@@ -503,6 +503,289 @@ function centrosPaises() {
   return _centrosPais;
 }
 
+// ── Los accidentes, con nombre ──────────────────────────────
+// El dato físico trae los trazos pero no los nombres: FISICO.rios son 895
+// polilíneas sueltas y FISICO.lagos 391 manchas, todas anónimas. Los nombres
+// van en estas tablas —longitud y latitud, como se leen en una carta— y se
+// pegan al trazo que les corresponde una sola vez, la primera que se pregunta
+// qué hay debajo del dedo. Los mares no tienen trazo: son un punto y basta,
+// porque a un océano se lo nombra por cercanía y no por contorno.
+const MARES = [
+  ["Océano Pacífico",-150,5], ["Pacífico Norte",-170,35], ["Pacífico Sur",-120,-30],
+  ["Océano Atlántico",-30,10], ["Atlántico Norte",-40,45], ["Atlántico Sur",-15,-30],
+  ["Océano Índico",75,-25], ["Océano Glacial Ártico",0,87], ["Océano Antártico",20,-62],
+  ["Mar Mediterráneo",17,35], ["Mar Adriático",16.5,43], ["Mar Egeo",25,38],
+  ["Mar Jónico",18.5,38], ["Mar Tirreno",12,40], ["Mar de Liguria",8.8,43.5],
+  ["Mar Balear",2,39.5], ["Mar de Alborán",-3.5,36], ["Mar Negro",34,43],
+  ["Mar de Azov",36.5,46], ["Mar de Mármara",28,40.7], ["Mar Caspio",51,42],
+  ["Mar de Aral",59.5,45], ["Mar del Norte",3,56], ["Mar Báltico",19,57],
+  ["Golfo de Botnia",20,62], ["Golfo de Finlandia",26,60], ["Golfo de Riga",23.5,57.5],
+  ["Canal de la Mancha",-1,50], ["Mar de Irlanda",-5,53.5], ["Mar Céltico",-8,50.5],
+  ["Golfo de Vizcaya",-4.5,45.5], ["Mar de Noruega",2,68], ["Mar de Groenlandia",-5,76],
+  ["Mar de Barents",40,74], ["Mar de Kara",70,74], ["Mar de Láptev",127,76],
+  ["Mar de Siberia Oriental",160,73], ["Mar de Chukotka",-175,69], ["Mar Blanco",38,65.5],
+  ["Estrecho de Gibraltar",-5.6,35.95], ["Estrecho de Dinamarca",-28,67],
+  ["Mar Caribe",-75,15], ["Golfo de México",-90,25], ["Bahía de Hudson",-85,60],
+  ["Mar del Labrador",-55,57], ["Bahía de Baffin",-70,73], ["Mar de los Sargazos",-60,30],
+  ["Río de la Plata",-56.5,-35], ["Mar Argentino",-60,-45],
+  ["Estrecho de Magallanes",-70,-53.5], ["Pasaje de Drake",-65,-58], ["Mar Rojo",38,20],
+  ["Golfo de Adén",48,12.5], ["Golfo Pérsico",51,27], ["Golfo de Omán",58.5,24.5],
+  ["Mar Arábigo",63,15], ["Golfo de Bengala",88,15], ["Mar de Andamán",95,12],
+  ["Canal de Mozambique",41,-18], ["Golfo de Guinea",2,2],
+  ["Mar de China Meridional",114,13], ["Mar de China Oriental",125,29],
+  ["Mar Amarillo",123,35], ["Mar del Japón",135,40], ["Mar de Ojotsk",150,55],
+  ["Mar de Bering",-178,58], ["Mar de Filipinas",130,18], ["Mar de Célebes",122,4],
+  ["Mar de Banda",128,-5.5], ["Mar de Java",110,-5], ["Mar de Arafura",135,-9],
+  ["Mar de Timor",127,-11], ["Mar del Coral",152,-18], ["Mar de Tasmania",160,-38],
+  ["Estrecho de Malaca",99,4], ["Estrecho de Bering",-169,65.7],
+  ["Golfo de Tailandia",101.5,9.5], ["Golfo de Tonkín",107.5,20],
+  ["Golfo de Carpentaria",139.5,-14], ["Gran Bahía Australiana",131,-35],
+  ["Mar de Ross",180,-75], ["Mar de Weddell",-45,-73], ["Golfo de Alaska",-146,57],
+  ["Golfo de California",-112,27], ["Mar de Beaufort",-135,72]
+];
+
+const RIOS_N = [
+  ["Amazonas",-60,-3], ["Nilo",32,24], ["Yangtsé",112,30.5], ["Misisipi",-91,35],
+  ["Yeniséi",88,62], ["Huang He",110,37], ["Obi",70,62], ["Paraná",-59.5,-27.5],
+  ["Congo",20,-1.5], ["Amur",132,50], ["Lena",125,65], ["Mekong",104.5,15],
+  ["Mackenzie",-125,66], ["Níger",3,12], ["Murray",142,-34.5], ["Volga",47,50],
+  ["Indo",69,27], ["Danubio",23,44.5], ["Éufrates",42,34], ["Tigris",44.5,33.5],
+  ["Ganges",86,24.5], ["Brahmaputra",91,26], ["Zambeze",30,-16], ["Orinoco",-66,8],
+  ["Río Bravo",-102,29.5], ["Colorado",-113,36], ["Columbia",-120,46], ["Yukón",-155,63],
+  ["San Lorenzo",-71,47.5], ["Misuri",-100,44], ["Támesis",-0.7,51.5], ["Rin",7.6,51],
+  ["Elba",11.5,53], ["Loira",0.5,47.4], ["Sena",2.5,49], ["Ródano",4.7,44],
+  ["Ebro",-0.5,41.6], ["Garona",0.5,44.2], ["Tajo",-6,39.5], ["Duero",-5.5,41.4], ["Po",11.5,45],
+  ["Vístula",19,52.5], ["Óder",14.5,52.8], ["Dniéper",32,50], ["Don",41,48.5],
+  ["Dniéster",29,47.5], ["Ural",52,48], ["Sir Daria",65,44], ["Amu Daria",62,40],
+  ["Irtish",73,57], ["Kolimá",159,68], ["Indigirka",147,68], ["Salween",97.5,20],
+  ["Irawadi",95,22], ["Godavari",80,18.5], ["Orange",21,-28.7], ["Limpopo",32,-24],
+  ["Senegal",-14,16], ["Volta",0,8.5], ["São Francisco",-42,-12], ["Magdalena",-74.5,8],
+  ["Paraguay",-58,-22], ["Madeira",-61.5,-7], ["Tocantins",-49,-7], ["Nelson",-97,56],
+  ["Saskatchewan",-106,53], ["Fraser",-122,52], ["Pechora",55,66],
+  ["Dvina Septentrional",43,63], ["Helmand",62,31], ["Narmada",76,22.5],
+  ["Río Perla",111,23.5], ["Tarim",84,41], ["Chari",16,12], ["Okavango",22,-18.5],
+  ["Río Negro",-66,-39.5], ["Ohio",-84,38.5], ["Ottawa",-77,46], ["Kama",53,57],
+  ["Aldán",130,60], ["Tunguska Inferior",99,61], ["Olenek",118,70], ["Thelon",-100,63]
+];
+
+const LAGOS_N = [
+  ["Lago Superior",-87.5,47.7], ["Lago Michigan",-87,44], ["Lago Hurón",-82,45],
+  ["Lago Erie",-81,42.2], ["Lago Ontario",-77.8,43.7], ["Gran Lago del Oso",-121,66],
+  ["Gran Lago del Esclavo",-114,61.5], ["Lago Winnipeg",-97.5,52.5],
+  ["Lago Athabasca",-110,59.3], ["Lago Baikal",108,53.5], ["Lago Baljash",74,46.5],
+  ["Lago Ládoga",31.5,61], ["Lago Onega",35.5,61.8], ["Lago Vänern",13.3,58.9],
+  ["Lago Victoria",33,-1], ["Lago Tanganica",29.7,-6], ["Lago Malaui",34.5,-12],
+  ["Lago Turkana",36.1,3.5], ["Lago Alberto",30.9,1.7], ["Lago Chad",14.2,13.2],
+  ["Lago Titicaca",-69.3,-15.8], ["Lago Eyre",137.3,-28.4], ["Issyk-Kul",77.3,42.4],
+  ["Lago Urmía",45.4,37.7], ["Lago Van",43,38.6], ["Tonlé Sap",104.1,12.9],
+  ["Lago Qinghai",100.2,36.9], ["Lago Nasser",32.7,22.5], ["Lago Volta",0,7.5],
+  ["Lago Kariba",28,-16.8], ["Lago Nicaragua",-85.4,11.6], ["Gran Lago Salado",-112.5,41.2],
+  ["Lago Peipus",27.5,58.7], ["Lago Mweru",28.7,-9], ["Lago Saimaa",28.5,61.3],
+  ["Lago Inari",28,69], ["Lago Reindeer",-102.5,57.3], ["Lago Nettilling",-70.5,66.5]
+];
+
+// Los puntos de un trazo, separados por subtrazo. Sirve para el sondeo del
+// puntero y para repartir los nombres entre las polilíneas anónimas.
+const _ptsTrazo = new Map();
+function puntosTrazo(d) {
+  if (_ptsTrazo.has(d)) return _ptsTrazo.get(d);
+  const subs = [];
+  for (const t of d.split("M")) {
+    const ps = [];
+    const re = /(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g;
+    let m;
+    while ((m = re.exec(t))) ps.push([+m[1], +m[2]]);
+    if (ps.length) subs.push(ps);
+  }
+  if (_ptsTrazo.size > 500) _ptsTrazo.clear();
+  _ptsTrazo.set(d, subs);
+  return subs;
+}
+// Punto dentro de un polígono, contando cruces de un rayo hacia la derecha.
+function dentroDe(pts, x, y) {
+  let dentro = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+
+const CELDA_ACC = 6;
+let _acc = null;
+// Índice de accidentes: puntos de muestra para lo que es línea —ríos, picos—
+// y polígonos para lo que es mancha —lagos, sierras—.
+function accidentes() {
+  if (_acc) return _acc;
+  const puntos = new Map(), lineas = new Map(), areas = new Map();
+  const meterP = (m) => {
+    const k = Math.floor(m.x / CELDA_ACC) + "," + Math.floor(m.y / CELDA_ACC);
+    if (!puntos.has(k)) puntos.set(k, []);
+    puntos.get(k).push(m);
+  };
+  // Un río se guarda por tramos y no por vértices: entre dos vértices puede
+  // haber medio grado de cauce dibujado, y si solo se guardaran las puntas, la
+  // mitad del río sería intocable. La distancia se mide al segmento.
+  const meterL = (m) => {
+    for (let cx = Math.floor(Math.min(m.ax, m.bx) / CELDA_ACC); cx <= Math.floor(Math.max(m.ax, m.bx) / CELDA_ACC); cx++)
+      for (let cy = Math.floor(Math.min(m.ay, m.by) / CELDA_ACC); cy <= Math.floor(Math.max(m.ay, m.by) / CELDA_ACC); cy++) {
+        const k = cx + "," + cy;
+        if (!lineas.has(k)) lineas.set(k, []);
+        lineas.get(k).push(m);
+      }
+  };
+  const meterA = (a) => {
+    for (let cx = Math.floor(a.x0 / CELDA_ACC); cx <= Math.floor(a.x1 / CELDA_ACC); cx++)
+      for (let cy = Math.floor(a.y0 / CELDA_ACC); cy <= Math.floor(a.y1 / CELDA_ACC); cy++) {
+        const k = cx + "," + cy;
+        if (!areas.has(k)) areas.set(k, []);
+        areas.get(k).push(a);
+      }
+  };
+  const enMapa = (t) => t.map((e) => ({ n: e[0], x: e[1] + 180, y: 90 - e[2] }));
+
+  // Ríos. Los fragmentos que comparten una punta son el mismo río, así que se
+  // encadenan antes de buscarles nombre: un solo nombre bien puesto bautiza el
+  // cauce entero, de la cabecera a la desembocadura, y no hace falta una tabla
+  // con un punto por cada tramo.
+  const tramos = puntosTrazo(FISICO.rios);
+  const padre = tramos.map((_, i) => i);
+  const raiz = (a) => { while (padre[a] !== a) { padre[a] = padre[padre[a]]; a = padre[a]; } return a; };
+  const punta = new Map();
+  tramos.forEach((ps, i) => {
+    for (const p of [ps[0], ps[ps.length - 1]]) {
+      const k = p[0].toFixed(2) + "," + p[1].toFixed(2);
+      if (punta.has(k)) { const a = raiz(i), b = raiz(punta.get(k)); if (a !== b) padre[a] = b; }
+      else punta.set(k, i);
+    }
+  });
+  const cauces = new Map();
+  tramos.forEach((ps, i) => {
+    const r = raiz(i);
+    if (!cauces.has(r)) cauces.set(r, []);
+    cauces.get(r).push(ps);
+  });
+  const tRios = enMapa(RIOS_N);
+  for (const frs of cauces.values()) {
+    let nom = null, md = 9;                                  // 3° de tolerancia
+    for (const e of tRios) for (const ps of frs) for (const p of ps) {
+      const dx = p[0] - e.x, dy = p[1] - e.y, dd = dx * dx + dy * dy;
+      if (dd < md) { md = dd; nom = e.n; }
+    }
+    if (!nom) continue;
+    for (const ps of frs)
+      for (let i = 1; i < ps.length; i++)
+        meterL({ n: nom, ax: ps[i - 1][0], ay: ps[i - 1][1], bx: ps[i][0], by: ps[i][1] });
+  }
+
+  // Lagos y sierras: manchas cerradas. Se contestan por dentro y no por
+  // cercanía, que es lo que hace que tocar el medio de un lago diga su nombre.
+  const porMancha = (trazos, tabla, tope, tipo) => {
+    for (const ps of trazos) {
+      let cx = 0, cy = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of ps) {
+        cx += p[0]; cy += p[1];
+        if (p[0] < x0) x0 = p[0];
+        if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1];
+        if (p[1] > y1) y1 = p[1];
+      }
+      cx /= ps.length; cy /= ps.length;
+      let nom = null, md = tope * tope;
+      for (const e of tabla) {
+        const dx = cx - e.x, dy = cy - e.y, dd = dx * dx + dy * dy;
+        if (dd < md) { md = dd; nom = e.n; }
+      }
+      if (nom) meterA({ t: tipo, n: nom, pts: ps, x0, y0, x1, y1 });
+    }
+  };
+  porMancha(puntosTrazo(FISICO.lagos), enMapa(LAGOS_N), 2.5, "lago");
+  porMancha(puntosTrazo(FISICO.montes),
+    FISICO.cordilleras.map((c) => ({ n: c[0], x: c[1], y: c[2] })), 18, "sierra");
+  for (const p of FISICO.picos) meterP({ t: "pico", n: `${p[0]} · ${p[3]} m`, x: p[1], y: p[2] });
+
+  _acc = { puntos, lineas, areas, mares: enMapa(MARES) };
+  return _acc;
+}
+
+// La provincia que contiene un punto, si hay alguna. La rejilla descarta el
+// mundo entero y solo se prueban de verdad las dos o tres que pueden serlo.
+function provinciaEn(x, y) {
+  const lista = rejillaProvincias().get(Math.floor(x / CELDA) + "," + Math.floor(y / CELDA));
+  if (!lista) return null;
+  for (const i of lista) {
+    const g = geomProvincia(i);
+    if (!g || !g.d || x < g.x0 || x > g.x1 || y < g.y0 || y > g.y1) continue;
+    const ps = puntosTrazo(g.d)[0];
+    if (ps && dentroDe(ps, x, y)) return g;
+  }
+  return null;
+}
+
+// Qué hay debajo del dedo. El orden es de lo chico a lo grande: un pico está
+// dentro de una sierra y un lago dentro de una provincia, así que si ganara
+// el más grande nunca se podría nombrar lo de adentro.
+function accidenteEn(x, y, tol) {
+  const a = accidentes();
+  const gx = Math.floor(x / CELDA_ACC), gy = Math.floor(y / CELDA_ACC);
+  const cerca = [], cauces = [];
+  for (let i = -1; i <= 1; i++)
+    for (let j = -1; j <= 1; j++) {
+      const l = a.puntos.get(gx + i + "," + (gy + j));
+      if (l) cerca.push(l);
+      const q = a.lineas.get(gx + i + "," + (gy + j));
+      if (q) cauces.push(q);
+    }
+  const masCerca = (tipo, radio) => {
+    let n = null, md = radio * radio;
+    for (const l of cerca)
+      for (const m of l) {
+        if (m.t !== tipo) continue;
+        const dx = m.x - x, dy = m.y - y, dd = dx * dx + dy * dy;
+        if (dd < md) { md = dd; n = m.n; }
+      }
+    return n;
+  };
+  const masCercaCauce = (radio) => {
+    let n = null, md = radio * radio;
+    for (const l of cauces)
+      for (const m of l) {
+        const dx = m.bx - m.ax, dy = m.by - m.ay, ll = dx * dx + dy * dy;
+        let t = ll ? ((x - m.ax) * dx + (y - m.ay) * dy) / ll : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const ex = m.ax + t * dx - x, ey = m.ay + t * dy - y, dd = ex * ex + ey * ey;
+        if (dd < md) { md = dd; n = m.n; }
+      }
+    return n;
+  };
+  const manchas = a.areas.get(gx + "," + gy) || [];
+  const dentro = (tipo) => {
+    for (const q of manchas)
+      if (q.t === tipo && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && dentroDe(q.pts, x, y)) return q.n;
+    return null;
+  };
+  let n = masCerca("pico", tol * 1.3);
+  if (n) return { t: "pico", n };
+  n = dentro("lago");
+  if (n) return { t: "lago", n };
+  n = masCercaCauce(tol);
+  if (n) return { t: "río", n };
+  // La sierra no le gana a la provincia: las manchas de relieve son enormes
+  // —«Península Ibérica» tapa media España— y si ganaran, tocar Madrid diría
+  // el nombre de una cordillera. Va de acompañante, que es su lugar: primero
+  // dónde estás, después sobre qué.
+  const sierra = dentro("sierra");
+  const p = provinciaEn(x, y);
+  if (p) return { t: "tierra", n: p.n, de: p.pais, sobre: sierra };
+  if (sierra) return { t: "sierra", n: sierra };
+  let mar = null, md = Infinity;
+  for (const m of a.mares) {
+    const dx = m.x - x, dy = m.y - y, dd = dx * dx + dy * dy;
+    if (dd < md) { md = dd; mar = m.n; }
+  }
+  return mar ? { t: "mar", n: mar } : null;
+}
+
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
 // Se arrastra con un dedo, se acerca con dos o con la rueda, y también
 // obedece al teclado. Cada capa se recuerda por separado: al arrastrar solo
@@ -632,6 +915,13 @@ const MINI_MUNDO = (
   </svg>
 );
 const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true };
+// Cada clase de accidente con su color y su palabra: el rótulo dice qué es
+// antes de decir cómo se llama, que es lo que uno quiere saber primero cuando
+// toca una mancha azul en el medio de la nada.
+const ROTULO_TIT = { mar: "AGUAS", río: "RÍO", lago: "LAGO", sierra: "CORDILLERA",
+                     pico: "CUMBRE", tierra: "PROVINCIA" };
+const ROTULO_COL = { mar: "#7FC0DE", río: "#5FB0D6", lago: "#5FB0D6", sierra: "#C6BC9A",
+                     pico: "#E4DCC0", tierra: "#C9A227" };
 const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu reino"],
                       ["🌐", "ver el mundo entero"], ["▤", "leyenda y capas"]];
 // Puede haber dos mapas a la vez —el del fondo y el de la pestaña— con zoom
@@ -649,6 +939,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const [vb, setVb] = useState(vbRef.current);
   const [med, setMed] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState(null);
+  const [rotulo, setRotulo] = useState(null);
   const [panel, setPanel] = useState(false);
   const [capas, setCapas] = useState(CAPAS_INI);
   const punteros = useRef(new Map());
@@ -658,6 +949,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const anim = useRef(0);
   const meta = useRef(null);
   const desliz = useRef(0);
+  const sonda = useRef(null);
+  const pedidoSonda = useRef(0);
+  const borrarRotulo = useRef(0);
 
   // ——— encuadre: nunca deforma, siempre respeta la forma del contenedor ———
   const limitar = (v) => {
@@ -727,7 +1021,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     aspRef.current = med.w / med.h;
     fijar(limitar(vbRef.current), true);
   }, [med.w, med.h]);
-  useEffect(() => () => { detener(); frenar(); if (cuadro.current) cancelAnimationFrame(cuadro.current); }, []);
+  useEffect(() => () => {
+    detener(); frenar();
+    clearTimeout(borrarRotulo.current);
+    if (pedidoSonda.current) cancelAnimationFrame(pedidoSonda.current);
+    if (cuadro.current) cancelAnimationFrame(cuadro.current);
+  }, []);
   // El mapa abre mirando tu reino y a quienes lo rodean, no un pedazo
   // cualquiera de mundo. Una sola vez, en cuanto se sabe cuánto mide el hueco.
   const encuadrado = useRef(false);
@@ -809,9 +1108,38 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     meta.current = limitar({ x, y, w, h: 0 });
     if (!desliz.current) desliz.current = requestAnimationFrame(deslizar);
   }
+  // Sondeo: qué hay debajo del dedo. Va acotado a un cuadro por vez —el ratón
+  // manda muchos más eventos que cuadros dibuja la pantalla— y trabaja en
+  // coordenadas del mapa, no de la pantalla, así el resultado no depende del
+  // zoom. La tolerancia es proporcional a lo que se ve: de lejos hay que
+  // perdonar más grados para dar con el mismo río.
+  const sondear = (sx, sy) => {
+    sonda.current = { sx, sy };
+    if (pedidoSonda.current) return;
+    pedidoSonda.current = requestAnimationFrame(() => {
+      pedidoSonda.current = 0;
+      const q = sonda.current, r = medRef.current, v = vbRef.current;
+      if (!q || !r.w) return;
+      const mx = v.x + ((q.sx - r.left) / r.w) * v.w;
+      const my = v.y + ((q.sy - r.top) / r.h) * v.h;
+      // El radio de acierto se mide en píxeles de pantalla, no en grados: dar
+      // con un río tiene que costar lo mismo de cerca que de lejos.
+      let a = null;
+      try { a = accidenteEn(mx, my, (v.w / r.w) * 9); } catch (_) { a = null; }
+      setRotulo(a ? { ...a, sx: q.sx - r.left, sy: q.sy - r.top } : null);
+    });
+  };
+  // En una pantalla táctil no hay «pasar por encima»: el nombre sale al tocar
+  // y se va solo, porque no hay forma de retirar el dedo del mapa.
+  const sondearYSoltar = (sx, sy) => {
+    sondear(sx, sy);
+    clearTimeout(borrarRotulo.current);
+    borrarRotulo.current = setTimeout(() => setRotulo(null), 2600);
+  };
   function onDown(e) {
     detener();
     frenar();
+    setRotulo(null);
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture?.(e.pointerId);
     if (punteros.current.size === 1) {
@@ -820,6 +1148,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     }
   }
   function onMove(e) {
+    if (!arrastre.current && e.pointerType !== "touch") sondear(e.clientX, e.clientY);
     if (!punteros.current.has(e.pointerId)) return;
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const ps = [...punteros.current.values()];
@@ -840,7 +1169,11 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   }
   function onUp(e) {
     punteros.current.delete(e.pointerId);
-    if (punteros.current.size === 0) { arrastre.current = null; return; }
+    if (punteros.current.size === 0) {
+      if (!movido.current) sondearYSoltar(e.clientX, e.clientY);
+      arrastre.current = null;
+      return;
+    }
     const q = [...punteros.current.values()][0];               // queda un dedo: sigue el arrastre
     arrastre.current = { x: q.x, y: q.y, vx: vbRef.current.x, vy: vbRef.current.y, pinch: null };
   }
@@ -916,6 +1249,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // entran de a poco y engordan un punto al acercarse, en vez de aparecer
   // de golpe y con el mismo grosor a cualquier distancia.
   const cerca = acotar((200 - w) / 130, 0, 1);
+  // El grosor de una línea del mapa. Es uno solo: la costa, el límite de un
+  // país y la división entre provincias se dibujan con el mismo hilo. Es lo
+  // que hace que las tres sigan el contorno con la misma fidelidad —una línea
+  // gruesa no dibuja el borde, dibuja su propio grosor— y la jerarquía queda
+  // en el color, que es donde no cuesta nada.
+  const fino = px * (0.28 + 0.22 * cerca);
   const bloque = Math.max(0.25, w / 6);
   const rx = Math.floor((vb.x - w * 0.08) / bloque) * bloque;
   const ry = Math.floor((vb.y - vb.h * 0.08) / bloque) * bloque;
@@ -969,10 +1308,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           unión redonda, cada cabo y cada ría se achatan al grosor del trazo.
           Y el trazo, cuanto más fino, más fiel al dibujo que hay debajo. */}
       <path d={MUNDO_D} fill={`url(#${uid}Tierra)`} stroke="#070C06"
-        strokeWidth={px * 1.5} strokeLinejoin="miter" strokeMiterlimit="2"
+        strokeWidth={fino * 2.2} strokeLinejoin="miter" strokeMiterlimit="2"
         shapeRendering="geometricPrecision" />
       <path d={MUNDO_D} fill="none" stroke="#D6E2B8" clipPath={`url(#${uid}SinPolo)`}
-        strokeWidth={px * 0.75} strokeLinejoin="miter" strokeMiterlimit="2"
+        strokeWidth={fino} strokeLinejoin="miter" strokeMiterlimit="2"
         shapeRendering="geometricPrecision" opacity="0.95" />
       {capas.fisico && (
         <g style={{ pointerEvents: "none" }}>
@@ -990,7 +1329,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         </g>
       )}
     </g>
-  ), [w, px, uid, capas.reticula, capas.fisico]);
+  ), [w, px, fino, uid, capas.reticula, capas.fisico]);
 
   // Las 4.594 provincias del mundo, agrupadas por país.
   // Las 4.594 provincias del mundo. La división interior es el escalón más
@@ -1001,7 +1340,6 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     if (!capas.provincias || w >= 300) return null;
     const op = acotar((300 - w) / 120, 0, 1);
     const grupos = trazoProvinciasEn(rx, ry, rw, rh);
-    const fino = px * (0.28 + 0.22 * cerca);
     return (
       <g style={{ pointerEvents: "none" }}>
         {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col} opacity={op * 0.62} stroke="none" />)}
@@ -1017,16 +1355,19 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         ))}
       </g>
     );
-  }, [w, px, cerca, claveVista, capas.provincias]);
+  }, [w, px, fino, cerca, claveVista, capas.provincias]);
 
   // Fronteras y aguas: por encima de las provincias.
   const capaAguas = useMemo(() => (
     <g style={{ pointerEvents: "none" }}>
-      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={px * 1.7}
+      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={fino * 2.2}
         strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
         shapeRendering="geometricPrecision" opacity="0.6" />
+      {/* El límite de un país lleva el mismo hilo, un punto más marcado. El
+          suelo es para el mundo entero: ahí el hilo se afina tanto que la
+          división política desaparecería, y un mapa sin países no sirve. */}
       <path d={FRONT_PAIS} fill="none" stroke="#F7EDD2" clipPath={`url(#${uid}SinPolo)`}
-        strokeWidth={px * (0.75 + 0.3 * cerca)}
+        strokeWidth={Math.max(fino * 1.35, px * 0.6)}
         strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
         shapeRendering="geometricPrecision" opacity={w > 260 ? 0.85 : 1} />
       {capas.fisico && (
@@ -1050,59 +1391,48 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         </>
       )}
     </g>
-  ), [w, px, cerca, capas.fisico]);
+  ), [w, px, fino, cerca, capas.fisico]);
 
-  // Los nombres de las cordilleras van con el resto de los rótulos, debajo del
-  // reino: son letra grande y suelta, y encima de tus provincias taparían los
-  // nombres que sí hacen falta para jugar.
-  const capaCordilleras = useMemo(() => {
-    if (!capas.fisico || w >= 120) return null;
-    const cs = FISICO.cordilleras.filter((c) => enVista(c[1], c[2])).slice(0, 14);
-    return (
-      <g style={{ pointerEvents: "none" }}>
-        {cs.map((c, i) => (
-          <text key={"cd" + i} x={c[1]} y={c[2]} textAnchor="middle" fontSize={px * 23}
-            fill={c[3] ? "#C6BC9A" : "#D8C9A0"} opacity="0.62"
-            style={{ fontStyle: "italic", letterSpacing: `${px * 4.6}px`,
-              paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)", strokeWidth: px * 3 }}>{c[0]}</text>
-        ))}
-      </g>
-    );
-  }, [w, px, claveVista, capas.fisico]);
-
-  // Los picos, en cambio, van arriba de todo: un ocho mil que desaparece al
-  // entrar en tus tierras deja de ser un accidente del terreno.
+  // Los picos se marcan pero no se rotulan. Un mapa que escribe el nombre de
+  // todo lo que sabe termina siendo una lista de nombres sobre un fondo de
+  // mapa; el nombre de una sierra, de un río o de un mar se pregunta tocando,
+  // y aparece uno solo: el que se preguntó.
   const capaPicos = useMemo(() => {
     if (!capas.fisico || w >= 160) return null;
-    const t = px * 8;
+    const t = px * 7;
     const ps = FISICO.picos.filter((p) => enVista(p[1], p[2])).slice(0, 40);
     return (
       <g style={{ pointerEvents: "none" }}>
         {ps.map((p, i) => (
-          <g key={"pk" + i}>
-            <path d={`M${p[1]},${p[2] - t * 1.15} L${p[1] + t},${p[2] + t * 0.75} L${p[1] - t},${p[2] + t * 0.75}Z`}
-              fill="#D9CDB0" stroke="#221B0E" strokeWidth={t * 0.22} />
-            {w < 60 && (
-              <text x={p[1]} y={p[2] + t * 2.6} textAnchor="middle" fontSize={px * 15} fill="#E6DCC2"
-                style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: px * 4 }}>{p[0]} · {p[3]} m</text>
-            )}
-          </g>
+          <path key={"pk" + i} fill="#D9CDB0" stroke="#221B0E" strokeWidth={t * 0.22}
+            d={`M${p[1]},${p[2] - t * 1.15} L${p[1] + t},${p[2] + t * 0.75} L${p[1] - t},${p[2] + t * 0.75}Z`} />
         ))}
       </g>
     );
   }, [w, px, claveVista, capas.fisico]);
 
-  // Nombres de país.
+  // Nombres de país. El rótulo se gana con el tamaño: un país se nombra
+  // recién cuando ocupa pantalla suficiente para sostener su nombre, y la
+  // letra crece con él hasta un techo. De ahí salen dos cosas de una: el mundo
+  // entero aparece limpio, y los nombres van saliendo a medida que te acercás,
+  // primero los países grandes y después los chicos. Antes todos llevaban el
+  // mismo cuerpo de letra, así que Rusia y Andorra se anunciaban igual de
+  // fuerte y el mapa se leía como una lista y no como un mapa.
   const capaPaises = useMemo(() => {
-    if (!capas.paises || w >= 300 || w <= 6) return null;
-    const sep = px * 171;
-    const cand = centrosPaises().filter((c) => enVista(c.x, c.y) && c.a >= (w * rh) / 1100);
+    if (!capas.paises || w >= 210 || w <= 6) return null;
+    const cand = [];
+    for (const c of centrosPaises()) {                    // vienen del más grande al más chico
+      if (!enVista(c.x, c.y)) continue;
+      const lado = Math.sqrt(c.a || 0);                   // el lado del cuadrado equivalente, en grados
+      if (lado / px < 108) continue;                      // todavía no da la escala para nombrarlo
+      cand.push({ ...c, fs: acotar(lado * 0.1, px * 9, px * 17) });
+    }
     return (
       <g style={{ pointerEvents: "none" }}>
-        {repartirRotulos(cand, sep, sep * 0.5, 26).map((c, i) => (
-          <text key={"pn" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={px * 27} fill="#EADFC0" opacity="0.48"
-            style={{ letterSpacing: `${px * 5}px`, textTransform: "uppercase",
-              paintOrder: "stroke", stroke: "rgba(0,0,0,0.65)", strokeWidth: px * 3.75 }}>{c.n}</text>
+        {repartirRotulos(cand, px * 120, px * 46, 22).map((c, i) => (
+          <text key={"pn" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={c.fs} fill="#EADFC0" opacity="0.45"
+            style={{ letterSpacing: `${c.fs * 0.17}px`, textTransform: "uppercase",
+              paintOrder: "stroke", stroke: "rgba(0,0,0,0.65)", strokeWidth: c.fs * 0.14 }}>{c.n}</text>
         ))}
       </g>
     );
@@ -1142,9 +1472,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                 </>
               )}
               {conNombre.has(c) && (
-                <text x={c.x} y={c.y - r * 2.1} textAnchor="middle" fontSize={px * 19}
+                <text x={c.x} y={c.y - r * 2.1} textAnchor="middle" fontSize={px * 14.5}
                   fill={c.cap === 2 ? "#FFF3C6" : "#EDE8D6"}
-                  style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.9)", strokeWidth: px * 5.7,
+                  style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.9)", strokeWidth: px * 4.3,
                     fontWeight: c.cap === 2 ? 600 : 400, letterSpacing: c.cap === 2 ? `${px * 1.7}px` : "0" }}>{c.n}</text>
               )}
             </g>
@@ -1213,6 +1543,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         background: "#08131C", outline: "none" }}>
       <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+        onPointerLeave={() => setRotulo(null)}
         onDoubleClick={(e) => zoomSuave(e.shiftKey ? 2 : 0.5, e.clientX, e.clientY)}
         onClick={() => { if (!movido.current && onSeleccion) onSeleccion(null); }}
         style={{ width: "100%", height: "100%", display: "block", touchAction: "none", cursor: "grab" }}>
@@ -1220,7 +1551,6 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         {capaMundo}
         {capaProvincias}
         {capaAguas}
-        {capaCordilleras}
         {capaPaises}
         {capaCiudades}
 
@@ -1266,9 +1596,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             afuera. Eso es el perímetro. Las divisiones internas vuelven después,
             finas. */}
         <g style={{ pointerEvents: "none" }}>
-          <path d={trazoReino} fill="none" stroke="#080C05" strokeWidth={px * 4.4}
+          {/* Tu frontera es la única línea que se permite pesar: es lo que el
+              ojo tiene que encontrar sin buscarlo. Aun así va con el mismo
+              hilo de siempre, multiplicado, y no con un grosor propio. */}
+          <path d={trazoReino} fill="none" stroke="#080C05" strokeWidth={fino * 6}
             strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round" opacity="0.55" />
-          <path d={trazoReino} fill="none" stroke="#FFD25A" strokeWidth={px * 2.4}
+          <path d={trazoReino} fill="none" stroke="#FFD25A" strokeWidth={fino * 3.8}
             strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
             shapeRendering="geometricPrecision" />
           {/* base opaca: además de tapar la mitad interior del trazo, hace que
@@ -1319,12 +1652,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             return h ? <path key="rhov" d={h.poly} fill="#FFFFFF" opacity="0.12" stroke="none" /> : null;
           })()}
           {/* divisiones internas: la mitad de fino que el perímetro */}
-          <path d={trazoReino} fill="none" stroke="#0A0E06" strokeWidth={px * (0.85 + 0.4 * cerca)}
+          <path d={trazoReino} fill="none" stroke="#0A0E06" strokeWidth={fino * 2.2}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision" opacity="0.32" />
-          <path d={trazoReino} fill="none" stroke="#F3D68C" strokeWidth={px * (0.45 + 0.3 * cerca)}
+          <path d={trazoReino} fill="none" stroke="#F3D68C" strokeWidth={fino * 1.35}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision" opacity="0.95" />
           {trazoOcupado && (
-            <path d={trazoOcupado} fill="none" stroke="#E89189" strokeWidth={px * (0.85 + 0.4 * cerca)}
+            <path d={trazoOcupado} fill="none" stroke="#E89189" strokeWidth={fino * 2.2}
               strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision" opacity="0.95" />
           )}
           {sel && sel.poly && (
@@ -1358,7 +1691,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                 )}
                 {rotulosMios.has(m) && (
                   <text x={m.x} y={m.y - alto2} textAnchor="middle"
-                    fontSize={rMarca * (esSel ? 1.35 : 1.1)} fill={esSel ? "#FFF3C6" : "#F3E8CC"}
+                    fontSize={rMarca * (esSel ? 1.2 : 0.95)} fill={esSel ? "#FFF3C6" : "#F3E8CC"}
                     style={{ fontWeight: esSel || m.capital ? 600 : 400,
                       paintOrder: "stroke", stroke: "rgba(0,0,0,0.85)", strokeWidth: rMarca * 0.34 }}>{m.nombre}</text>
                 )}
@@ -1389,6 +1722,30 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
 
         <rect x={vb.x} y={vb.y} width={vb.w} height={vb.h} fill={`url(#${uid}Vinieta)`} style={{ pointerEvents: "none" }} />
       </svg>
+
+      {/* el nombre de lo que se está tocando: uno solo, el que se preguntó */}
+      {rotulo && (
+        <div style={{ position: "absolute", zIndex: 5, pointerEvents: "none",
+          left: acotar(rotulo.sx, 70, Math.max(70, (med.w || 320) - 70)),
+          top: acotar(rotulo.sy - 34, 6, Math.max(6, (med.h || 200) - 40)),
+          transform: "translateX(-50%)",
+          padding: "4px 9px", borderRadius: 7, whiteSpace: "nowrap",
+          background: "rgba(10,16,22,0.92)", border: `1px solid ${ROTULO_COL[rotulo.t] || C.brass}55`,
+          boxShadow: "0 4px 14px rgba(0,0,0,0.5)" }}>
+          <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.3, color: ROTULO_COL[rotulo.t] || C.brass }}>
+            {ROTULO_TIT[rotulo.t] || ""}
+          </div>
+          <div style={{ fontFamily: serif, fontSize: 13, color: C.ink, lineHeight: 1.25 }}>
+            {rotulo.n}
+            {rotulo.de && <span style={{ color: C.muted, fontSize: 11 }}> · {rotulo.de}</span>}
+          </div>
+          {rotulo.sobre && (
+            <div style={{ fontFamily: mono, fontSize: 9.5, color: ROTULO_COL.sierra, opacity: 0.8 }}>
+              sobre {rotulo.sobre}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ficha de la provincia elegida */}
       {sel && (
@@ -1544,7 +1901,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           ))}
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 5px" }}>─ TECLAS</div>
           <div style={{ fontSize: 10.5, color: C.muted, lineHeight: 1.6 }}>
-            ←↑↓→ moverse · <b>+ −</b> acercar<br /><b>0</b> tu reino · <b>1</b> el mundo · <b>Esc</b> soltar
+            ←↑↓→ moverse · <b>+ −</b> acercar<br /><b>0</b> tu reino · <b>1</b> el mundo · <b>Esc</b> soltar<br />tocá el mapa y te dice qué hay ahí
           </div>
         </div>
       )}
