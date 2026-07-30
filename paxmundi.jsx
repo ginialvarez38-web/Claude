@@ -3309,6 +3309,1513 @@ JSON exacto:
 {"narrativa":"2-3 frases: resultado de la acción","eventoMundial":"1 frase o null","cambios":{"economia":-15 a 15,"militar":-15 a 15,"estabilidad":-15 a 15,"diplomacia":-15 a 15,"tecnologia":-15 a 15,"prestigio":-15 a 15},"vecinos":[lista completa actualizada],"proyectos":[{"id":"id del proyecto","avance":"1 frase de avance","ritmo":"normal|impulso|retraso|fracaso"}],"investigaciones":[{"id":"id de la investigación","avance":"1 frase de avance","ritmo":"normal|impulso|retraso|fracaso"}],"ciencia":"1-2 frases sobre la vida científica de la nación este año","opciones":[3 acciones, máx 8 palabras],"fin":null o {"tipo":"victoria|derrota","razon":"1 frase"}}`;
 }
 
+// ═══ FUNDAR LA NACIÓN SIN API ════════════════════════════════
+// Lo último que ataba el juego a la red: el estado inicial. Con listas por
+// época y una semilla sale igual de verosímil, y además es repetible: la
+// misma nación en la misma época arranca siempre igual.
+const CARGOS_GOB = {
+  "Monarquía": [["Canciller", "diplomacia"], ["Tesorero", "economia"], ["Condestable", "militar"], ["Capellán mayor", "estabilidad"]],
+  "República": [["Cónsul", "diplomacia"], ["Cuestor", "economia"], ["Pretor", "militar"], ["Censor", "estabilidad"]],
+  "Teocracia": [["Sumo sacerdote", "estabilidad"], ["Limosnero", "economia"], ["Brazo armado", "militar"], ["Legado", "diplomacia"]],
+  "Imperio": [["Prefecto", "estabilidad"], ["Procurador", "economia"], ["Magister militum", "militar"], ["Legado", "diplomacia"]],
+};
+const NOMBRES_CORTE_M = ["Ruy", "Gonzalo", "Álvar", "Nuño", "Ordoño", "Fruela", "Bermudo", "Ramiro", "Íñigo", "Diego"];
+const NOMBRES_CORTE_F = ["Elvira", "Sancha", "Berenguela", "Teresa", "Jimena", "Urraca", "Constanza", "Mayor", "Estefanía", "Aldonza"];
+const APELLIDOS_CORTE = ["de Lara", "Fernández", "de Haro", "Núñez", "de Castro", "Pérez", "de Vivar",
+  "Rodríguez", "de Cameros", "Álvarez", "de Trastámara", "Ossorio"];
+// El rasgo concuerda con quien lo lleva: «Teresa, ambiciosa», no «ambicioso».
+const RASGOS_CORTE = [["leal", "leal"], ["ambicioso", "ambiciosa"], ["venal", "venal"],
+  ["prudente", "prudente"], ["brillante", "brillante"], ["cobarde", "cobarde"], ["devoto", "devota"],
+  ["intrigante", "intrigante"], ["íntegro", "íntegra"], ["perezoso", "perezosa"],
+  ["implacable", "implacable"], ["conciliador", "conciliadora"]];
+const LEMAS = ["Ni un paso atrás", "Dios y derecho", "Por tierra y por mar", "Antes rotos que doblados",
+  "El orden es la paz", "Firmes en la tormenta", "La palabra empeñada", "Todo por el reino",
+  "Nada sin consejo", "Del hierro, pan", "Más allá", "Servir y durar"];
+const RAICES_VECINO = ["Aur", "Norv", "Tesal", "Ulm", "Brand", "Vald", "Kar", "Mir", "Oste", "Sar",
+  "Lud", "Ver", "Cast", "Pann", "Thur", "Gald", "Rhen", "Sabo", "Est", "Ill"];
+const COLAS_VECINO = ["ia", "ania", "onia", "esia", "aria", "landia", "avia", "itania", "ura", "ega"];
+const ESTADOS_VECINO = ["paz", "paz", "paz", "tension", "aliado"];
+
+function fundarLocal(era, pais, formaGob) {
+  const rnd = dado(`${era}|${pais}|${formaGob}`);
+  const meta = ERAS.find((e) => e.id === era) || ERAS[1];
+  const anio = { "Antigüedad clásica (500 a.C.)": -500, "Era medieval (1200 d.C.)": 1200,
+                 "Era napoleónica (1805)": 1805, "Guerra Fría (1962)": 1962, "Era moderna (2026)": 2026 }[era] ?? 1200;
+  const soberano = nombreSoberano(anio, era + pais);
+  const titulo = { "Monarquía": "Rey", "República": "Cónsul", "Teocracia": "Sumo sacerdote", "Imperio": "Emperador" }[formaGob] || "Soberano";
+  const cargos = CARGOS_GOB[formaGob] || CARGOS_GOB["Monarquía"];
+  const miembros = cargos.map(([cargo, area]) => {
+    const ella = rnd() < 0.42;
+    return { cargo, area,
+      nombre: `${alAzar(rnd, ella ? NOMBRES_CORTE_F : NOMBRES_CORTE_M)} ${alAzar(rnd, APELLIDOS_CORTE)}`,
+      competencia: 2 + Math.floor(rnd() * 9), rasgo: alAzar(rnd, RASGOS_CORTE)[ella ? 1 : 0] };
+  });
+  const usados = new Set();
+  const vecinos = [];
+  for (let i = 0; i < 3 + Math.floor(rnd() * 2); i++) {
+    let nombre;
+    for (let k = 0; k < 12; k++) {
+      nombre = alAzar(rnd, RAICES_VECINO) + alAzar(rnd, COLAS_VECINO);
+      if (!usados.has(nombre)) break;
+    }
+    usados.add(nombre);
+    vecinos.push({ nombre, poder: 2 + Math.round(rnd() * 7), relacion: Math.round(rnd() * 80 - 35),
+                   estado: alAzar(rnd, ESTADOS_VECINO), impulso: +(rnd() * 1.2 - 0.6).toFixed(2) });
+  }
+  const base = { "Antigüedad clásica (500 a.C.)": 22, "Era medieval (1200 d.C.)": 28,
+                 "Era napoleónica (1805)": 42, "Guerra Fría (1962)": 58, "Era moderna (2026)": 66 }[era] ?? 30;
+  const st = () => acotar(Math.round(38 + rnd() * 26), 12, 88);
+  const stats = { economia: st(), militar: st(), estabilidad: st(), diplomacia: st(),
+                  tecnologia: acotar(Math.round(base + rnd() * 10 - 5), 5, 92), prestigio: st() };
+  const tension = vecinos.filter((v) => v.estado === "tension" || v.estado === "guerra" || v.relacion < -20);
+  const situacion = `${pais} despierta en ${fmtAnio(anio)} con ${vecinos.length} potencias alrededor` +
+    (tension.length ? ` y al menos ${tension.length === 1 ? "una que no disimula su hostilidad" : `${tension.length} que no disimulan su hostilidad`}.`
+                    : " y ninguna que declare abiertamente su hostilidad.") +
+    ` ${meta.detalle.split("·")[1] ? meta.detalle.split("·")[1].trim() : "El siglo aprieta"}. ` +
+    (stats.economia > 55 ? "Las arcas aguantan." : "Las arcas están más flacas de lo que se dice en la corte.") +
+    (stats.estabilidad < 40 ? " Y el reino murmura." : "");
+  return {
+    nacion: { nombre: pais, lider: `${titulo} ${soberano}`, lema: alAzar(rnd, LEMAS) },
+    anio, situacion, soberano, stats, vecinos, gobierno: miembros,
+    opciones: ["Levantar tropas", "Firmar un tratado de comercio", "Fundar una casa de estudios"],
+  };
+}
+
+// ═══ MOTOR LOCAL: ÓRDENES EN TEXTO LIBRE ═════════════════════
+// El jugador escribe lo que se le ocurra. No hay menú. Este motor lee la
+// orden, entiende qué está pidiendo y la resuelve contra la simulación que
+// ya existe —cosecha, hacienda, facciones, frentes— sin preguntarle nada a
+// ninguna API.
+//
+// No hay millones de escenarios guardados en ningún lado: se generan. Una
+// maniobra por sí sola no es un escenario; lo es la maniobra aplicada a un
+// objetivo concreto, con una intensidad, sobre un estado del reino, y con un
+// resultado que puede salir bien, a medias o al revés. Ese producto es lo que
+// da los millones, y por eso no hace falta enumerarlos.
+
+// ——— texto ———
+const sinTildes = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+const normal = (t) => sinTildes(t).toLowerCase().replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ").trim();
+const fichas = (t) => normal(t).split(" ").filter(Boolean);
+// Se compara por prefijo: "reclut" abarca recluto, reclutar, reclutaremos,
+// reclutamiento. En castellano la raíz aguanta casi toda la conjugación y
+// evita tener que escribir el verbo entero cuarenta veces.
+const casa1 = (f, r) => (r[0] === "=" ? f === r.slice(1) : f.startsWith(r));
+const tiene = (fs, raices) => raices.some((r) => fs.some((f) => casa1(f, r)));
+const cuenta = (fs, raices) => raices.reduce((a, r) => a + (fs.some((f) => casa1(f, r)) ? 1 : 0), 0);
+
+// ——— azar reproducible ———
+// La misma semilla da la misma partida. Sin esto no se puede explorar el
+// espacio de escenarios: cada corrida sería irrepetible y no habría con qué
+// comparar.
+function dado(semilla) {
+  let h = 2166136261 >>> 0;
+  const s = String(semilla);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return () => {
+    h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0;
+    return h / 4294967296;
+  };
+}
+const alAzar = (rnd, xs) => xs[Math.floor(rnd() * xs.length) % xs.length];
+
+// ═══ LO QUE SE PUEDE PEDIR ═══════════════════════════════════
+// `nucleo` son las palabras que definen la maniobra; `apoyo` refuerzan pero
+// no alcanzan solas. `sobre` dice a qué se aplica, para ir a buscarlo en el
+// estado. `cuesta` en oro, `roza` las facciones que se ofenden o se alegran.
+const MANIOBRAS = [
+  // ——— hacienda ———
+  { id: "subir_impuestos", n: "subir los tributos", fam: "hacienda",
+    nucleo: ["impuest", "tribut", "gabela", "alcabala", "contribucion", "diezm", "tasa", "grava", "recaud", "fisc"],
+    apoyo: ["subir", "sube", "aument", "increment", "elev", "cobr", "exig", "duplic", "mas"],
+    contra: ["baj", "reduc", "perdon", "exim", "alivi", "suprim", "quit"],
+    sobre: null, inverso: "bajar_impuestos" },
+  { id: "bajar_impuestos", n: "aliviar los tributos", fam: "hacienda",
+    nucleo: ["impuest", "tribut", "gabela", "alcabala", "contribucion", "diezm", "tasa"],
+    apoyo: ["baj", "reduc", "perdon", "exim", "alivi", "suprim", "quit", "condon"],
+    sobre: null, inverso: "subir_impuestos" },
+  { id: "confiscar", n: "confiscar bienes", fam: "hacienda",
+    nucleo: ["confisc", "expropi", "incaut", "requis", "embarg", "despoj", "desamortiz"],
+    apoyo: ["bien", "tierra", "propiedad", "tesoro", "plata", "oro"], sobre: "faccion" },
+  { id: "vender_cargos", n: "vender cargos y oficios", fam: "hacienda",
+    nucleo: ["vender", "vende", "venta", "subast", "remat"],
+    apoyo: ["cargo", "oficio", "titulo", "hidalgu", "nobleza", "puesto", "juro"], sobre: null },
+  { id: "pedir_prestamo", n: "pedir prestado", fam: "hacienda",
+    nucleo: ["prestam", "prest", "empresti", "credito", "banquer", "endeud"],
+    apoyo: ["pedir", "pide", "toma", "contrat", "buscar"], sobre: null },
+  { id: "pagar_deuda", n: "amortizar la deuda", fam: "hacienda",
+    nucleo: ["deuda", "acreedor", "amortiz"],
+    apoyo: ["pagar", "paga", "salda", "cancel", "devolv", "quit"], sobre: null },
+  { id: "devaluar_moneda", n: "envilecer la moneda", fam: "hacienda",
+    nucleo: ["devalu", "envilec", "acuñ", "acun", "moneda", "ceca", "vellon"],
+    apoyo: ["baj", "rebaj", "mezcl", "liga", "cobre"], sobre: null },
+  { id: "monopolio", n: "declarar un monopolio", fam: "hacienda",
+    nucleo: ["monopoli", "estanc", "exclusiv"],
+    apoyo: ["sal", "tabac", "seda", "especia", "comercio"], sobre: null },
+  { id: "aranceles", n: "poner aranceles", fam: "hacienda",
+    nucleo: ["arancel", "aduana", "portazg", "almojarifazg", "peaje"],
+    apoyo: ["subir", "poner", "cobr", "cerrar", "proteg"], sobre: "vecino" },
+  { id: "catastro", n: "levantar un catastro", fam: "hacienda",
+    nucleo: ["catastr", "censo", "padron", "empadron", "amillar"],
+    apoyo: ["levant", "hacer", "orden", "contar", "registr"], sobre: null },
+
+  // ——— guerra ———
+  { id: "declarar_guerra", n: "declarar la guerra", fam: "guerra",
+    nucleo: ["guerra", "invad", "invasion", "atac", "conquist", "someter", "hostil"],
+    apoyo: ["declar", "romp", "marchar", "cruzar", "campaña", "campan"], sobre: "vecino",
+    // atacar a alguien con quien ya se combate no es declarar otra guerra
+    contexto: (o, s) => (o.vecino && o.vecino.estado !== "guerra" ? 3 : 0) - (s.guerra && !o.vecino ? 1.5 : 0) },
+  { id: "pedir_paz", n: "buscar la paz", fam: "guerra",
+    nucleo: ["paz", "armistici", "rendicion", "capitul", "tregua"],
+    apoyo: ["pedir", "firm", "busc", "negoci", "propon", "acabar", "termin"], sobre: "vecino",
+    contexto: (o, s) => (s.guerra ? 3 : -0.5) },
+  { id: "reclutar", n: "levantar tropas", fam: "guerra",
+    nucleo: ["reclut", "=leva", "=levas", "alist", "conscrip", "quint", "mesnad", "tropa", "solda", "ejercit", "hueste", "tercio", "regimient"],
+    apoyo: ["levant", "arm", "form", "crear", "mas", "aument", "infanter", "caballer", "artiller", "marina", "flota"],
+    contra: ["licenci", "disolv", "desmoviliz"], sobre: "rama", inverso: "licenciar" },
+  { id: "licenciar", n: "licenciar tropas", fam: "guerra",
+    nucleo: ["licenci", "desmoviliz", "disolv", "despedir"],
+    apoyo: ["tropa", "solda", "ejercit", "tercio", "regimient"], sobre: "rama", inverso: "reclutar" },
+  { id: "fortificar", n: "fortificar la frontera", fam: "guerra",
+    nucleo: ["fortific", "muralla", "castill", "fortaleza", "baluart", "bastion", "trinche", "almena"],
+    apoyo: ["construir", "levant", "reforz", "alzar", "amurall"], sobre: "provincia" },
+  { id: "asediar", n: "poner sitio", fam: "guerra",
+    nucleo: ["asedi", "sitio", "sitiar", "cerc", "bloque"],
+    apoyo: ["poner", "romp", "levant", "plaza", "ciudad"], sobre: "provincia",
+    contexto: (o, s) => (s.guerra ? 2 : -0.5) },
+  { id: "ofensiva", n: "lanzar una ofensiva", fam: "guerra",
+    nucleo: ["ofensiv", "asalt", "embest", "cargar", "avanz", "empuj", "contraatac", "atac"],
+    apoyo: ["frente", "linea", "enemig", "batalla", "ofensiva", "guerra", "lanzar"], sobre: null,
+    contexto: (o, s) => (s.guerra ? 3 : -0.5) },
+  { id: "replegarse", n: "replegar el frente", fam: "guerra",
+    nucleo: ["repleg", "retir", "retroced", "defend", "defensiv", "atrinch", "aguant", "resist"],
+    apoyo: ["frente", "linea", "posicion"], sobre: null },
+  { id: "saquear", n: "saquear al enemigo", fam: "guerra",
+    nucleo: ["saque", "pillaj", "botin", "arras", "quemar", "devast", "raz"],
+    apoyo: ["enemig", "campo", "ciudad", "aldea"], sobre: "vecino" },
+  { id: "nombrar_general", n: "nombrar un general", fam: "guerra",
+    nucleo: ["general", "capitan", "mariscal", "condestable", "caudill", "mando"],
+    apoyo: ["nombr", "design", "ascend", "poner", "buscar"], sobre: null },
+
+  // ——— diplomacia ———
+  { id: "tratado_comercio", n: "firmar un tratado de comercio", fam: "diplomacia",
+    nucleo: ["tratad", "comerci", "acuerd", "pacto", "convenio"],
+    apoyo: ["firm", "negoci", "propon", "sellar", "abrir", "libre"], sobre: "vecino" },
+  { id: "alianza", n: "sellar una alianza", fam: "diplomacia",
+    nucleo: ["alianz", "ali", "liga", "coalicion", "confederac"],
+    apoyo: ["firm", "sellar", "busc", "propon", "unir"], sobre: "vecino" },
+  { id: "matrimonio", n: "concertar un matrimonio", fam: "diplomacia",
+    nucleo: ["matrimoni", "boda", "casa", "despos", "dote", "enlace", "dinast", "nupci"],
+    apoyo: ["concert", "arregl", "propon", "hij", "princ", "infant", "hered", "sobrin", "prim"],
+    sobre: "vecino" },
+  { id: "exigir_tributo", n: "exigir parias a un vecino", fam: "diplomacia",
+    nucleo: ["parias", "vasallaj", "sumision"],
+    apoyo: ["exig", "cobr", "reclam", "imponer", "tribut"], sobre: "vecino",
+    contexto: (o) => (o.vecino ? 3 : 0) },
+  { id: "pagar_tributo", n: "pagar parias a un vecino", fam: "diplomacia",
+    nucleo: ["parias", "vasallaj"],
+    apoyo: ["pagar", "ofrec", "comprar", "sobornar", "apacigu", "tribut"], sobre: "vecino",
+    contexto: (o) => (o.vecino ? 3 : 0) },
+  { id: "embajada", n: "enviar una embajada", fam: "diplomacia",
+    nucleo: ["embaja", "emisari", "legad", "mensajer", "delegacion", "obsequi", "regal", "presente"],
+    apoyo: ["enviar", "mandar", "despach", "cortejar", "halag"], sobre: "vecino" },
+  { id: "espiar", n: "montar una red de espías", fam: "diplomacia",
+    nucleo: ["espi", "informant", "agente", "intriga", "conspir", "soborn", "infiltr"],
+    apoyo: ["montar", "enviar", "pagar", "corte", "secret"], sobre: "vecino" },
+  { id: "romper_relaciones", n: "romper relaciones", fam: "diplomacia",
+    nucleo: ["romp", "expuls", "ultimatum", "ultimat"],
+    apoyo: ["relacion", "embaja", "trato", "vinculo"], sobre: "vecino" },
+
+  // ——— interior ———
+  { id: "reprimir", n: "reprimir", fam: "interior",
+    nucleo: ["reprim", "castig", "escarmient", "ahorc", "ejecut", "encarcel", "sofoc", "aplast", "purg"],
+    apoyo: ["revuelt", "motin", "rebel", "sedicion", "desorden"], sobre: "faccion" },
+  { id: "amnistia", n: "conceder una amnistía", fam: "interior",
+    nucleo: ["amnist", "indult", "perdon", "clemenc", "liber"],
+    apoyo: ["conced", "otorg", "dar", "pres", "reo"], sobre: "faccion" },
+  { id: "repartir_grano", n: "repartir grano", fam: "interior",
+    nucleo: ["grano", "trigo", "pan", "pos", "silo", "hambr", "socorr"],
+    apoyo: ["repart", "dar", "abrir", "distribu", "aliment", "socorr"], sobre: "provincia" },
+  { id: "fiestas", n: "dar fiestas", fam: "interior",
+    nucleo: ["fiesta", "juego", "circo", "torne", "celebr", "festej", "procesion", "carnav"],
+    apoyo: ["dar", "organiz", "costear", "pueblo"], sobre: null },
+  { id: "reforma_legal", n: "promulgar una reforma", fam: "interior",
+    nucleo: ["ley", "leyes", "codig", "fuero", "reform", "ordenanz", "pragmat", "constitu", "decret"],
+    apoyo: ["promulg", "dictar", "escrib", "unific", "orden"], sobre: null },
+  { id: "privilegio", n: "otorgar privilegios", fam: "interior",
+    nucleo: ["privilegi", "franquic", "merced", "exencion", "favor", "prebenda"],
+    apoyo: ["otorg", "conced", "dar", "premi"], sobre: "faccion" },
+  { id: "destituir", n: "destituir a un ministro", fam: "interior",
+    nucleo: ["destitu", "cesar", "echar", "remov", "relev", "despedir", "apart"],
+    apoyo: ["ministr", "consejer", "cargo", "gabinete", "canciller", "tesorer"], sobre: "ministro" },
+  { id: "colonizar", n: "poblar tierras vacías", fam: "interior",
+    nucleo: ["colon", "poblar", "repobl", "asent", "roturar", "desmont"],
+    apoyo: ["tierra", "vacia", "yerma", "frontera", "campesin"], sobre: "provincia" },
+
+  // ——— saber ———
+  { id: "fundar_institucion", n: "fundar una casa de estudios", fam: "saber",
+    nucleo: ["universidad", "academia", "escuela", "colegio", "institut", "facultad", "biblioteca", "observatori", "estudios"],
+    apoyo: ["fund", "crear", "abrir", "levant", "dotar", "casa"], sobre: "provincia" },
+  { id: "invitar_sabio", n: "llamar a un sabio", fam: "saber",
+    nucleo: ["sabio", "sabios", "erudit", "filosof", "maestr", "docto", "astronom"],
+    apoyo: ["invit", "llam", "traer", "contrat", "corte", "pension", "cientif", "medic"], sobre: null },
+  { id: "dotar_catedra", n: "dotar una cátedra", fam: "saber",
+    nucleo: ["catedr", "beca", "pension", "mecenazg", "patrocin", "dotacion"],
+    apoyo: ["dotar", "crear", "financ", "pagar", "estudio"], sobre: null },
+  { id: "enfocar_saber", n: "orientar el esfuerzo científico", fam: "saber",
+    nucleo: ["investig", "estudiar", "ciencia", "cientif", "saber", "conocimient", "experiment", "esfuerzo"],
+    apoyo: ["orient", "enfoc", "concentr", "dedicar", "impuls", "financ"], sobre: null },
+  { id: "censurar", n: "censurar", fam: "saber",
+    nucleo: ["censur", "prohib", "indice", "quemar", "herej", "inquisicion"],
+    apoyo: ["libro", "idea", "imprent", "escrit"], sobre: null },
+  { id: "expedicion", n: "armar una expedición", fam: "saber",
+    nucleo: ["expedicion", "explor", "descubr", "viaje", "navegac", "ultramar", "mapa"],
+    apoyo: ["armar", "enviar", "financ", "flota", "costa"], sobre: null },
+
+  // ——— obras ———
+  { id: "caminos", n: "abrir caminos", fam: "obras",
+    nucleo: ["camino", "calzada", "carreter", "puente", "ruta"],
+    apoyo: ["abrir", "construir", "empedr", "reparar", "tender"], sobre: "provincia" },
+  { id: "puerto", n: "levantar un puerto", fam: "obras",
+    nucleo: ["puerto", "dique", "muelle", "astiller", "darsen"],
+    apoyo: ["levant", "construir", "ampliar", "dragar"], sobre: "provincia" },
+  { id: "regadio", n: "abrir canales de riego", fam: "obras",
+    nucleo: ["riego", "regadi", "canal", "acequia", "azud", "panta", "presa", "acueduct", "pozo"],
+    apoyo: ["abrir", "construir", "cavar", "tender", "agua"], sobre: "provincia" },
+  { id: "templo", n: "levantar un templo", fam: "obras",
+    nucleo: ["catedral", "templo", "iglesia", "basilica", "monaster", "mezquit", "santuari"],
+    apoyo: ["levant", "construir", "consagr", "erigir"], sobre: "provincia" },
+  { id: "mercado", n: "abrir mercados", fam: "obras",
+    nucleo: ["mercad", "lonja", "feria", "almacen", "deposit", "alhondig"],
+    apoyo: ["abrir", "crear", "construir", "franquic"], sobre: "provincia" },
+  { id: "hospital", n: "abrir hospitales", fam: "obras",
+    nucleo: ["hospital", "lazaret", "hospici", "sanidad", "salubr", "cuarenten", "peste"],
+    apoyo: ["abrir", "fundar", "construir", "cuidar"], sobre: "provincia" },
+
+  // ——— comercio ———
+  { id: "factoria", n: "abrir una factoría", fam: "comercio",
+    nucleo: ["factori", "consulad", "compañ", "compan", "sucursal"],
+    apoyo: ["abrir", "fundar", "establec", "comerci", "agente"], sobre: "vecino" },
+  { id: "flota_mercante", n: "armar una flota mercante", fam: "comercio",
+    nucleo: ["flota", "mercante", "navio", "barco", "galeon", "carrac", "nave"],
+    apoyo: ["armar", "construir", "comprar", "comerci", "carga"], sobre: null },
+
+  // ——— corona ———
+  { id: "boato", n: "desplegar el boato de la corona", fam: "corona",
+    nucleo: ["coronacion", "boato", "palaci", "corte", "pompa", "desfil", "estatua", "monument", "retrat"],
+    apoyo: ["celebr", "levant", "encarg", "mostrar", "gloria"], sobre: null },
+  { id: "mecenazgo", n: "proteger las artes", fam: "corona",
+    nucleo: ["arte", "pintor", "escultor", "poeta", "musica", "teatro", "obra"],
+    apoyo: ["proteg", "mecenaz", "pagar", "encarg", "traer"], sobre: null },
+  { id: "peregrinar", n: "hacer una peregrinación", fam: "corona",
+    nucleo: ["peregrin", "romer", "concili", "sinodo", "bendicion", "reliqui", "cruzad"],
+    apoyo: ["hacer", "convoc", "ir", "traer", "papa", "obispo"], sobre: null },
+];
+
+const MANIOBRA_IDX = Object.fromEntries(MANIOBRAS.map((m) => [m.id, m]));
+const NEGACIONES = ["no", "nunca", "jamas", "dejar", "deja", "dejemos", "suspender", "suspende",
+                    "cancelar", "cancela", "detener", "detene", "parar", "para", "evitar", "evita"];
+const MUCHO = ["much", "mas", "todo", "toda", "maxim", "total", "drastic", "brutal", "duro", "fuerte",
+               "urgent", "inmediat", "doble", "triple", "masiv", "gran", "grande", "enorme"];
+const POCO = ["poco", "leve", "algo", "apenas", "prudent", "moder", "cauto", "cautel", "gradual",
+              "lento", "discret", "minim", "pequeñ", "pequen", "sutil"];
+
+// ═══ ENTENDER LA ORDEN ═══════════════════════════════════════
+// Busca en el texto los nombres que existen de verdad en la partida: no vale
+// asediar una provincia que no está en el mapa ni aliarse con un vecino
+// inventado.
+function buscarObjetivos(texto, s) {
+  const t = " " + normal(texto) + " ";
+  const halla = (lista, campo) => {
+    let mejor = null;
+    for (const x of lista) {
+      const nom = normal(x[campo] || "");
+      if (nom.length < 3) continue;
+      if (t.includes(" " + nom + " ") || t.includes(" " + nom)) {
+        if (!mejor || nom.length > normal(mejor[campo]).length) mejor = x;
+      }
+    }
+    return mejor;
+  };
+  const fs = fichas(texto);
+  const faccion = FACCIONES.find((f) => tiene(fs, [normal(f.n).slice(0, 5)]))
+    || (tiene(fs, ["nobl", "señor", "senor", "hidalg", "aristocr", "grande"]) ? FACCIONES[0] : null)
+    || (tiene(fs, ["cler", "iglesi", "obisp", "cura", "monj", "sacerdot", "papa", "religios"]) ? FACCIONES[1] : null)
+    || (tiene(fs, ["mercad", "comerciant", "burgu", "gremio", "banquer", "negoci"]) ? FACCIONES[2] : null)
+    || (tiene(fs, ["ejercit", "milit", "tropa", "solda", "oficial", "veteran"]) ? FACCIONES[3] : null)
+    || (tiene(fs, ["pueblo", "plebe", "campesin", "villan", "labrieg", "vulgo", "comun"]) ? FACCIONES[4] : null);
+  const rama = RAMAS_EJERCITO.find((r) => tiene(fs, [normal(r.n).slice(0, 6)]))
+    || (tiene(fs, ["jinete", "caball", "ecuestr"]) ? RAMAS_EJERCITO[1] : null)
+    || (tiene(fs, ["cañon", "canon", "bombard", "pieza"]) ? RAMAS_EJERCITO[2] : null)
+    || (tiene(fs, ["zapador", "ingenier", "mina"]) ? RAMAS_EJERCITO[3] : null)
+    || (tiene(fs, ["barco", "navio", "flota", "naval", "galer"]) ? RAMAS_EJERCITO[4] : null);
+  return {
+    provincia: halla(s.provincias || [], "nombre"),
+    vecino: halla(s.vecinos || [], "nombre"),
+    ministro: halla((s.gobierno && s.gobierno.miembros) || [], "nombre"),
+    faccion, rama,
+  };
+}
+
+// Puntúa cada maniobra contra lo escrito y se queda con la que más encaja.
+// Si ninguna llega al umbral, la orden no se descarta: se trata como un gesto
+// de gobierno, con efecto chico pero real. Nunca hay una orden "inválida".
+function interpretarOrden(texto, s) {
+  const fs = fichas(texto);
+  if (!fs.length) return null;
+  const obj = buscarObjetivos(texto, s);
+  const negada = NEGACIONES.some((n) => fs.includes(n));
+  let intensidad = 1;
+  if (tiene(fs, MUCHO)) intensidad = 1.6;
+  if (tiene(fs, POCO)) intensidad = 0.55;
+  const num = fs.map(Number).find((x) => !isNaN(x) && x > 0 && x < 1000);
+
+  const puntuadas = [];
+  for (const m of MANIOBRAS) {
+    const nuc = cuenta(fs, m.nucleo);
+    if (!nuc) continue;
+    let p = nuc * 3 + cuenta(fs, m.apoyo || []);
+    if (m.contra && tiene(fs, m.contra)) p -= 4;      // "bajar impuestos" no es "subir impuestos"
+    if (m.sobre && obj[m.sobre]) p += 2.5;            // pidió algo que existe en la partida
+    if (m.sobre === "vecino" && !obj.vecino) p -= 1;
+    // la misma palabra significa cosas distintas según cómo esté el reino:
+    // «atacar» es declarar la guerra en paz y cargar contra el frente en guerra
+    const ctx = m.contexto ? m.contexto(obj, s) : 0;
+    puntuadas.push({ m, p: p + ctx, lex: p });
+  }
+  puntuadas.sort((a, b) => b.p - a.p);
+  const gana = puntuadas[0];
+  const umbral = 3;
+
+  // el umbral se mide sobre lo léxico: el contexto decide cuál de dos
+  // maniobras encaja mejor, pero no puede dejar una orden sin entender
+  if (!gana || gana.lex < umbral) {
+    return { maniobra: null, texto, objetivos: obj, intensidad, negada, num,
+             confianza: 0, alternativas: puntuadas.slice(0, 3).map((x) => x.m.id) };
+  }
+  let m = gana.m;
+  // "no subas los impuestos" es una orden, no un rechazo: es la contraria
+  if (negada && m.inverso && MANIOBRA_IDX[m.inverso]) m = MANIOBRA_IDX[m.inverso];
+  const segunda = puntuadas[1] ? puntuadas[1].p : 0;
+  return { maniobra: m.id, texto, objetivos: obj, intensidad, negada, num,
+           confianza: Math.min(1, (gana.p - segunda + 2) / 8),
+           alternativas: puntuadas.slice(1, 3).map((x) => x.m.id) };
+}
+
+// ═══ RESOLVER LA ORDEN ═══════════════════════════════════════
+// Cada maniobra se mide contra el estado del reino: lo que cuesta, lo que
+// puede salir mal y a quién ofende. Nada es gratis y casi nada es seguro.
+const salio = (rnd, p) => rnd() < acotar(p, 0, 1);
+
+// Un resultado vacío al que cada efecto le va agregando.
+const vacio = () => ({ hechos: [], d: {}, fac: {}, oro: 0, deuda: 0, pob: 0,
+                       vec: [], ejercito: {}, prov: [], grano: 0, fallo: false });
+const sumar = (r, campo, k, v) => { r[campo][k] = (r[campo][k] || 0) + v; };
+
+const EFECTOS = {
+  // ——— hacienda ———
+  subir_impuestos: (c) => {
+    const r = vacio(), i = c.inten;
+    const cargados = c.s.stats.economia < 35 || (c.pobTecho > 0.95);
+    r.oro = Math.round(c.ingreso * 0.35 * i);
+    sumar(r, "d", "economia", -Math.round(2 * i));
+    sumar(r, "fac", "pueblo", -Math.round(9 * i));
+    sumar(r, "fac", "mercaderes", -Math.round(6 * i));
+    sumar(r, "fac", "nobleza", -Math.round(3 * i));
+    r.hechos.push({ t: "recauda", oro: r.oro });
+    if (salio(c.rnd, (cargados ? 0.42 : 0.14) * i)) {
+      r.fallo = true;
+      sumar(r, "d", "estabilidad", -Math.round(7 * i));
+      sumar(r, "fac", "pueblo", -8);
+      r.oro = Math.round(r.oro * 0.5);
+      r.hechos.push({ t: "motin_fiscal", donde: c.provPeor });
+    }
+    return r;
+  },
+  bajar_impuestos: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.25 * i);
+    sumar(r, "d", "economia", Math.round(3 * i));
+    sumar(r, "d", "estabilidad", Math.round(2 * i));
+    sumar(r, "fac", "pueblo", Math.round(8 * i));
+    sumar(r, "fac", "mercaderes", Math.round(5 * i));
+    r.hechos.push({ t: "alivio_fiscal" });
+    return r;
+  },
+  confiscar: (c) => {
+    const r = vacio(), i = c.inten;
+    const f = c.o.objetivos.faccion || FACCIONES[Math.floor(c.rnd() * 5)];
+    const rico = f.id === "mercaderes" || f.id === "clero" || f.id === "nobleza";
+    r.oro = Math.round(c.ingreso * (rico ? 0.9 : 0.3) * i);
+    sumar(r, "fac", f.id, -Math.round(24 * i));
+    sumar(r, "d", "prestigio", -Math.round(4 * i));
+    sumar(r, "d", "diplomacia", -2);
+    r.hechos.push({ t: "confisca", faccion: f, oro: r.oro });
+    if (salio(c.rnd, 0.3 * i)) {
+      r.fallo = true;
+      sumar(r, "d", "estabilidad", -8);
+      sumar(r, "d", "economia", -5);
+      r.hechos.push({ t: "capital_huye", faccion: f });
+    }
+    return r;
+  },
+  vender_cargos: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = Math.round(c.ingreso * 0.5 * i);
+    sumar(r, "fac", "nobleza", Math.round(6 * i));
+    sumar(r, "fac", "pueblo", -Math.round(4 * i));
+    sumar(r, "d", "estabilidad", -Math.round(3 * i));
+    r.hechos.push({ t: "vende_cargos", oro: r.oro });
+    return r;
+  },
+  pedir_prestamo: (c) => {
+    const r = vacio(), i = c.inten;
+    const monto = Math.round(c.ingreso * 0.8 * i);
+    if ((c.s.creditoVetado || 0) > c.s.anio) {
+      r.fallo = true;
+      r.hechos.push({ t: "sin_credito" });
+      sumar(r, "d", "prestigio", -2);
+      return r;
+    }
+    r.oro = monto; r.deuda = monto;
+    sumar(r, "fac", "mercaderes", 3);
+    r.hechos.push({ t: "presta", oro: monto });
+    return r;
+  },
+  pagar_deuda: (c) => {
+    const r = vacio(), i = c.inten;
+    const paga = Math.min(c.oroDisp * 0.8, (c.s.deuda || 0) * i);
+    if (paga < 1) { r.fallo = true; r.hechos.push({ t: "nada_que_pagar" }); return r; }
+    r.oro = -Math.round(paga); r.deuda = -Math.round(paga);
+    sumar(r, "fac", "mercaderes", 7);
+    sumar(r, "d", "prestigio", 2);
+    r.hechos.push({ t: "amortiza", oro: Math.round(paga) });
+    return r;
+  },
+  devaluar_moneda: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = Math.round(c.ingreso * 0.6 * i);
+    r.deuda = -Math.round((c.s.deuda || 0) * 0.25 * i);
+    sumar(r, "d", "economia", -Math.round(6 * i));
+    sumar(r, "d", "prestigio", -Math.round(4 * i));
+    sumar(r, "fac", "mercaderes", -Math.round(14 * i));
+    sumar(r, "fac", "pueblo", -Math.round(8 * i));
+    r.hechos.push({ t: "devalua", oro: r.oro });
+    return r;
+  },
+  monopolio: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = Math.round(c.ingreso * 0.3 * i);
+    sumar(r, "d", "economia", Math.round(2 * i));
+    sumar(r, "fac", "mercaderes", -Math.round(10 * i));
+    r.hechos.push({ t: "monopolio", oro: r.oro });
+    return r;
+  },
+  aranceles: (c) => {
+    const r = vacio(), i = c.inten, v = c.o.objetivos.vecino;
+    r.oro = Math.round(c.ingreso * 0.18 * i);
+    sumar(r, "d", "economia", -Math.round(2 * i));
+    sumar(r, "fac", "mercaderes", -Math.round(7 * i));
+    if (v) r.vec.push({ nombre: v.nombre, relacion: -Math.round(10 * i) });
+    r.hechos.push({ t: "aranceles", vecino: v });
+    return r;
+  },
+  catastro: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.15);
+    sumar(r, "d", "economia", Math.round(4 * i));
+    sumar(r, "fac", "nobleza", -Math.round(8 * i));
+    sumar(r, "fac", "pueblo", -3);
+    r.hechos.push({ t: "catastro" });
+    return r;
+  },
+
+  // ——— guerra ———
+  declarar_guerra: (c) => {
+    const r = vacio();
+    const v = c.o.objetivos.vecino || (c.s.vecinos || []).filter((x) => x.estado !== "guerra")[0];
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    if (c.s.guerra) { r.fallo = true; r.hechos.push({ t: "ya_en_guerra", vecino: c.s.guerra.vecino }); return r; }
+    r.vec.push({ nombre: v.nombre, relacion: -60, estado: "guerra" });
+    sumar(r, "d", "diplomacia", -10);
+    sumar(r, "d", "militar", 3);
+    sumar(r, "fac", "ejercito", 12);
+    sumar(r, "fac", "mercaderes", -12);
+    sumar(r, "fac", "pueblo", -6);
+    r.guerra = { vecino: v.nombre };
+    r.hechos.push({ t: "declara_guerra", vecino: v });
+    return r;
+  },
+  pedir_paz: (c) => {
+    const r = vacio();
+    if (!c.s.guerra) { r.fallo = true; r.hechos.push({ t: "no_hay_guerra" }); return r; }
+    const g = c.s.guerra;
+    const ganando = (g.frente || 0) > 8;
+    // pedir la paz cuando vas perdiendo cuesta caro; cuando vas ganando, la
+    // otra parte se hace rogar
+    if (salio(c.rnd, ganando ? 0.35 : 0.72)) {
+      r.paz = true;
+      r.vec.push({ nombre: g.vecino, relacion: ganando ? 5 : -15, estado: "paz" });
+      sumar(r, "d", "diplomacia", 6);
+      sumar(r, "d", "estabilidad", 5);
+      sumar(r, "fac", "ejercito", ganando ? -4 : -12);
+      sumar(r, "fac", "pueblo", 10);
+      sumar(r, "fac", "mercaderes", 10);
+      if (!ganando) { r.oro = -Math.round(c.ingreso * 0.5); sumar(r, "d", "prestigio", -6); }
+      r.hechos.push({ t: "firma_paz", vecino: g.vecino, ganando });
+    } else {
+      r.fallo = true;
+      sumar(r, "d", "prestigio", -3);
+      r.hechos.push({ t: "paz_rechazada", vecino: g.vecino });
+    }
+    return r;
+  },
+  reclutar: (c) => {
+    const r = vacio(), i = c.inten;
+    const rama = c.o.objetivos.rama || RAMAS_EJERCITO[0];
+    if (!ramaDisponible(rama, c.s.ciencia)) {
+      r.fallo = true; r.hechos.push({ t: "rama_imposible", rama }); return r;
+    }
+    const pedidas = Math.max(1, Math.round((c.o.num || 2) * i));
+    const puede = Math.floor(c.oroDisp / rama.costo);
+    const brazos = Math.floor((brazosMaximos(c.pob) - brazosOcupados(c.s.ejercito)) / rama.brazos);
+    const n = Math.max(0, Math.min(pedidas, puede, brazos));
+    if (!n) {
+      r.fallo = true;
+      r.hechos.push({ t: "sin_medios", rama, oro: c.oroDisp < rama.costo, brazos: brazos <= 0 });
+      return r;
+    }
+    r.oro = -n * rama.costo;
+    r.ejercito[rama.id] = n;
+    sumar(r, "d", "militar", Math.min(9, n * 2));
+    sumar(r, "fac", "ejercito", 8);
+    sumar(r, "fac", "pueblo", -Math.round(4 * i));
+    r.hechos.push({ t: "recluta", rama, n });
+    return r;
+  },
+  licenciar: (c) => {
+    const r = vacio(), i = c.inten;
+    const rama = c.o.objetivos.rama || RAMAS_EJERCITO.find((x) => (c.s.ejercito || {})[x.id]) || RAMAS_EJERCITO[0];
+    const hay = (c.s.ejercito || {})[rama.id] || 0;
+    const n = Math.max(0, Math.min(hay, Math.round((c.o.num || Math.ceil(hay / 2)) * i)));
+    if (!n) { r.fallo = true; r.hechos.push({ t: "nada_que_licenciar", rama }); return r; }
+    r.ejercito[rama.id] = -n;
+    sumar(r, "d", "militar", -Math.min(8, n * 2));
+    sumar(r, "fac", "ejercito", -10);
+    sumar(r, "fac", "pueblo", 5);
+    r.hechos.push({ t: "licencia", rama, n });
+    return r;
+  },
+  fortificar: (c) => {
+    const r = vacio(), i = c.inten;
+    const p = c.o.objetivos.provincia || c.provFrontera;
+    const costo = Math.round(c.ingreso * 0.4 * i);
+    if (c.oroDisp < costo * 0.5) { r.fallo = true; r.hechos.push({ t: "sin_oro" }); return r; }
+    r.oro = -costo;
+    sumar(r, "d", "militar", Math.round(4 * i));
+    sumar(r, "d", "estabilidad", 2);
+    if (p) r.prov.push({ id: p.id, fortificada: true });
+    r.hechos.push({ t: "fortifica", provincia: p });
+    return r;
+  },
+  asediar: (c) => {
+    const r = vacio(), i = c.inten;
+    if (!c.s.guerra) { r.fallo = true; r.hechos.push({ t: "no_hay_guerra" }); return r; }
+    const exito = acotar(0.2 + c.ventaja * 0.5, 0.05, 0.85);
+    if (salio(c.rnd, exito)) {
+      r.frente = Math.round(14 * i);
+      sumar(r, "d", "militar", 4);
+      sumar(r, "d", "prestigio", 5);
+      r.hechos.push({ t: "plaza_tomada", provincia: c.o.objetivos.provincia });
+    } else {
+      r.fallo = true;
+      r.frente = -Math.round(6 * i);
+      r.bajas = Math.round(8 * i);
+      sumar(r, "d", "militar", -3);
+      r.hechos.push({ t: "asedio_fracasa", provincia: c.o.objetivos.provincia });
+    }
+    return r;
+  },
+  ofensiva: (c) => {
+    const r = vacio(), i = c.inten;
+    if (!c.s.guerra) { r.fallo = true; r.hechos.push({ t: "no_hay_guerra" }); return r; }
+    const exito = acotar(0.25 + c.ventaja * 0.55, 0.08, 0.9);
+    if (salio(c.rnd, exito)) {
+      r.frente = Math.round(18 * i);
+      r.bajas = Math.round(6 * i);
+      sumar(r, "d", "militar", 5); sumar(r, "d", "prestigio", 6);
+      sumar(r, "fac", "ejercito", 10);
+      r.hechos.push({ t: "victoria_campo" });
+    } else {
+      r.fallo = true;
+      r.frente = -Math.round(16 * i);
+      r.bajas = Math.round(16 * i);
+      sumar(r, "d", "militar", -7); sumar(r, "d", "prestigio", -7);
+      sumar(r, "fac", "ejercito", -10); sumar(r, "fac", "pueblo", -8);
+      r.hechos.push({ t: "derrota_campo" });
+    }
+    return r;
+  },
+  replegarse: (c) => {
+    const r = vacio(), i = c.inten;
+    if (!c.s.guerra) { r.fallo = true; r.hechos.push({ t: "no_hay_guerra" }); return r; }
+    r.frente = -Math.round(4 * i);
+    r.aguante = Math.round(9 * i);                    // se conserva tropa
+    sumar(r, "d", "prestigio", -3);
+    sumar(r, "fac", "ejercito", -5);
+    r.hechos.push({ t: "repliegue" });
+    return r;
+  },
+  saquear: (c) => {
+    const r = vacio(), i = c.inten;
+    if (!c.s.guerra) { r.fallo = true; r.hechos.push({ t: "no_hay_guerra" }); return r; }
+    r.oro = Math.round(c.ingreso * 0.4 * i);
+    r.frente = Math.round(4 * i);
+    sumar(r, "d", "prestigio", -Math.round(6 * i));
+    sumar(r, "d", "diplomacia", -Math.round(8 * i));
+    sumar(r, "fac", "ejercito", 8);
+    sumar(r, "fac", "clero", -Math.round(9 * i));
+    r.hechos.push({ t: "saqueo", oro: r.oro });
+    return r;
+  },
+  nombrar_general: (c) => {
+    const r = vacio();
+    if ((c.s.generales || []).length >= cupoGenerales(c.s.ciencia)) {
+      r.fallo = true; r.hechos.push({ t: "cupo_generales" }); return r;
+    }
+    r.general = true;
+    r.oro = -Math.round(c.ingreso * 0.12);
+    sumar(r, "d", "militar", 3);
+    sumar(r, "fac", "ejercito", 7);
+    sumar(r, "fac", "nobleza", 3);
+    r.hechos.push({ t: "nombra_general" });
+    return r;
+  },
+
+  // ——— diplomacia ———
+  tratado_comercio: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoAfin;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    if (v.estado === "guerra") { r.fallo = true; r.hechos.push({ t: "en_guerra_con", vecino: v }); return r; }
+    if (salio(c.rnd, acotar(0.4 + (v.relacion || 0) / 140 + c.s.stats.diplomacia / 260, 0.15, 0.92))) {
+      r.vec.push({ nombre: v.nombre, relacion: 18, estado: v.estado === "tension" ? "paz" : v.estado });
+      sumar(r, "d", "economia", 5); sumar(r, "d", "diplomacia", 5);
+      sumar(r, "fac", "mercaderes", 12);
+      r.hechos.push({ t: "tratado", vecino: v });
+    } else {
+      r.fallo = true;
+      sumar(r, "d", "prestigio", -2);
+      r.hechos.push({ t: "tratado_rechazado", vecino: v });
+    }
+    return r;
+  },
+  alianza: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoAfin;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    if (salio(c.rnd, acotar(0.18 + (v.relacion || 0) / 150 + c.s.stats.prestigio / 300, 0.05, 0.8))) {
+      r.vec.push({ nombre: v.nombre, relacion: 30, estado: "aliado" });
+      sumar(r, "d", "diplomacia", 10); sumar(r, "d", "militar", 3);
+      r.hechos.push({ t: "alianza", vecino: v });
+    } else {
+      r.fallo = true;
+      sumar(r, "d", "prestigio", -3);
+      r.hechos.push({ t: "alianza_rechazada", vecino: v });
+    }
+    return r;
+  },
+  matrimonio: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoAfin;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    if (salio(c.rnd, acotar(0.3 + c.s.stats.prestigio / 200 + (v.relacion || 0) / 200, 0.1, 0.88))) {
+      r.vec.push({ nombre: v.nombre, relacion: 25 });
+      sumar(r, "d", "diplomacia", 8); sumar(r, "d", "prestigio", 6);
+      sumar(r, "fac", "nobleza", 8);
+      r.hechos.push({ t: "boda", vecino: v });
+    } else {
+      r.fallo = true;
+      sumar(r, "d", "prestigio", -5);
+      r.hechos.push({ t: "desaire", vecino: v });
+    }
+    return r;
+  },
+  exigir_tributo: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoDebil;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    const fuerza = (c.s.stats.militar - (v.poder || 5) * 10) / 100;
+    if (salio(c.rnd, acotar(0.3 + fuerza, 0.05, 0.85))) {
+      r.oro = Math.round(c.ingreso * 0.35);
+      r.tributo = { hacia: v.nombre, monto: Math.round(c.ingreso * 0.12) };
+      r.vec.push({ nombre: v.nombre, relacion: -25 });
+      sumar(r, "d", "prestigio", 7);
+      r.hechos.push({ t: "tributo_logrado", vecino: v, oro: r.oro });
+    } else {
+      r.fallo = true;
+      r.vec.push({ nombre: v.nombre, relacion: -20, estado: "tension" });
+      sumar(r, "d", "prestigio", -5); sumar(r, "d", "diplomacia", -6);
+      r.hechos.push({ t: "tributo_negado", vecino: v });
+    }
+    return r;
+  },
+  pagar_tributo: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoFuerte;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    r.oro = -Math.round(c.ingreso * 0.3);
+    r.vec.push({ nombre: v.nombre, relacion: 25, estado: v.estado === "guerra" ? "paz" : v.estado });
+    sumar(r, "d", "prestigio", -8);
+    sumar(r, "fac", "nobleza", -8); sumar(r, "fac", "ejercito", -10);
+    r.hechos.push({ t: "paga_tributo", vecino: v });
+    return r;
+  },
+  embajada: (c) => {
+    const r = vacio(), i = c.inten, v = c.o.objetivos.vecino || c.vecinoAfin;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    r.oro = -Math.round(c.ingreso * 0.1 * i);
+    r.vec.push({ nombre: v.nombre, relacion: Math.round(12 * i) });
+    sumar(r, "d", "diplomacia", Math.round(3 * i));
+    r.hechos.push({ t: "embajada", vecino: v });
+    return r;
+  },
+  espiar: (c) => {
+    const r = vacio(), i = c.inten, v = c.o.objetivos.vecino || c.vecinoFuerte;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    r.oro = -Math.round(c.ingreso * 0.15 * i);
+    if (salio(c.rnd, 0.68)) {
+      sumar(r, "d", "diplomacia", 4); sumar(r, "d", "militar", 3);
+      r.hechos.push({ t: "espia_exito", vecino: v });
+    } else {
+      r.fallo = true;
+      r.vec.push({ nombre: v.nombre, relacion: -22, estado: "tension" });
+      sumar(r, "d", "prestigio", -6); sumar(r, "d", "diplomacia", -8);
+      r.hechos.push({ t: "espia_descubierto", vecino: v });
+    }
+    return r;
+  },
+  romper_relaciones: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoHostil;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    r.vec.push({ nombre: v.nombre, relacion: -35, estado: "tension" });
+    sumar(r, "d", "diplomacia", -6); sumar(r, "d", "prestigio", 2);
+    sumar(r, "fac", "mercaderes", -8);
+    r.hechos.push({ t: "rompe", vecino: v });
+    return r;
+  },
+
+  // ——— interior ———
+  reprimir: (c) => {
+    const r = vacio(), i = c.inten;
+    const f = c.o.objetivos.faccion || c.faccionHostil;
+    sumar(r, "d", "estabilidad", Math.round(8 * i));
+    if (f) sumar(r, "fac", f.id, -Math.round(16 * i));
+    for (const g of FACCIONES) if (!f || g.id !== f.id) sumar(r, "fac", g.id, -Math.round(2 * i));
+    sumar(r, "d", "prestigio", -Math.round(2 * i));
+    r.hechos.push({ t: "reprime", faccion: f });
+    if (salio(c.rnd, 0.22 * i)) {
+      r.fallo = true;
+      sumar(r, "d", "estabilidad", -Math.round(14 * i));
+      r.hechos.push({ t: "represion_fracasa", faccion: f });
+    }
+    return r;
+  },
+  amnistia: (c) => {
+    const r = vacio(), i = c.inten;
+    const f = c.o.objetivos.faccion || c.faccionHostil;
+    if (f) sumar(r, "fac", f.id, Math.round(14 * i));
+    sumar(r, "fac", "pueblo", Math.round(6 * i));
+    sumar(r, "fac", "clero", 4);
+    sumar(r, "d", "estabilidad", -Math.round(2 * i));
+    sumar(r, "d", "prestigio", 3);
+    r.hechos.push({ t: "amnistia", faccion: f });
+    return r;
+  },
+  repartir_grano: (c) => {
+    const r = vacio(), i = c.inten;
+    const p = c.o.objetivos.provincia || c.provPeor;
+    r.oro = -Math.round(c.ingreso * 0.25 * i);
+    r.grano = -Math.round((c.s.reservaGrano || 0) * 0.5 * i);
+    sumar(r, "d", "estabilidad", Math.round(6 * i));
+    sumar(r, "fac", "pueblo", Math.round(15 * i));
+    sumar(r, "fac", "clero", 5);
+    r.hechos.push({ t: "reparte_grano", provincia: p });
+    return r;
+  },
+  fiestas: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.15 * i);
+    sumar(r, "d", "estabilidad", Math.round(4 * i));
+    sumar(r, "d", "prestigio", Math.round(3 * i));
+    sumar(r, "fac", "pueblo", Math.round(10 * i));
+    r.hechos.push({ t: "fiestas" });
+    return r;
+  },
+  reforma_legal: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.1);
+    sumar(r, "d", "estabilidad", Math.round(5 * i));
+    sumar(r, "d", "economia", Math.round(3 * i));
+    sumar(r, "fac", "nobleza", -Math.round(9 * i));
+    sumar(r, "fac", "clero", -Math.round(5 * i));
+    sumar(r, "fac", "pueblo", Math.round(8 * i));
+    sumar(r, "fac", "mercaderes", Math.round(6 * i));
+    r.hechos.push({ t: "reforma" });
+    return r;
+  },
+  privilegio: (c) => {
+    const r = vacio(), i = c.inten;
+    const f = c.o.objetivos.faccion || c.faccionFuerte;
+    if (f) sumar(r, "fac", f.id, Math.round(18 * i));
+    for (const g of FACCIONES) if (!f || g.id !== f.id) sumar(r, "fac", g.id, -Math.round(4 * i));
+    r.oro = -Math.round(c.ingreso * 0.12 * i);
+    r.hechos.push({ t: "privilegio", faccion: f });
+    return r;
+  },
+  destituir: (c) => {
+    const r = vacio();
+    const m = c.o.objetivos.ministro || ((c.s.gobierno || {}).miembros || [])
+      .slice().sort((a, b) => (a.competencia || 5) - (b.competencia || 5))[0];
+    if (!m) { r.fallo = true; r.hechos.push({ t: "sin_ministro" }); return r; }
+    r.destituir = m.cargo;
+    sumar(r, "d", "estabilidad", -2);
+    sumar(r, "fac", "nobleza", -6);
+    r.hechos.push({ t: "destituye", ministro: m });
+    return r;
+  },
+  colonizar: (c) => {
+    const r = vacio(), i = c.inten;
+    const p = c.o.objetivos.provincia || c.provVacia;
+    r.oro = -Math.round(c.ingreso * 0.3 * i);
+    sumar(r, "d", "economia", Math.round(3 * i));
+    sumar(r, "fac", "pueblo", 5); sumar(r, "fac", "nobleza", -3);
+    r.pob = Math.round(c.pob * 0.01 * i);
+    r.hechos.push({ t: "coloniza", provincia: p });
+    return r;
+  },
+
+  // ——— saber ———
+  fundar_institucion: (c) => {
+    const r = vacio();
+    const orden = INSTITUCIONES.filter((x) => !x.req || c.s.edu.instituciones[x.req]);
+    const meta = orden.find((x) => !c.s.edu.instituciones[x.id]) || INSTITUCIONES[0];
+    if (c.oroDisp < meta.costo) { r.fallo = true; r.hechos.push({ t: "sin_oro_sede", meta }); return r; }
+    r.oro = -meta.costo;
+    r.sede = { tipo: meta.id, provincia: (c.o.objetivos.provincia || c.provCapital || {}).id };
+    sumar(r, "d", "tecnologia", 4);
+    sumar(r, "fac", "clero", -3);
+    r.hechos.push({ t: "funda_sede", meta, provincia: c.o.objetivos.provincia || c.provCapital });
+    return r;
+  },
+  invitar_sabio: (c) => {
+    const r = vacio();
+    const costo = costoSabio((c.s.edu.sabios || []).length);
+    if (c.oroDisp < costo) { r.fallo = true; r.hechos.push({ t: "sin_oro_sabio", costo }); return r; }
+    r.oro = -costo; r.sabio = true;
+    sumar(r, "d", "tecnologia", 3); sumar(r, "d", "prestigio", 3);
+    r.hechos.push({ t: "llega_sabio" });
+    return r;
+  },
+  dotar_catedra: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.2 * i);
+    r.pi = Math.round(8 * i);
+    sumar(r, "d", "tecnologia", Math.round(3 * i));
+    r.hechos.push({ t: "catedra" });
+    return r;
+  },
+  enfocar_saber: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.12 * i);
+    r.pi = Math.round(12 * i);
+    sumar(r, "d", "tecnologia", Math.round(4 * i));
+    r.hechos.push({ t: "enfoca_saber" });
+    return r;
+  },
+  censurar: (c) => {
+    const r = vacio(), i = c.inten;
+    sumar(r, "d", "tecnologia", -Math.round(6 * i));
+    sumar(r, "d", "estabilidad", Math.round(4 * i));
+    sumar(r, "fac", "clero", Math.round(14 * i));
+    sumar(r, "fac", "mercaderes", -5);
+    r.hechos.push({ t: "censura" });
+    return r;
+  },
+  expedicion: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.35 * i);
+    if (salio(c.rnd, 0.55)) {
+      sumar(r, "d", "prestigio", Math.round(8 * i));
+      sumar(r, "d", "economia", Math.round(4 * i));
+      sumar(r, "d", "tecnologia", 3);
+      r.hechos.push({ t: "expedicion_vuelve" });
+    } else {
+      r.fallo = true;
+      sumar(r, "d", "prestigio", -3);
+      r.hechos.push({ t: "expedicion_perdida" });
+    }
+    return r;
+  },
+
+  // ——— obras ———
+  caminos: (c) => obra(c, { d: { economia: 5, estabilidad: 2 }, fac: { mercaderes: 8, pueblo: 4 }, t: "caminos" }),
+  puerto: (c) => obra(c, { d: { economia: 6, militar: 2 }, fac: { mercaderes: 12 }, t: "puerto" }),
+  regadio: (c) => obra(c, { d: { economia: 4 }, fac: { pueblo: 10, nobleza: 3 }, t: "regadio", fert: true }),
+  templo: (c) => obra(c, { d: { prestigio: 6, estabilidad: 3 }, fac: { clero: 16, pueblo: 5 }, t: "templo" }),
+  mercado: (c) => obra(c, { d: { economia: 5 }, fac: { mercaderes: 10, pueblo: 3 }, t: "mercado" }),
+  hospital: (c) => obra(c, { d: { estabilidad: 4 }, fac: { pueblo: 12, clero: 6 }, t: "hospital" }),
+
+  // ——— comercio ———
+  factoria: (c) => {
+    const r = vacio(), v = c.o.objetivos.vecino || c.vecinoAfin;
+    if (!v) { r.fallo = true; r.hechos.push({ t: "sin_vecino" }); return r; }
+    if (c.oroDisp < COSTO_FACTORIA) { r.fallo = true; r.hechos.push({ t: "sin_oro" }); return r; }
+    if ((c.s.factorias || []).includes(v.nombre)) { r.fallo = true; r.hechos.push({ t: "ya_hay_factoria", vecino: v }); return r; }
+    r.oro = -COSTO_FACTORIA;
+    r.factoria = v.nombre;
+    sumar(r, "d", "economia", 4);
+    sumar(r, "fac", "mercaderes", 10);
+    r.hechos.push({ t: "factoria", vecino: v });
+    return r;
+  },
+  flota_mercante: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.4 * i);
+    sumar(r, "d", "economia", Math.round(6 * i));
+    sumar(r, "fac", "mercaderes", Math.round(12 * i));
+    r.hechos.push({ t: "flota" });
+    return r;
+  },
+
+  // ——— corona ———
+  boato: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.3 * i);
+    sumar(r, "d", "prestigio", Math.round(9 * i));
+    sumar(r, "fac", "nobleza", Math.round(8 * i));
+    sumar(r, "fac", "pueblo", -Math.round(5 * i));
+    r.hechos.push({ t: "boato" });
+    return r;
+  },
+  mecenazgo: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.2 * i);
+    sumar(r, "d", "prestigio", Math.round(7 * i));
+    sumar(r, "d", "tecnologia", 2);
+    sumar(r, "fac", "nobleza", 5); sumar(r, "fac", "clero", 3);
+    r.hechos.push({ t: "mecenazgo" });
+    return r;
+  },
+  peregrinar: (c) => {
+    const r = vacio(), i = c.inten;
+    r.oro = -Math.round(c.ingreso * 0.18 * i);
+    sumar(r, "d", "prestigio", Math.round(5 * i));
+    sumar(r, "d", "estabilidad", 3);
+    sumar(r, "fac", "clero", Math.round(16 * i));
+    sumar(r, "fac", "pueblo", 6);
+    r.hechos.push({ t: "peregrina" });
+    return r;
+  },
+
+  // ——— lo que no encaja en ninguna ———
+  // No se rechaza nada. Si el jugador escribe algo que el motor no reconoce,
+  // sigue siendo un acto de gobierno: se le da un efecto chico y coherente y
+  // queda anotado en la crónica. Un juego que contesta "orden inválida" deja
+  // de ser un juego.
+  __gesto: (c) => {
+    const r = vacio();
+    const f = alAzar(c.rnd, FACCIONES);
+    sumar(r, "fac", f.id, Math.round((c.rnd() * 8 - 3)));
+    const st = alAzar(c.rnd, ["estabilidad", "prestigio", "diplomacia", "economia"]);
+    sumar(r, "d", st, Math.round(c.rnd() * 4 - 1));
+    r.oro = -Math.round(c.ingreso * 0.04);
+    r.hechos.push({ t: "gesto", faccion: f });
+    return r;
+  },
+};
+
+// Las obras públicas comparten forma: cuestan, tardan y contentan a alguien.
+function obra(c, spec) {
+  const r = vacio(), i = c.inten;
+  const costo = Math.round(c.ingreso * 0.35 * i);
+  if (c.oroDisp < costo * 0.4) { r.fallo = true; r.hechos.push({ t: "sin_oro" }); return r; }
+  r.oro = -costo;
+  for (const [k, v] of Object.entries(spec.d)) sumar(r, "d", k, Math.round(v * i));
+  for (const [k, v] of Object.entries(spec.fac)) sumar(r, "fac", k, Math.round(v * i));
+  const p = c.o.objetivos.provincia || c.provCapital;
+  if (spec.fert && p) r.prov.push({ id: p.id, riego: true });
+  r.hechos.push({ t: spec.t, provincia: p });
+  return r;
+}
+
+// ═══ NOMBRES SIN API ═════════════════════════════════════════
+// Lo que antes pedía la API: un sabio que llega a la corte, un general que
+// recibe el bastón. Con listas y una semilla alcanza, y además es repetible.
+const NOMBRES_SABIO = ["Abenragel", "Hipatia", "Al-Juarismi", "Teodora de Mileto", "Gerberto",
+  "Maslama", "Constanza de Pisa", "Avicena", "Rogerio Bacon", "Hildegarda", "Nicolás Oresme",
+  "Isaac Israelí", "Zheng Yuan", "Bhaskara", "Levi ben Gerson", "Catalina de Erauso",
+  "Simón Estévanez", "Juana de Alcalá", "Al-Battani", "Teofrasto de Rodas"];
+const CAMPOS_SABIO = ["astronomía", "medicina", "álgebra", "óptica", "cartografía", "metalurgia",
+  "botánica", "arquitectura", "hidráulica", "filosofía natural", "alquimia", "mecánica"];
+const APORTES_SABIO = ["ordena los saberes dispersos de la corte",
+  "trae instrumentos que nadie del reino sabía usar", "discute con todos y acierta a menudo",
+  "enseña a medir lo que antes se estimaba a ojo", "traduce obras que estaban perdidas",
+  "insiste en probar antes de afirmar"];
+function sabioLocal(rnd, usados) {
+  const libres = NOMBRES_SABIO.filter((n) => !usados.includes(n));
+  const nombre = libres.length ? alAzar(rnd, libres)
+    : alAzar(rnd, NOMBRES_SABIO) + " " + ROMANOS[Math.floor(rnd() * 8)];
+  return { nombre, campo: alAzar(rnd, CAMPOS_SABIO), aporte: alAzar(rnd, APORTES_SABIO),
+           bonoPI: 3 + Math.floor(rnd() * 9) };
+}
+function generalLocal(rnd, anio, usados) {
+  const libres = NOMBRES_GENERAL.filter((n) => !usados.includes(n));
+  const nombre = libres.length ? alAzar(rnd, libres) : alAzar(rnd, NOMBRES_GENERAL);
+  const rasgo = alAzar(rnd, RASGOS_GENERAL);
+  return { nombre, rasgo: rasgo.id, pericia: 3 + Math.floor(rnd() * 7),
+           nacio: anio - (30 + Math.floor(rnd() * 22)), desde: anio };
+}
+
+// ═══ APLICAR LO QUE EL MOTOR DECIDIÓ ═════════════════════════
+// El motor local puede mover cosas que la API no podía: oro, tropas, deuda,
+// facciones, tratados. Se aplican acá, sobre el estado ya cerrado por el
+// turno, para no tener que tocar las quinientas líneas de la simulación.
+function aplicarEfectos(n, ef, rnd) {
+  if (!ef) return n;
+  const e = { ...n };
+  if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
+  if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
+  if (ef.pi) e.ciencia = { ...e.ciencia, pi: Math.max(0, (e.ciencia.pi || 0) + ef.pi) };
+  if (ef.grano) e.reservaGrano = Math.max(0, (e.reservaGrano || 0) + ef.grano);
+  if (ef.fac && Object.keys(ef.fac).length) {
+    e.facciones = { ...e.facciones };
+    for (const [k, v] of Object.entries(ef.fac)) e.facciones[k] = acotar((e.facciones[k] ?? 50) + v, 0, 100);
+  }
+  if (ef.ejercito && Object.keys(ef.ejercito).length) {
+    e.ejercito = { ...e.ejercito };
+    for (const [k, v] of Object.entries(ef.ejercito)) e.ejercito[k] = Math.max(0, (e.ejercito[k] || 0) + v);
+  }
+  if (ef.pob) {                                        // el saldo se reparte por tamaño
+    const total = poblacionTotal(e.provincias) || 1;
+    e.provincias = e.provincias.map((p) => ({ ...p,
+      poblacion: Math.max(20, Math.round(p.poblacion + ef.pob * (p.poblacion / total))) }));
+    e.poblacion = Math.round(poblacionTotal(e.provincias));
+  }
+  if (ef.prov && ef.prov.length) {
+    e.provincias = e.provincias.map((p) => {
+      const c = ef.prov.find((x) => x.id === p.id);
+      return c ? { ...p, ...(c.riego ? { rio: true } : {}), ...(c.fortificada ? { fortificada: true } : {}) } : p;
+    });
+  }
+  if (ef.guerra && !e.guerra) {
+    const front = elegirFrente(e.provincias);
+    e.guerra = { vecino: ef.guerra.vecino, provincia: front && front.id, desde: e.anio,
+                 frente: 0, agotaProp: 0, agotaEnem: 0 };
+  }
+  if (ef.paz) e.guerra = null;
+  if (e.guerra && ef.frente) e.guerra = { ...e.guerra, frente: acotar((e.guerra.frente || 0) + ef.frente, -100, 100) };
+  if (e.guerra && ef.aguante) e.guerra = { ...e.guerra, agotaProp: Math.max(0, (e.guerra.agotaProp || 0) - ef.aguante) };
+  if (ef.bajas) e.bajasRecientes = (e.bajasRecientes || 0) + ef.bajas;
+  if (ef.tributo) e.tributos = [...(e.tributos || []).filter((t) => t.hacia !== ef.tributo.hacia), ef.tributo];
+  if (ef.factoria && !(e.factorias || []).includes(ef.factoria))
+    e.factorias = [...(e.factorias || []), ef.factoria];
+  if (ef.destituir)
+    e.gobierno = { ...e.gobierno, miembros: (e.gobierno.miembros || []).filter((m) => m.cargo !== ef.destituir) };
+  if (ef.sede) {
+    const meta = INSTITUCIONES.find((i) => i.id === ef.sede.tipo);
+    const num = (e.edu.sedes || []).filter((x) => x.tipo === ef.sede.tipo).length + 1;
+    e.edu = { ...e.edu,
+      instituciones: { ...e.edu.instituciones, [ef.sede.tipo]: ((e.edu.instituciones || {})[ef.sede.tipo] || 0) + 1 },
+      sedes: [...(e.edu.sedes || []), { id: "sd" + Date.now().toString(36) + num, tipo: ef.sede.tipo, num,
+        nombre: `${meta ? meta.nombre : "Sede"} n.º ${num}`, provincia: ef.sede.provincia,
+        dom: null, director: null, inv: null }] };
+  }
+  if (ef.sabio) {
+    const sb = sabioLocal(rnd, (e.edu.sabios || []).map((x) => x.nombre));
+    e.edu = { ...e.edu, sabios: [...(e.edu.sabios || []), sb] };
+  }
+  if (ef.general) {
+    const g = generalLocal(rnd, e.anio, (e.generales || []).map((x) => x.nombre));
+    e.generales = [...(e.generales || []), g];
+  }
+  return e;
+}
+
+// ═══ CONTAR LO QUE PASÓ ═══════════════════════════════════════
+// El narrador no inventa: solo puede contar hechos que la simulación produjo.
+// Es menos sorprendente que un modelo de lenguaje y a cambio nunca narra una
+// hambruna que no ocurrió.
+const FRASES = {
+  recauda: ["Los recaudadores salen a los caminos y vuelven con {oro}.",
+            "Se pregona la nueva contribución; las arcas suman {oro}.",
+            "El tesorero cuenta {oro} de la derrama, y aún faltan concejos por pagar."],
+  motin_fiscal: ["En {donde} la gente apedrea a los recaudadores y quema el padrón.",
+                 "Los cobradores no llegan a {donde}: los echan a palos antes de entrar.",
+                 "{donde} se amotina contra la nueva carga y la corona debe ceder."],
+  alivio_fiscal: ["Se perdona parte de la carga y en los concejos se bendice al soberano.",
+                  "Rebajadas las tasas, los mercados vuelven a llenarse.",
+                  "El alivio fiscal corre de boca en boca antes que el pregón."],
+  confisca: ["Se incautan los bienes de {faccion}: {oro} entran en el tesoro.",
+             "Los alguaciles sellan las arcas de {faccion} y se llevan {oro}.",
+             "{faccion} ve sus propiedades embargadas por orden de la corona."],
+  capital_huye: ["{faccion} saca lo que puede del reino antes de que se lo quiten.",
+                 "El dinero de {faccion} desaparece: nadie confía ya en la palabra de la corona."],
+  vende_cargos: ["Se subastan oficios y regidurías: {oro}, y una administración algo peor.",
+                 "Los títulos se venden a quien los pague; el tesoro suma {oro}."],
+  presta: ["Los banqueros adelantan {oro} contra las rentas del año que viene.",
+           "Se firma el empréstito: {oro} ahora, y una hipoteca sobre el futuro."],
+  sin_credito: ["Ningún banquero se sienta a la mesa: la corona ya faltó a su palabra.",
+                "Las casas de cambio cierran la puerta al emisario real."],
+  amortiza: ["Se saldan {oro} de la deuda y los acreedores respiran.",
+             "La corona paga {oro} y recupera algo de crédito."],
+  nada_que_pagar: ["No hay deuda que amortizar, ni oro con que hacerlo."],
+  devalua: ["Se rebaja la ley de la moneda: {oro} para el tesoro y desconfianza para todos.",
+            "La ceca mezcla más cobre del debido. Nadie tarda en notarlo."],
+  monopolio: ["Se estanca el ramo y la corona cobra {oro} por las licencias.",
+              "El monopolio se pregona; los gremios lo maldicen y lo pagan."],
+  aranceles: ["Se cierran las aduanas a las mercancías de {vecino}.",
+              "Los géneros de {vecino} pagan ahora el doble en las puertas."],
+  catastro: ["Escribanos y medidores recorren el reino: por primera vez se sabe qué hay.",
+             "El catastro descubre tierras que nunca habían pagado nada."],
+  declara_guerra: ["Se declara la guerra a {vecino}. Los pendones salen de la capital.",
+                   "El heraldo lee la declaración ante la corte de {vecino}.",
+                   "Rota la paz con {vecino}, las levas empiezan esa misma semana."],
+  ya_en_guerra: ["Ya se combate contra {vecinoNom}: no hay manos para otra guerra."],
+  sin_vecino: ["No hay a quién dirigir la orden: la corte no encuentra destinatario."],
+  no_hay_guerra: ["No hay guerra que librar; la orden se queda sin objeto."],
+  firma_paz: ["Se firma la paz con {vecinoNom}. Las campanas suenan todo el día.",
+              "Los plenipotenciarios sellan la paz con {vecinoNom}."],
+  paz_rechazada: ["{vecinoNom} rechaza la propuesta: cree que puede sacar más.",
+                  "Los emisarios vuelven con las manos vacías de la corte de {vecinoNom}."],
+  recluta: ["Se levantan {n} cuerpos de {rama}. Los tambores no paran en las plazas.",
+            "Alistan {n} de {rama}; las madres miran pasar la columna.",
+            "{n} nuevas unidades de {rama} juran bandera."],
+  rama_imposible: ["Nadie en el reino sabe todavía formar {rama}."],
+  sin_medios: ["No hay oro ni brazos para levantar más tropa."],
+  licencia: ["Se licencian {n} de {rama}; vuelven a sus pueblos sin paga atrasada.",
+             "{n} unidades de {rama} se disuelven. El tesoro respira, los oficiales no."],
+  nada_que_licenciar: ["No hay tropas de esa clase que licenciar."],
+  fortifica: ["Se levantan obras en {provincia}: fosos, cortinas y un baluarte nuevo.",
+              "Los canteros trabajan en {provincia} de sol a sol."],
+  asedio_fracasa: ["El sitio se rompe con pérdidas y los sitiadores se retiran de noche.",
+                   "La plaza aguanta. Se levanta el cerco antes de que llegue el invierno."],
+  plaza_tomada: ["La plaza cae tras semanas de cerco.",
+                 "Se abre brecha y la guarnición capitula."],
+  victoria_campo: ["El choque se resuelve a favor: el enemigo deja el campo y la artillería.",
+                   "La línea enemiga cede al segundo empuje. Es una victoria clara."],
+  derrota_campo: ["La ofensiva se deshace contra una línea mejor plantada. Se pierden muchos.",
+                  "El ataque fracasa y la retirada se hace de noche, en desorden."],
+  repliegue: ["Se acortan las líneas y se atrinchera lo que se puede conservar.",
+              "El repliegue salva tropa y entrega terreno."],
+  saqueo: ["Las columnas vuelven cargadas: {oro} y una comarca arrasada detrás.",
+           "Se saquea sin miramientos. {oro} para el tesoro, y una fama peor."],
+  nombra_general: ["Un nuevo general recibe el bastón de mando.",
+                   "Se confía el ejército a otro nombre. Los veteranos lo aprueban."],
+  cupo_generales: ["No hay estado mayor que sostenga otro general."],
+  tratado: ["Se firma tratado de comercio con {vecino}: los géneros cruzan sin trabas.",
+            "Los mercaderes celebran el acuerdo con {vecino}."],
+  tratado_rechazado: ["{vecino} deja el tratado sobre la mesa sin firmarlo."],
+  en_guerra_con: ["No se comercia con {vecino}: se combate contra ellos."],
+  alianza: ["Se sella alianza con {vecino}: sus banderas y las nuestras, juntas.",
+            "{vecino} acepta la alianza. Es un cambio de tablero."],
+  alianza_rechazada: ["{vecino} agradece la propuesta y no se compromete a nada."],
+  boda: ["Se concierta el enlace con la casa de {vecino}. Habrá fiestas.",
+         "La boda con {vecino} se anuncia antes de estar cerrada del todo."],
+  desaire: ["La casa de {vecino} declina el enlace. El desaire se comenta en toda Europa."],
+  tributo_logrado: ["{vecino} acepta pagar: {oro} ahora y una renta cada año.",
+                    "Las parias de {vecino} empiezan a llegar."],
+  tributo_negado: ["{vecino} responde que no paga tributo a nadie."],
+  paga_tributo: ["Se compra la calma de {vecino} con oro. En la corte nadie lo llama tributo."],
+  embajada: ["Parte una embajada a {vecino} con regalos y buenas palabras.",
+             "Los presentes a {vecino} valen más que muchas promesas."],
+  espia_exito: ["La red en {vecino} empieza a rendir: se sabe qué preparan.",
+                "Un secretario de {vecino} vende lo que oye."],
+  espia_descubierto: ["Descubren a los agentes en {vecino}. El escándalo es mayúsculo.",
+                      "Los espías caen y {vecino} exige explicaciones."],
+  rompe: ["Se rompen las relaciones con {vecino} y se llama al embajador."],
+  reprime: ["Se escarmienta a {faccion} sin contemplaciones.",
+            "La tropa entra donde {faccion} se reunía. Hay presos y algo peor."],
+  represion_fracasa: ["La represión enciende lo que quería apagar: {faccion} se alza.",
+                      "El escarmiento sale al revés y el desorden se extiende."],
+  amnistia: ["Se abre la cárcel a los presos de {faccion}. Hay abrazos en las plazas.",
+             "El perdón alcanza a {faccion}; algunos lo llaman debilidad."],
+  reparte_grano: ["Se abren los pósitos en {provincia}: pan para quien no lo tiene.",
+                  "El grano de la corona llega a {provincia} antes que el hambre."],
+  fiestas: ["Hay fiestas, toros y vino a costa del tesoro. El pueblo lo agradece.",
+            "Se celebran juegos durante días. Nadie habla de otra cosa."],
+  reforma: ["Se promulga la reforma: un solo fuero donde había veinte.",
+            "Las nuevas ordenanzas recortan privilegios y ordenan lo que estaba suelto."],
+  privilegio: ["Se otorgan mercedes a {faccion}, que lo celebra ruidosamente.",
+               "{faccion} recibe franquicias que los demás miran con envidia."],
+  destituye: ["{ministro} es apartado del cargo sin muchas explicaciones.",
+              "Cae {ministro}. La corte toma nota de quién manda."],
+  sin_ministro: ["No hay gabinete que remover."],
+  coloniza: ["Se reparten tierras en {provincia} a quien quiera roturarlas.",
+             "Llegan pobladores a {provincia}; se levantan las primeras casas."],
+  funda_sede: ["Se funda {meta} en {provincia}. Los primeros maestros llegan en otoño.",
+               "{meta} abre sus puertas en {provincia}."],
+  sin_oro_sede: ["No hay caudal para fundar {meta}."],
+  llega_sabio: ["Un sabio de renombre acepta la pensión y se instala en la corte.",
+                "Llega a la corte un erudito que otros reyes querían para sí."],
+  sin_oro_sabio: ["Ningún sabio se mueve por lo que la corona puede pagar."],
+  catedra: ["Se dota una cátedra y se pagan las primeras becas.",
+            "La nueva cátedra atrae estudiantes de fuera del reino."],
+  enfoca_saber: ["Se orienta el gasto del saber hacia lo que la corona necesita.",
+                 "Los sabios reciben instrucciones —y fondos— más concretos."],
+  censura: ["Se prohíben libros y se queman algunos. El clero aplaude.",
+            "El índice de obras vedadas crece; los impresores emigran."],
+  expedicion_vuelve: ["La expedición vuelve con cartas, mercancías y noticias del mundo.",
+                      "Los navíos regresan: menos de los que salieron, pero cargados."],
+  expedicion_perdida: ["De la expedición no vuelve nadie. Se pierde el dinero y la ilusión."],
+  caminos: ["Se empiedran caminos y se levantan puentes hacia {provincia}.",
+            "Las calzadas nuevas acortan a la mitad el viaje a {provincia}."],
+  puerto: ["Se draga y amplía el puerto de {provincia}.",
+           "Los astilleros de {provincia} no dan abasto."],
+  regadio: ["Se abren acequias en {provincia}: la vega da dos cosechas.",
+            "El agua llega por canal a {provincia} y la tierra cambia de color."],
+  templo: ["Se consagra un templo nuevo en {provincia}. Se ve desde una legua.",
+           "Las obras del templo de {provincia} emplean a media comarca."],
+  mercado: ["Se franquea un mercado en {provincia} y acuden tratantes de todas partes."],
+  hospital: ["Se abre un hospital en {provincia}: los pobres ya tienen dónde morir con techo."],
+  factoria: ["Se establece factoría en {vecino}: almacenes, agentes y crédito propio."],
+  ya_hay_factoria: ["Ya hay factoría nuestra en {vecino}."],
+  flota: ["Se arma una flota mercante. Los seguros bajan y los fletes también."],
+  boato: ["La corte despliega un boato que deja en silencio a los embajadores.",
+          "Se encargan retratos, arcos y un desfile que el reino recordará."],
+  mecenazgo: ["Pintores y poetas encuentran mesa en palacio."],
+  peregrina: ["El soberano peregrina en persona. El clero no lo olvidará.",
+              "Se convoca concilio y se traen reliquias de lejos."],
+  sin_oro: ["No hay caudal para tanto: la orden queda a medias."],
+  gesto: ["La orden se cumple como se puede, y {faccion} toma nota.",
+          "La corte ejecuta el mandato sin entenderlo del todo.",
+          "Se hace lo mandado. Los efectos, si los hay, tardarán en verse."],
+};
+
+function rellenar(txt, h, s) {
+  return txt
+    .replace("{oro}", () => fmtDinero(Math.abs(h.oro || 0), s.anio))
+    .replace("{faccion}", () => (h.faccion ? h.faccion.n.toLowerCase() : "los estamentos"))
+    .replace("{provincia}", () => (h.provincia ? h.provincia.nombre : "la capital"))
+    .replace("{vecinoNom}", () => h.vecino || "el enemigo")
+    .replace("{vecino}", () => (h.vecino && h.vecino.nombre ? h.vecino.nombre : h.vecino || "el vecino"))
+    .replace("{rama}", () => (h.rama ? h.rama.n.toLowerCase() : "tropa"))
+    .replace("{meta}", () => (h.meta ? h.meta.nombre.toLowerCase() : "la casa de estudios"))
+    .replace("{ministro}", () => (h.ministro ? h.ministro.nombre : "el ministro"))
+    .replace("{donde}", () => (h.donde ? h.donde.nombre : "las provincias"))
+    .replace("{n}", () => h.n);
+}
+function narrar(hechos, s, rnd) {
+  const fs = [];
+  for (const h of hechos) {
+    const pool = FRASES[h.t];
+    if (!pool) continue;
+    fs.push(rellenar(alAzar(rnd, pool), h, s));
+  }
+  return fs.join(" ");
+}
+
+// ═══ EL MUNDO POR SU CUENTA ══════════════════════════════════
+// Un suceso ajeno a la voluntad del jugador, elegido según lo que el estado
+// del reino hace verosímil. No es decoración: los que tienen consecuencias
+// las aplican.
+const SUCESOS = [
+  { id: "cometa", peso: () => 1, txt: "Un cometa cruza el cielo durante nueve noches y nadie se pone de acuerdo en qué anuncia." },
+  { id: "peste", peso: (s, c) => (c.pobTecho > 0.85 ? 4 : 1), txt: "Llega la peste por los puertos y se lleva a quien alcanza.", d: { estabilidad: -6 }, pobPct: -0.04 },
+  { id: "buena_cosecha", peso: () => 2, txt: "El año viene generoso: los graneros no dan abasto.", d: { economia: 3 } },
+  { id: "incendio", peso: () => 1.5, txt: "Un incendio devora un barrio entero de la capital.", d: { economia: -3, estabilidad: -2 } },
+  { id: "hereje", peso: (s) => (s.stats.tecnologia > 45 ? 3 : 1), txt: "Un predicador reúne multitudes con doctrinas que el clero condena.", fac: { clero: -6, pueblo: 4 } },
+  { id: "descubrimiento", peso: (s) => (s.stats.tecnologia > 40 ? 3 : 0.5), txt: "Un taller de la capital da con un procedimiento que nadie había ensayado.", d: { tecnologia: 3 } },
+  { id: "muerte_noble", peso: () => 1.5, txt: "Muere sin herederos un gran señor y su casa se disputa la herencia.", fac: { nobleza: -5 } },
+  { id: "motin_pan", peso: (s, c) => (c.pobTecho > 0.95 ? 5 : 0.3), txt: "El precio del pan desata un motín en el mercado.", d: { estabilidad: -5 }, fac: { pueblo: -8 } },
+  { id: "feria", peso: (s) => (s.stats.economia > 55 ? 3 : 1), txt: "La feria anual atrae a tratantes de medio continente.", d: { economia: 2 }, fac: { mercaderes: 5 } },
+  { id: "milagro", peso: () => 1, txt: "Se habla de un milagro en una aldea y empiezan a llegar romeros.", fac: { clero: 6, pueblo: 4 } },
+  { id: "tormenta", peso: () => 1.5, txt: "Un temporal echa a pique media flota pesquera.", d: { economia: -2 } },
+  { id: "embajada_lejana", peso: (s) => (s.stats.prestigio > 55 ? 3 : 0.5), txt: "Llega una embajada de un reino lejano solo para ver la corte.", d: { prestigio: 3 } },
+];
+function sucesoDelMundo(s, c, rnd) {
+  if (rnd() > 0.45) return null;
+  const pesos = SUCESOS.map((x) => Math.max(0, x.peso(s, c)));
+  const total = pesos.reduce((a, b) => a + b, 0);
+  let t = rnd() * total;
+  for (let i = 0; i < SUCESOS.length; i++) { t -= pesos[i]; if (t <= 0) return SUCESOS[i]; }
+  return SUCESOS[0];
+}
+
+// ═══ EL TURNO COMPLETO ═══════════════════════════════════════
+// Devuelve exactamente la misma forma que devolvía la API, más un campo
+// `efectos` con lo que el motor local sabe hacer y la API no podía: mover
+// oro, tropas, deuda y facciones. Así encaja sin tocar el resto del juego.
+function motorLocal(s, accion, dias, semilla) {
+  const esc = dias / 365;
+  const rnd = dado(`${semilla || s.nacion?.nombre || "pm"}|${s.anio}|${s.dia}|${s.turno}|${accion || ""}`);
+  const orden = accion ? interpretarOrden(accion, s) : null;
+
+  const provs = s.provincias || [];
+  const pob = poblacionTotal(provs) || s.poblacion || 1;
+  const techo = demografiaDe(s.ciencia).techo || 1;
+  const ingreso = Math.max(8, ingresoAnualDe(s.stats, s.gobierno, s.ciencia, pob, s.vecinos, s.factorias, s.ejercito));
+  const vecs = s.vecinos || [];
+  const sumaFert = provs.reduce((acc, x) => acc + fertProv(x), 0) || 1;
+  const techoTotal = demografiaDe(s.ciencia).techo;
+  const ocupacion = provs
+    .map((p) => ({ p, o: p.poblacion / Math.max(1, techoTotal * (fertProv(p) / sumaFert)) }))
+    .sort((a, b) => b.o - a.o);
+
+  const ctx = {
+    s, o: orden || { objetivos: {}, intensidad: 1 }, rnd, esc,
+    inten: (orden ? orden.intensidad : 1) * Math.max(0.4, Math.min(1, esc * 2)),
+    ingreso, oroDisp: Math.max(0, s.edu?.oro || 0), pob, pobTecho: pob / techo,
+    ventaja: s.guerra ? acotar(((s.guerra.frente || 0) + 30) / 90, 0, 1) : 0.4,
+    provCapital: provs.find((p) => p.capital) || provs[0],
+    // el techo se calcula una vez por provincia y no dentro del comparador:
+    // techoProvincia recorre todas las demás, y ordenar así costaba más que
+    // el resto del turno junto
+    provPeor: ocupacion[0] && ocupacion[0].p,
+    provVacia: ocupacion[ocupacion.length - 1] && ocupacion[ocupacion.length - 1].p,
+    provFrontera: provs.find((p) => p.ocupada) || provs.find((p) => !p.capital) || provs[0],
+    vecinoAfin: vecs.slice().sort((a, b) => (b.relacion || 0) - (a.relacion || 0))[0],
+    vecinoHostil: vecs.slice().sort((a, b) => (a.relacion || 0) - (b.relacion || 0))[0],
+    vecinoFuerte: vecs.slice().sort((a, b) => (b.poder || 0) - (a.poder || 0))[0],
+    vecinoDebil: vecs.slice().sort((a, b) => (a.poder || 0) - (b.poder || 0))[0],
+    faccionHostil: FACCIONES.slice().sort((a, b) => ((s.facciones || {})[a.id] || 50) - ((s.facciones || {})[b.id] || 50))[0],
+    faccionFuerte: FACCIONES.slice().sort((a, b) => poderFaccion(b.id, s) - poderFaccion(a.id, s))[0],
+  };
+
+  const res = orden ? (EFECTOS[orden.maniobra] || EFECTOS.__gesto)(ctx) : vacio();
+  const suceso = sucesoDelMundo(s, ctx, rnd);
+  if (suceso) {
+    for (const [k, v] of Object.entries(suceso.d || {})) sumar(res, "d", k, v);
+    for (const [k, v] of Object.entries(suceso.fac || {})) sumar(res, "fac", k, v);
+    if (suceso.pobPct) res.pob += Math.round(pob * suceso.pobPct * esc);
+  }
+
+  // los cambios se atemperan al lapso: una semana no mueve el reino como un año
+  const cambios = {};
+  for (const k of Object.keys(STAT_META)) {
+    const bruto = (res.d[k] || 0) * Math.max(0.35, Math.min(1, esc * 1.6));
+    cambios[k] = acotar(Math.round(bruto), -15, 15);
+  }
+
+  const narrativa = orden
+    ? (narrar(res.hechos, s, rnd) || "La orden se cumple sin que nadie note gran cosa.")
+    : narrarSinOrden(s, ctx, rnd);
+
+  return {
+    narrativa,
+    eventoMundial: suceso ? suceso.txt : null,
+    cambios,
+    vecinos: aplicarVecinos(vecs, res.vec),
+    proyectos: (s.proyectos || []).filter((p) => p.estado === "activo")
+      .map((p) => ritmoLocal(p, s, ctx, rnd, "proyecto")),
+    investigaciones: ((s.edu || {}).sedes || []).filter((x) => x.inv && x.inv.estado === "activa")
+      .map((x) => ritmoLocal(x.inv, s, ctx, rnd, "investigacion")),
+    ciencia: cienciaLocal(s, rnd),
+    opciones: opcionesLocales(s, ctx, rnd),
+    fin: null,
+    // ——— lo que la API no podía tocar ———
+    efectos: { oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
+               pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra,
+               paz: res.paz, frente: res.frente, bajas: res.bajas, aguante: res.aguante,
+               tributo: res.tributo, factoria: res.factoria, sede: res.sede,
+               sabio: res.sabio, general: res.general, destituir: res.destituir, pi: res.pi },
+    interpretacion: orden,
+  };
+}
+
+function aplicarVecinos(vecs, cambios) {
+  if (!cambios || !cambios.length) return vecs;
+  return vecs.map((v) => {
+    const c = cambios.find((x) => x.nombre === v.nombre);
+    if (!c) return v;
+    return { ...v,
+      relacion: acotar(Math.round((v.relacion || 0) + (c.relacion || 0)), -100, 100),
+      estado: c.estado || v.estado };
+  });
+}
+
+// Cuando el jugador deja pasar el tiempo, el mundo habla solo.
+const SIN_ORDEN = [
+  "El reino sigue su curso sin que la corona levante la voz.",
+  "Pasan las semanas. La corte intriga, los caminos se llenan y nadie espera órdenes.",
+  "No hay decretos este tiempo: los asuntos se resuelven como pueden, provincia por provincia.",
+  "El soberano deja correr los días. Los consejeros lo interpretan cada uno a su manera.",
+];
+function narrarSinOrden(s, c, rnd) {
+  const base = alAzar(rnd, SIN_ORDEN);
+  if (s.guerra) return base + " En el frente, en cambio, no hay pausa.";
+  if (c.pobTecho > 0.95) return base + " En el campo, el pan escasea y se nota.";
+  const hostil = c.faccionHostil;
+  if (hostil && (s.facciones || {})[hostil.id] < 35)
+    return base + ` ${hostil.n} aprovecha el silencio para hacerse oír.`;
+  return base;
+}
+
+// El ritmo de proyectos e investigaciones sale del estado, no de una opinión.
+function ritmoLocal(p, s, c, rnd, tipo) {
+  let ritmo = "normal";
+  const apuro = s.guerra ? 0.3 : 0;
+  const pobre = (s.edu?.oro || 0) < 20 ? 0.25 : 0;
+  const rico = (s.edu?.oro || 0) > 250 ? 0.2 : 0;
+  const sabios = (s.edu?.sabios || []).length;
+  const r = rnd();
+  if (r < 0.05 + apuro + pobre) ritmo = "retraso";
+  else if (r > 0.82 - rico - Math.min(0.15, sabios * 0.03)) ritmo = "impulso";
+  if (s.guerra && rnd() < 0.012) ritmo = "fracaso";
+  const av = {
+    normal: ["Las obras siguen su curso, ni antes ni después de lo previsto.",
+             "El trabajo avanza sin sobresaltos dignos de mención.",
+             "Se cumple lo planeado para este tramo."],
+    impulso: ["El trabajo se acelera: llegan fondos y manos de sobra.",
+              "Un hallazgo inesperado adelanta meses de trabajo.",
+              "Todo sale mejor de lo previsto y el plazo se acorta."],
+    retraso: ["Faltan fondos y brazos: el trabajo se arrastra.",
+              "Las obras se detienen semanas enteras por falta de materiales.",
+              "La guerra se lleva los hombres que hacían falta aquí."],
+    fracaso: ["La empresa se viene abajo y no hay modo de rehacerla.",
+              "Todo se pierde: lo hecho, lo invertido y las ganas."],
+  }[ritmo];
+  return { id: p.id, avance: alAzar(rnd, av), ritmo };
+}
+
+// La frontera del saber solo cambia cuando se aprende algo o sube la técnica.
+// Recalcular los 1.601 nodos en cada turno costaba el 84% del turno entero.
+let _frontCache = { clave: null, front: null };
+function fronteraDe(s) {
+  const sab = new Set(s.ciencia?.sabidos || []);
+  const clave = sab.size + "|" + Math.round(s.stats.tecnologia) + "|" + (s.ciencia?.bloqueados || []).length;
+  if (_frontCache.clave === clave) return _frontCache.front;
+  const front = MED.filter((n) => !sab.has(n.id) && anillo(n, sab, s.stats.tecnologia) === FRONTERA);
+  _frontCache = { clave, front };
+  return front;
+}
+function cienciaLocal(s, rnd) {
+  const front = fronteraDe(s);
+  const nombres = front.slice(0, 3).map((n) => n.nombre);
+  if (!nombres.length) return "Los sabios repasan lo conocido sin abrir camino nuevo.";
+  const sabios = (s.edu?.sabios || []).length;
+  const quien = sabios ? alAzar(rnd, s.edu.sabios).nombre : "los maestros de la corte";
+  return `${quien} y los suyos trabajan sobre ${nombres.slice(0, 2).join(" y ")}.` +
+    (nombres[2] ? ` Alguno insiste además con ${nombres[2]}, sin que nadie lo tome muy en serio.` : "");
+}
+
+// Tres sugerencias sacadas de lo que le está pasando al reino ahora mismo.
+function opcionesLocales(s, c, rnd) {
+  const op = [];
+  if (s.guerra) op.push("Lanzar una ofensiva en el frente", "Pedir la paz", "Replegarse y atrincherar");
+  if (c.pobTecho > 0.92) op.push("Repartir grano de los pósitos", "Poblar tierras vacías");
+  if ((s.edu?.oro || 0) < 25) op.push("Subir los tributos", "Vender cargos y oficios");
+  if ((s.deuda || 0) > c.ingreso * 2) op.push("Amortizar la deuda", "Envilecer la moneda");
+  const hostil = c.faccionHostil;
+  if (hostil && (s.facciones || {})[hostil.id] < 40)
+    op.push(`Otorgar privilegios a ${hostil.n.toLowerCase()}`, `Reprimir a ${hostil.n.toLowerCase()}`);
+  const v = c.vecinoAfin;
+  if (v && v.estado !== "guerra") op.push(`Firmar tratado con ${v.nombre}`);
+  op.push("Fundar una casa de estudios", "Abrir caminos y puentes", "Llamar a un sabio a la corte",
+          "Levantar tropas", "Dar fiestas al pueblo", "Abrir canales de riego");
+  const vistos = new Set(); const out = [];
+  while (out.length < 3 && op.length) {
+    const x = op.splice(Math.floor(rnd() * Math.min(4, op.length)), 1)[0];
+    if (!vistos.has(x)) { vistos.add(x); out.push(x); }
+  }
+  return out;
+}
+
 const GlobalStyle = () => (
   <style>{`
     @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -3419,6 +4926,10 @@ export default function PaxMundi() {
   const [facAbierta, setFacAbierta] = useState(null);
   const [provSel, setProvSel] = useState(null);
   const [mapaAbierto, setMapaAbierto] = useState(false);
+  // El juego corre entero con el motor local. La IA es opcional: narra con más
+  // vuelo, pero cuesta, tarda y necesita conexión.
+  const [usarIA, setUsarIA] = useState(false);
+  const [ultimaLectura, setUltimaLectura] = useState(null);
   const [pensandoGen, setPensandoGen] = useState(false);
   const [errorGen, setErrorGen] = useState(null);
   const [ayudaPart, setAyudaPart] = useState(false);
@@ -3440,7 +4951,10 @@ export default function PaxMundi() {
     setFase("cargando");
     setError(null);
     try {
-      const init = await callEngine(initPrompt(era, pais.trim(), formaGob));
+      // Sin IA la nación se funda igual: listas por época y una semilla.
+      const init = usarIA
+        ? await callEngine(initPrompt(era, pais.trim(), formaGob))
+        : fundarLocal(era, pais.trim(), formaGob);
       const miembrosRaw = Array.isArray(init.gobierno) && init.gobierno.length
         ? init.gobierno
         : [
@@ -3969,7 +5483,13 @@ export default function PaxMundi() {
     if (orden) setState((s) => ({ ...s, cronica: [...s.cronica,
       { anio: s.anio, dia: s.dia, tipo: "orden", lapso: etqLapso, texto: orden }] }));
     try {
-      const r = await callEngine(turnPrompt(state, orden, lapso));
+      // El motor local resuelve el turno sin salir a ninguna red. La IA queda
+      // como adorno opcional: narra mejor, pero ya no hace falta para jugar.
+      const semillaTurno = `${state.nacion?.nombre || "pm"}|${state.turno}`;
+      const r = usarIA
+        ? await callEngine(turnPrompt(state, orden, lapso))
+        : motorLocal(state, orden, lapso, semillaTurno);
+      const rndEfectos = dado(semillaTurno + "|ef");
       const nuevosStats = {};
       const nuevosDeltas = {};
       for (const k of Object.keys(STAT_META)) {
@@ -4623,7 +6143,7 @@ export default function PaxMundi() {
       let finLocal = r.fin || null;
       if (!finLocal && nuevosStats.estabilidad <= 0)
         finLocal = { tipo: "derrota", razon: "El colapso interno disolvió tu gobierno." };
-      setState((s) => ({
+      setState((s) => aplicarEfectos({
         ...s,
         anio: anioNuevo, dia: diaNuevo,
         turno: s.turno + 1,
@@ -4652,8 +6172,13 @@ export default function PaxMundi() {
         edu: { ...s.edu, oro: Math.max(0, s.edu.oro + gananciaOro + oroReembolso + oroTributo - (guerraNueva ? poderMilitar(nuevosStats, cienciaPrevia, pobNueva, P, state.ejercito).total * 0.55 * esc : 0)), sedes: sedesFin, sabios: sabiosVivos },
         proyectos: proyectosNuevos,
         cronica: [...s.cronica, ...entradas, ...entradasProy, ...entradasInv, ...entradasCiencia, ...entradasEco, ...entradasPob, ...entradasFac, ...entradasVec, ...entradasVida, ...entradasGuerra],
-      }));
+      }, r.efectos, rndEfectos));
       setDeltas(nuevosDeltas);
+      setUltimaLectura(r.interpretacion
+        ? (r.interpretacion.maniobra
+            ? (MANIOBRA_IDX[r.interpretacion.maniobra] || {}).n
+            : "algo que no supe clasificar")
+        : null);
       setAccionLibre("");
       setPendiente(null);
       if (finLocal) {
@@ -7290,6 +8815,30 @@ export default function PaxMundi() {
                   EJECUTAR<br /><span style={{ fontSize: 9, fontWeight: 400, letterSpacing: 0 }}>
                     {PASOS.find((p) => p.id === paso)?.corto}</span>
                 </button>
+              </div>
+
+              {/* Qué resuelve el turno. El motor local no sale a ninguna red:
+                  entiende la orden, la mide contra el reino y la resuelve. La
+                  IA narra con más vuelo, pero cuesta, tarda y hay que estar
+                  conectado. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8,
+                fontFamily: mono, fontSize: 10.5, color: C.muted }}>
+                <span style={{ letterSpacing: 1 }}>MOTOR</span>
+                {[[false, "⚙ local", "resuelve acá mismo, sin conexión ni coste"],
+                  [true, "✦ con IA", "narra mejor; necesita conexión y clave"]].map(([v, t, ayuda]) => (
+                  <button key={t} onClick={() => setUsarIA(v)} title={ayuda} disabled={pensando}
+                    style={{ padding: "3px 9px", borderRadius: 5, cursor: pensando ? "wait" : "pointer",
+                      fontFamily: mono, fontSize: 10.5,
+                      background: usarIA === v ? `${C.gold}22` : "transparent",
+                      border: `1px solid ${usarIA === v ? C.gold : C.line}`,
+                      color: usarIA === v ? C.gold : C.muted }}>{t}</button>
+                ))}
+                {ultimaLectura && !usarIA && (
+                  <span style={{ marginLeft: "auto", fontStyle: "italic", opacity: 0.85 }}
+                    title="cómo interpretó el motor tu última orden">
+                    leyó: {ultimaLectura}
+                  </span>
+                )}
               </div>
 
               {/* esperar sin órdenes, con el mismo lapso */}
