@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 
 // ——— PAX MUNDI v6 — Proyectos Nacionales con bitácora IA ———
 
@@ -504,353 +504,904 @@ function centrosPaises() {
 }
 
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
-// Se arrastra con un dedo, se acerca con dos o con la rueda.
-function MapaMundi({ centro, marcas, vecinos, alto }) {
-  const [vb, setVb] = useState(() => ({ x: centro.x - 42, y: centro.y - 26, w: 84, h: 52 }));
-  const arrastre = useRef(null);
-  const punteros = useRef(new Map());
-  const svgRef = useRef(null);
+// Se arrastra con un dedo, se acerca con dos o con la rueda, y también
+// obedece al teclado. Cada capa se recuerda por separado: al arrastrar solo
+// cambia el viewBox, así que el navegador no vuelve a construir las 4.594
+// provincias del mundo en cada cuadro.
 
+const GRADO_KM = 111.32;
+const enRad = (g) => (g * Math.PI) / 180;
+const acotar = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Grados a lectura de carta: 190.4 · 44.8 → «45°12′N 10°24′E»
+function fmtCoord(x, y) {
+  const lat = acotar(90 - y, -90, 90);
+  const lon = ((((x - 180) % 360) + 540) % 360) - 180;
+  const g = (v, pos, neg) => {
+    const a = Math.abs(v);
+    let d = Math.floor(a), m = Math.round((a - d) * 60);
+    if (m === 60) { d += 1; m = 0; }
+    return `${d}°${String(m).padStart(2, "0")}′${v >= 0 ? pos : neg}`;
+  };
+  return `${g(lat, "N", "S")} ${g(lon, "E", "O")}`;
+}
+
+// Para la retícula alcanza el grado entero: «45°N», «10°O».
+const fmtGrado = (v, pos, neg) => `${Math.abs(Math.round(v))}°${Math.round(v) === 0 ? "" : v > 0 ? pos : neg}`;
+
+// Recuadro que ocupa un trazo. Se lee del propio path, así el encuadre no
+// depende de que quien llame se acuerde de mandar los límites.
+const _cajaTrazo = new Map();
+function cajaTrazo(d) {
+  if (!d) return null;
+  if (_cajaTrazo.has(d)) return _cajaTrazo.get(d);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const re = /(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g;
+  let m;
+  while ((m = re.exec(d))) {
+    const px = +m[1], py = +m[2];
+    if (px < x0) x0 = px;
+    if (px > x1) x1 = px;
+    if (py < y0) y0 = py;
+    if (py > y1) y1 = py;
+  }
+  const r = x0 === Infinity ? null : [x0, y0, x1, y1];
+  if (_cajaTrazo.size > 600) _cajaTrazo.clear();
+  _cajaTrazo.set(d, r);
+  return r;
+}
+// Encuadre que abarca todo el reino, con aire alrededor.
+function encuadrarReino(marcas, aspecto, centro) {
+  const a = aspecto || 1.62;
+  const ms = (marcas || []).filter((m) => m && m.x != null);
+  if (!ms.length) return { x: centro.x - 20, y: centro.y - 20 / a, w: 40, h: 40 / a };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const m of ms) {
+    const c = cajaTrazo(m.poly) || [m.x, m.y, m.x, m.y];
+    if (c[0] < x0) x0 = c[0];
+    if (c[1] < y0) y0 = c[1];
+    if (c[2] > x1) x1 = c[2];
+    if (c[3] > y1) y1 = c[3];
+  }
+  const w = Math.max((x1 - x0) * 1.3, (y1 - y0) * 1.4 * a, 2.5);
+  return { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - w / a / 2, w, h: w / a };
+}
+// Una estrella de cinco puntas para la capital.
+function estrella(cx, cy, r) {
+  let d = "";
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 ? r * 0.42 : r;
+    d += (i ? "L" : "M") + (cx + Math.cos(a) * rr).toFixed(3) + "," + (cy + Math.sin(a) * rr).toFixed(3);
+  }
+  return d + "Z";
+}
+// Los vecinos son inventados; el mar no. A cada uno se le busca el pedazo de
+// tierra real más cercano al sitio que le tocaría en la rueda, y nunca dos
+// caen sobre el mismo. Antes flotaban en mitad del océano.
+let _centroidesTierra = null;
+function centroidesTierra() {
+  if (_centroidesTierra) return _centroidesTierra;
+  _centroidesTierra = [];
+  for (let i = 0; i < PROV_MUNDO.length; i++) {
+    const g = geomProvincia(i);
+    if (!g || !g.d || (g.area || 0) < 0.08) continue;
+    _centroidesTierra.push({ x: g.x, y: g.y, pais: g.pais });
+  }
+  return _centroidesTierra;
+}
+function ubicarVecinos(vecinos, centro, paisPropio) {
+  const vs = vecinos || [];
+  if (!vs.length) return [];
+  const cs = centroidesTierra();
+  const usados = [];
+  return vs.map((v, i) => {
+    const a = (i / vs.length) * Math.PI * 2 + 0.6;
+    const d = 9 + (10 - (v.poder || 5)) * 1.1;
+    const ix = centro.x + Math.cos(a) * d, iy = centro.y + Math.sin(a) * d * 0.72;
+    let mejor = null, md = Infinity;
+    for (const c of cs) {
+      if (c.pais === paisPropio) continue;
+      const dd = Math.hypot(c.x - ix, c.y - iy);
+      if (dd >= md) continue;
+      if (usados.some((u) => Math.hypot(u.x - c.x, u.y - c.y) < 4.5)) continue;
+      md = dd; mejor = c;
+    }
+    const p = mejor || { x: ix, y: iy };
+    usados.push(p);
+    return { ...v, x: p.x, y: p.y };
+  });
+}
+// Reparte rótulos evitando que se pisen: gana el que llega primero, y la
+// lista llega ordenada por importancia.
+function repartirRotulos(items, sepX, sepY, tope) {
+  const puestos = [];
+  for (const it of items) {
+    if (puestos.some((q) => Math.abs(q.x - it.x) < sepX && Math.abs(q.y - it.y) < sepY)) continue;
+    puestos.push(it);
+    if (puestos.length >= tope) break;
+  }
+  return puestos;
+}
+// Mapa de situación: el mundo entero en miniatura. No cambia nunca, así que
+// se construye una sola vez y el recuadro de la vista va encima, en HTML.
+const MINI_MUNDO = (
+  <svg viewBox="0 0 360 180" preserveAspectRatio="none" width="100%" height="100%" style={{ display: "block" }}>
+    <rect width="360" height="180" fill="#0C2537" />
+    <path d={MUNDO_D} fill="#3E5137" stroke="#728F5C" strokeWidth="0.5" />
+  </svg>
+);
+const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true };
+const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu reino"],
+                      ["🌐", "ver el mundo entero"], ["▤", "leyenda y capas"]];
+// Puede haber dos mapas a la vez —el del fondo y el de la pestaña— con zoom
+// distinto. Si compartieran los ids del SVG, el rayado de uno se lo llevaría
+// el otro: cada instancia se numera.
+let _nMapa = 0;
+
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq }) {
+  const [uid] = useState(() => "pm" + ++_nMapa);
+  const cajaRef = useRef(null);
+  const svgRef = useRef(null);
+  const aspRef = useRef(1.62);
+  const medRef = useRef({ w: 0, h: 0, left: 0, top: 0 });
+  const vbRef = useRef({ x: centro.x - 42, y: centro.y - 26, w: 84, h: 84 / 1.62 });
+  const [vb, setVb] = useState(vbRef.current);
+  const [med, setMed] = useState({ w: 0, h: 0 });
+  const [hover, setHover] = useState(null);
+  const [panel, setPanel] = useState(false);
+  const [capas, setCapas] = useState(CAPAS_INI);
+  const punteros = useRef(new Map());
+  const arrastre = useRef(null);
+  const movido = useRef(false);
+  const cuadro = useRef(0);
+  const anim = useRef(0);
+
+  // ——— encuadre: nunca deforma, siempre respeta la forma del contenedor ———
   const limitar = (v) => {
-    const w = Math.max(1.2, Math.min(360, v.w));
-    const h = w * (v.h / v.w || 0.62);
-    return { w, h,
-      x: Math.max(-30, Math.min(360 + 30 - w, v.x)),
-      y: Math.max(-20, Math.min(180 + 20 - h, v.y)) };
+    const w = acotar(v.w, 0.6, 440);
+    const h = w / (aspRef.current || 1.62);
+    return { w, h, x: acotar(v.x, -40, Math.max(-40, 400 - w)), y: acotar(v.y, -35, Math.max(-35, 215 - h)) };
   };
-  const escalaPx = () => {
-    const r = svgRef.current?.getBoundingClientRect();
-    return r && r.width ? vb.w / r.width : 0.2;
+  // El viewBox vive en un ref y se pinta una vez por cuadro: arrastrar deja
+  // de disparar un render por cada evento del puntero.
+  const fijar = (v, ya) => {
+    vbRef.current = v;
+    if (ya) { setVb(v); return; }
+    if (cuadro.current) return;
+    cuadro.current = requestAnimationFrame(() => { cuadro.current = 0; setVb(vbRef.current); });
   };
+  const detener = () => { if (anim.current) { cancelAnimationFrame(anim.current); anim.current = 0; } };
+  // Viaje suave hasta otro encuadre: el zoom se interpola en escala
+  // geométrica, que es como lo lee el ojo.
+  const volarA = (dest, ms) => {
+    detener();
+    const d = limitar(dest), o = { ...vbRef.current }, dur = ms || 560;
+    const reloj = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const t0 = reloj();
+    const paso = () => {
+      const k = Math.min(1, (reloj() - t0) / dur);
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const w = o.w * Math.pow(d.w / o.w, e);
+      const cx = o.x + o.w / 2 + (d.x + d.w / 2 - (o.x + o.w / 2)) * e;
+      const cy = o.y + o.h / 2 + (d.y + d.h / 2 - (o.y + o.h / 2)) * e;
+      fijar(limitar({ x: cx - w / 2, y: cy - w / (aspRef.current || 1.62) / 2, w, h: 0 }), true);
+      anim.current = k < 1 ? requestAnimationFrame(paso) : 0;
+    };
+    anim.current = requestAnimationFrame(paso);
+  };
+
+  // ——— medida real del contenedor ———
+  useEffect(() => {
+    const el = cajaRef.current;
+    if (!el) return;
+    const medir = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) return;
+      medRef.current = { w: r.width, h: r.height, left: r.left, top: r.top };
+      setMed((m) => (Math.abs(m.w - r.width) < 0.5 && Math.abs(m.h - r.height) < 0.5 ? m : { w: r.width, h: r.height }));
+    };
+    medir();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", medir);
+      return () => window.removeEventListener("resize", medir);
+    }
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Al cambiar la forma del contenedor el viewBox se rehace con la misma
+  // relación. Antes el SVG se ajustaba solo y quedaban bandas visibles fuera
+  // del recorte: provincias que aparecían a destiempo o directamente no.
+  useEffect(() => {
+    if (!med.w || !med.h) return;
+    aspRef.current = med.w / med.h;
+    fijar(limitar(vbRef.current), true);
+  }, [med.w, med.h]);
+  useEffect(() => () => { detener(); if (cuadro.current) cancelAnimationFrame(cuadro.current); }, []);
+  // El mapa abre mirando tu reino y a quienes lo rodean, no un pedazo
+  // cualquiera de mundo. Una sola vez, en cuanto se sabe cuánto mide el hueco.
+  const encuadrado = useRef(false);
+  useEffect(() => {
+    if (encuadrado.current || !med.w || !(marcas || []).length) return;
+    encuadrado.current = true;
+    const a = aspRef.current || 1.62;
+    const propio = encuadrarReino(marcas, a, centro);
+    const conVecinos = encuadrarReino([...marcas, ...ubicarVecinos(vecinos, centro, paisPropio)], a, centro);
+    // se abre lo justo para asomar a los vecinos, pero nunca al precio de
+    // dejar el reino hecho una mancha: el doble de su propio encuadre y basta
+    const wi = acotar(conVecinos.w, propio.w, propio.w * 2);
+    fijar(limitar({ x: propio.x + propio.w / 2 - wi / 2, y: propio.y + propio.h / 2 - wi / a / 2, w: wi, h: 0 }), true);
+  }, [med.w, (marcas || []).length]);
+
+  // ——— puntero ———
+  const escalaPx = () => (medRef.current.w ? vbRef.current.w / medRef.current.w : 0.2);
+  const medirCaja = () => {
+    const el = cajaRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      medRef.current = { w: r.width, h: r.height, left: r.left, top: r.top };
+    }
+    return medRef.current;
+  };
+  // Acerca o aleja dejando quieto el punto (sx,sy) de la pantalla: el zoom
+  // va hacia donde estás mirando, no al centro.
+  function zoomEn(f, sx, sy) {
+    detener();
+    const v = vbRef.current, r = medirCaja();
+    const w = v.w * f, h = v.h * f;
+    if (!r.w) { fijar(limitar({ x: v.x + v.w / 2 - w / 2, y: v.y + v.h / 2 - h / 2, w, h })); return; }
+    const ux = v.x + acotar((sx - r.left) / r.w, 0, 1) * v.w;   // el punto del mundo bajo el dedo
+    const uy = v.y + acotar((sy - r.top) / r.h, 0, 1) * v.h;
+    fijar(limitar({ x: ux - (ux - v.x) * f, y: uy - (uy - v.y) * f, w, h }));
+  }
   function onDown(e) {
+    detener();
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    if (punteros.current.size === 1) arrastre.current = { x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y };
+    if (punteros.current.size === 1) {
+      movido.current = false;
+      arrastre.current = { x: e.clientX, y: e.clientY, vx: vbRef.current.x, vy: vbRef.current.y };
+    }
   }
   function onMove(e) {
     if (!punteros.current.has(e.pointerId)) return;
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const ps = [...punteros.current.values()];
-    if (ps.length >= 2) {                                    // pellizco
+    if (ps.length >= 2) {                                       // pellizco
       const d = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y);
       const previo = arrastre.current && arrastre.current.pinch;
-      if (previo) {
-        zoomEn(previo / (d || 1), (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2);
-      }
+      movido.current = true;
+      if (previo) zoomEn(previo / (d || 1), (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2);
       arrastre.current = { ...(arrastre.current || {}), pinch: d };
       return;
     }
-    // capturar el arrastre AHORA: el callback de setVb corre después,
-    // y para entonces el puntero puede haberse levantado
-    const ar = arrastre.current;
-    if (!ar || ar.pinch || ar.vx == null) return;
+    const a = arrastre.current;
+    if (!a || a.pinch || a.vx == null) return;
+    const dx = e.clientX - a.x, dy = e.clientY - a.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) movido.current = true;
     const k = escalaPx();
-    const nx = ar.vx - (e.clientX - ar.x) * k;
-    const ny = ar.vy - (e.clientY - ar.y) * k;
-    setVb((v) => limitar({ ...v, x: nx, y: ny }));
+    fijar(limitar({ ...vbRef.current, x: a.vx - dx * k, y: a.vy - dy * k }));
   }
   function onUp(e) {
     punteros.current.delete(e.pointerId);
     if (punteros.current.size === 0) { arrastre.current = null; return; }
-    // queda un dedo: se reanuda el arrastre desde donde está, sin pellizco
-    const q = [...punteros.current.values()][0];
-    arrastre.current = { x: q.x, y: q.y, vx: vb.x, vy: vb.y, pinch: null };
+    const q = [...punteros.current.values()][0];               // queda un dedo: sigue el arrastre
+    arrastre.current = { x: q.x, y: q.y, vx: vbRef.current.x, vy: vbRef.current.y, pinch: null };
   }
-  // Acerca o aleja manteniendo fijo el punto (px,py) de la pantalla:
-  // así el zoom va hacia donde mirás, no al centro.
-  function zoomEn(f, px, py) {
-    const r = svgRef.current?.getBoundingClientRect();
-    setVb((v) => {
-      const w = v.w * f, h = v.h * f;
-      if (!r || !r.width) return limitar({ x: v.x + v.w / 2 - w / 2, y: v.y + v.h / 2 - h / 2, w, h });
-      const ux = v.x + ((px - r.left) / r.width) * v.w;      // punto del mundo bajo el dedo
-      const uy = v.y + ((py - r.top) / r.height) * v.h;
-      return limitar({ x: ux - (ux - v.x) * f, y: uy - (uy - v.y) * f, w, h });
-    });
-  }
-  function onWheel(e) {
-    zoomEn(e.deltaY > 0 ? 1.14 : 0.88, e.clientX, e.clientY);
-  }
-  function onDoble(e) {
-    zoomEn(0.5, e.clientX, e.clientY);
-  }
+  // La rueda tiene que frenar el desplazamiento de la página, y React
+  // registra onWheel como pasivo: hay que atarlo a mano.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const h = (e) => { e.preventDefault(); zoomEn(e.deltaY > 0 ? 1.16 : 0.86, e.clientX, e.clientY); };
+    el.addEventListener("wheel", h, { passive: false });
+    return () => el.removeEventListener("wheel", h);
+  }, []);
+
   const zoom = (f) => {
-    const r = svgRef.current?.getBoundingClientRect();
-    zoomEn(f, r ? r.left + r.width / 2 : 0, r ? r.top + r.height / 2 : 0);
+    const r = medirCaja();
+    zoomEn(f, r.left + r.w / 2, r.top + r.h / 2);
   };
-  const alCentro = () => setVb(limitar({ x: centro.x - 20, y: centro.y - 12, w: 40, h: 25 }));
-  const rMarca = vb.w / 90;
+  const alReino = () => volarA(encuadrarReino(marcas, aspRef.current, centro));
+  const alMundo = () => volarA({ x: 0, y: 90 - 360 / (aspRef.current || 1.62) / 2, w: 360, h: 0 }, 620);
+  function onTecla(e) {
+    const v = vbRef.current, p = v.w * 0.16;
+    const dir = { ArrowLeft: [-p, 0], ArrowRight: [p, 0], ArrowUp: [0, -p], ArrowDown: [0, p] }[e.key];
+    if (dir) { e.preventDefault(); detener(); fijar(limitar({ ...v, x: v.x + dir[0], y: v.y + dir[1] })); return; }
+    if (e.key === "+" || e.key === "=") { e.preventDefault(); zoom(0.72); }
+    else if (e.key === "-" || e.key === "_") { e.preventDefault(); zoom(1.38); }
+    else if (e.key === "0" || e.key === "Home") { e.preventDefault(); alReino(); }
+    else if (e.key === "1") { e.preventDefault(); alMundo(); }
+    else if (e.key === "Escape" && onSeleccion) onSeleccion(null);
+  }
+
+  // Si eligen una provincia desde la lista y no se ve, el mapa va hacia ella.
+  // Al montar no: ahí manda el encuadre inicial, y arrancar pegado a una
+  // provincia porque quedó elegida de antes desorienta.
+  const selPrevia = useRef();
+  useEffect(() => {
+    const primera = selPrevia.current === undefined;
+    selPrevia.current = seleccion;
+    if (primera || !seleccion) return;
+    const m = (marcas || []).find((q) => q.id === seleccion);
+    if (!m) return;
+    const v = vbRef.current;
+    const aVista = m.x > v.x + v.w * 0.14 && m.x < v.x + v.w * 0.86 &&
+                   m.y > v.y + v.h * 0.14 && m.y < v.y + v.h * 0.86;
+    if (aVista && v.w < 42) return;
+    const a = aspRef.current || 1.62;
+    const c = cajaTrazo(m.poly);
+    const w = c ? Math.max((c[2] - c[0]) * 3.4, (c[3] - c[1]) * 3.4 * a, 3) : 11;
+    volarA({ x: m.x - w / 2, y: m.y - w / a / 2, w, h: 0 });
+  }, [seleccion]);
+
+  // ——— capas ———
+  // El ancho solo cambia al acercar o alejar; al arrastrar cambian x e y. Por
+  // eso lo que depende del zoom se recuerda aparte de lo que depende del
+  // recorte, y el recorte se redondea a bloques: arrastrar media pantalla no
+  // rehace nada hasta cruzar el bloque siguiente.
+  const w = vb.w;
+  // Unidades del viewBox que ocupa un píxel de pantalla. Los grosores y los
+  // cuerpos de letra se piden en píxeles y se traducen con esto: antes iban
+  // en unidades de mapa y en un teléfono salía todo tres veces más fino.
+  const px = w / (med.w || 320);
+  const bloque = Math.max(0.25, w / 6);
+  const rx = Math.floor((vb.x - w * 0.08) / bloque) * bloque;
+  const ry = Math.floor((vb.y - vb.h * 0.08) / bloque) * bloque;
+  const rw = Math.ceil((vb.w * 1.16) / bloque) * bloque + bloque;
+  const rh = Math.ceil((vb.h * 1.16) / bloque) * bloque + bloque;
+  const claveVista = `${rx.toFixed(2)}|${ry.toFixed(2)}|${rw.toFixed(2)}|${rh.toFixed(2)}`;
+  const enVista = (x, y) => x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+
+  const defs = useMemo(() => (
+    <defs>
+      <radialGradient id={`${uid}Hondura`} cx="50%" cy="45%" r="72%">
+        <stop offset="0%" stopColor="#17435F" />
+        <stop offset="70%" stopColor="#102F45" />
+        <stop offset="100%" stopColor="#0A2233" />
+      </radialGradient>
+      <linearGradient id={`${uid}Tierra`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#465939" />
+        <stop offset="100%" stopColor="#33422A" />
+      </linearGradient>
+      <radialGradient id={`${uid}Vinieta`} cx="50%" cy="50%" r="75%">
+        <stop offset="60%" stopColor="#000" stopOpacity="0" />
+        <stop offset="100%" stopColor="#000" stopOpacity="0.45" />
+      </radialGradient>
+      {/* rayado para lo que está en manos ajenas */}
+      <pattern id={`${uid}Ocupada`} width={px * 35} height={px * 35} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width={px * 35} height={px * 35} fill="#6E323B" />
+        <rect width={px * 11} height={px * 35} fill="#B75B58" opacity="0.85" />
+      </pattern>
+    </defs>
+  ), [px, uid]);
+
+  // Fondo del mundo: océano, retícula, continentes y relieve.
+  const capaMundo = useMemo(() => (
+    <g style={{ pointerEvents: "none" }}>
+      <rect x="-90" y="-70" width="560" height="330" fill={`url(#${uid}Hondura)`} />
+      {capas.reticula && (
+        <path d={reticula(w > 150 ? 30 : w > 60 ? 10 : w > 20 ? 5 : 1)}
+          fill="none" stroke="#7FB4CE" strokeWidth={px * 0.46} opacity={w > 150 ? 0.16 : 0.11} />
+      )}
+      {/* plataforma continental: tres halos que insinúan la profundidad */}
+      <path d={MUNDO_D} fill="none" stroke="#14415C" strokeWidth={px * 50} strokeLinejoin="round" opacity="0.55" />
+      <path d={MUNDO_D} fill="none" stroke="#1B5375" strokeWidth={px * 23} strokeLinejoin="round" opacity="0.6" />
+      <path d={MUNDO_D} fill="none" stroke="#276B8C" strokeWidth={px * 9.2} strokeLinejoin="round" opacity="0.75" />
+      <path d={MUNDO_D} fill={`url(#${uid}Tierra)`} stroke="#070C06"
+        strokeWidth={px * 2.9} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+      <path d={MUNDO_D} fill="none" stroke="#C3D3A2"
+        strokeWidth={px * 1.6} strokeLinejoin="round" shapeRendering="geometricPrecision" opacity="0.9" />
+      {capas.fisico && (
+        <>
+          <path d={FISICO.montes} fill="#6B6350" opacity="0.30" stroke="none" />
+          <path d={FISICO.montes} fill="none" stroke="#8E8468"
+            strokeWidth={px * 1.35} opacity="0.4" shapeRendering="geometricPrecision" />
+        </>
+      )}
+    </g>
+  ), [w, px, uid, capas.reticula, capas.fisico]);
+
+  // Las 4.594 provincias del mundo, agrupadas por país.
+  const capaProvincias = useMemo(() => {
+    if (!capas.provincias || w >= 300) return null;
+    const op = acotar((300 - w) / 70, 0, 1);
+    const grupos = trazoProvinciasEn(rx, ry, rw, rh);
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col} opacity={op * 0.62} stroke="none" />)}
+        {grupos.map((g) => (
+          <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={px * 1.9}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={op * 0.5} />
+        ))}
+        {grupos.map((g) => (
+          <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#FFFDF2" strokeWidth={px * 1.2}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={op * 0.95} />
+        ))}
+      </g>
+    );
+  }, [w, px, claveVista, capas.provincias]);
+
+  // Fronteras y aguas: por encima de las provincias.
+  const capaAguas = useMemo(() => (
+    <g style={{ pointerEvents: "none" }}>
+      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={px * 4}
+        strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.7" />
+      <path d={FRONT_PAIS} fill="none" stroke="#FFF8DC" strokeWidth={px * 2.3}
+        strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={w > 260 ? 0.85 : 1} />
+      {capas.fisico && (
+        <>
+          <path d={FISICO.lagos} fill="#1D5878" stroke="#3E86A6" strokeWidth={px * 0.86} shapeRendering="geometricPrecision" />
+          {w < 260 && (
+            <>
+              <path d={FISICO.rios} fill="none" stroke="#12384E" strokeWidth={px * 2.3}
+                strokeLinejoin="round" strokeLinecap="round" opacity={Math.min(0.7, (260 - w) / 120)}
+                shapeRendering="geometricPrecision" />
+              <path d={FISICO.rios} fill="none" stroke="#4E9BBF" strokeWidth={px * 1.2}
+                strokeLinejoin="round" strokeLinecap="round" opacity={Math.min(0.95, (260 - w) / 90)}
+                shapeRendering="geometricPrecision" />
+            </>
+          )}
+        </>
+      )}
+    </g>
+  ), [w, px, capas.fisico]);
+
+  // Picos y cordilleras con nombre.
+  const capaRelieve = useMemo(() => {
+    if (!capas.fisico || w >= 160) return null;
+    const t = px * 8;
+    const ps = FISICO.picos.filter((p) => enVista(p[1], p[2])).slice(0, 40);
+    const cs = w < 120 ? FISICO.cordilleras.filter((c) => enVista(c[1], c[2])).slice(0, 14) : [];
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {cs.map((c, i) => (
+          <text key={"cd" + i} x={c[1]} y={c[2]} textAnchor="middle" fontSize={px * 23}
+            fill={c[3] ? "#C6BC9A" : "#D8C9A0"} opacity="0.62"
+            style={{ fontStyle: "italic", letterSpacing: `${px * 4.6}px`,
+              paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)", strokeWidth: px * 3 }}>{c[0]}</text>
+        ))}
+        {ps.map((p, i) => (
+          <g key={"pk" + i}>
+            <path d={`M${p[1]},${p[2] - t * 1.15} L${p[1] + t},${p[2] + t * 0.75} L${p[1] - t},${p[2] + t * 0.75}Z`}
+              fill="#D9CDB0" stroke="#221B0E" strokeWidth={t * 0.22} />
+            {w < 60 && (
+              <text x={p[1]} y={p[2] + t * 2.6} textAnchor="middle" fontSize={px * 15} fill="#E6DCC2"
+                style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: px * 4 }}>{p[0]} · {p[3]} m</text>
+            )}
+          </g>
+        ))}
+      </g>
+    );
+  }, [w, px, claveVista, capas.fisico]);
+
+  // Nombres de país.
+  const capaPaises = useMemo(() => {
+    if (!capas.paises || w >= 300 || w <= 6) return null;
+    const sep = px * 171;
+    const cand = centrosPaises().filter((c) => enVista(c.x, c.y) && c.a >= (w * rh) / 1100);
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {repartirRotulos(cand, sep, sep * 0.5, 26).map((c, i) => (
+          <text key={"pn" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={px * 27} fill="#EADFC0" opacity="0.48"
+            style={{ letterSpacing: `${px * 5}px`, textTransform: "uppercase",
+              paintOrder: "stroke", stroke: "rgba(0,0,0,0.65)", strokeWidth: px * 3.75 }}>{c.n}</text>
+        ))}
+      </g>
+    );
+  }, [w, px, claveVista, capas.paises]);
+
+  // Las ciudades del mundo.
+  const capaCiudades = useMemo(() => {
+    if (!capas.ciudades) return null;
+    const cs = ciudadesVisibles(w, rx, ry, rw, rh);
+    if (!cs.length) return null;
+    const r0 = px * 2.9;
+    const conNombre = new Set(w >= 55 ? []
+      : repartirRotulos(cs.filter((c) => c.rango <= (w < 20 ? 8 : 5)), px * 133, px * 55, 90));
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {cs.map((c, i) => {
+          const grande = c.pob > 2000 || c.cap === 2;
+          const r = r0 * (c.cap === 2 ? 1.5 : grande ? 1.2 : 0.85);
+          return (
+            <g key={"ci" + i}>
+              {c.cap === 2 ? (
+                <>
+                  <circle cx={c.x} cy={c.y} r={r * 2.2} fill="#0A0F08" opacity="0.5" />
+                  <circle cx={c.x} cy={c.y} r={r * 1.35} fill="none" stroke="#FFE9A8" strokeWidth={r * 0.34} />
+                  <circle cx={c.x} cy={c.y} r={r * 0.62} fill="#FFE9A8" stroke="#241A06" strokeWidth={r * 0.2} />
+                </>
+              ) : c.cap === 1 ? (
+                <>
+                  <circle cx={c.x} cy={c.y} r={r * 1.8} fill="#0A0F08" opacity="0.45" />
+                  <rect x={c.x - r * 0.72} y={c.y - r * 0.72} width={r * 1.44} height={r * 1.44}
+                    fill="#EBDCA8" stroke="#241A06" strokeWidth={r * 0.26} />
+                </>
+              ) : (
+                <>
+                  <circle cx={c.x} cy={c.y} r={r * 1.6} fill="#0A0F08" opacity="0.4" />
+                  <circle cx={c.x} cy={c.y} r={r * 0.8} fill="#D6D2BC" stroke="#241A06" strokeWidth={r * 0.24} />
+                </>
+              )}
+              {conNombre.has(c) && (
+                <text x={c.x} y={c.y - r * 2.1} textAnchor="middle" fontSize={px * 19}
+                  fill={c.cap === 2 ? "#FFF3C6" : "#EDE8D6"}
+                  style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.9)", strokeWidth: px * 5.7,
+                    fontWeight: c.cap === 2 ? 600 : 400, letterSpacing: c.cap === 2 ? `${px * 1.7}px` : "0" }}>{c.n}</text>
+              )}
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [w, px, claveVista, capas.ciudades]);
+
+  // ——— el reino ———
+  const mias = useMemo(() => (marcas || []).filter((m) => m && m.x != null), [marcas]);
+  const conTrazo = useMemo(() => mias.filter((m) => m.poly), [mias]);
+  const sel = useMemo(() => mias.find((m) => m.id === seleccion) || null, [mias, seleccion]);
+  const vecUbic = useMemo(() => ubicarVecinos(vecinos, centro, paisPropio),
+    [vecinos, centro.x, centro.y, paisPropio]);
+  const terrenosReino = useMemo(() => {
+    const vistos = [];
+    for (const m of mias) if (m.terreno && TERRENOS[m.terreno] && !vistos.includes(m.terreno)) vistos.push(m.terreno);
+    return vistos.sort((a, b) => TERRENOS[b].fert - TERRENOS[a].fert);
+  }, [mias]);
+  // Rótulos de las provincias propias, sin pisarse entre ellos.
+  const rotulosMios = useMemo(() => {
+    if (w >= 150) return new Set();
+    const orden = [...mias].sort((a, b) =>
+      (b.capital ? 1 : 0) - (a.capital ? 1 : 0) || (b.poblacion || 0) - (a.poblacion || 0));
+    return new Set(repartirRotulos(orden, px * 75, px * 28, 30));
+  }, [mias, w, px]);
+
+  // La marca de una provincia no puede ser más grande que la provincia: con
+  // 28 provincias apretadas, unos discos de tamaño fijo tapaban el reino
+  // entero. Se mide la provincia típica y la marca se ajusta a ella, con un
+  // suelo para que al alejarse el reino no desaparezca del todo.
+  const anchoTipico = useMemo(() => {
+    const as = conTrazo.map((m) => {
+      const c = cajaTrazo(m.poly);
+      return c ? Math.max(c[2] - c[0], c[3] - c[1]) : 0;
+    }).filter(Boolean).sort((a, b) => a - b);
+    return as.length ? as[Math.floor(as.length / 2)] : 0;
+  }, [conTrazo]);
+  const rVecino = px * 13;
+  const rMarca = anchoTipico ? acotar(anchoTipico * 0.24, px * 3.75, px * 13) : px * 13;
+  // Cuando la forma de la provincia ya se distingue, el disco encima sobra:
+  // veintiocho discos tapaban justo lo que habían venido a señalar. Solo
+  // vuelven cuando el reino está tan lejos que sus contornos no se leen.
+  const conDisco = !anchoTipico || anchoTipico < px * 22;
+  // En un mapa bajo —el de la pestaña de provincias— la ficha entera se come
+  // media vista: ahí va en una línea.
+  const fichaBreve = med.h > 0 && med.h < 380;
+  const tocar = (id) => (e) => {
+    e.stopPropagation();
+    if (movido.current || !onSeleccion) return;
+    onSeleccion(seleccion === id ? null : id);
+  };
+  const entrar = (id) => (e) => { if (e.pointerType !== "touch" && !arrastre.current) setHover(id); };
+  const salir = () => setHover(null);
+
   return (
-    <div style={{ position: "relative", width: "100%", height: alto || "100%", overflow: "hidden", background: "#08131C" }}>
+    <div ref={cajaRef} tabIndex={0} onKeyDown={onTecla} className="pm-mapa"
+      role="application" aria-label="Mapa del mundo"
+      style={{ position: "relative", width: "100%", height: alto || "100%", overflow: "hidden",
+        background: "#08131C", outline: "none" }}>
       <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-        onWheel={onWheel} onDoubleClick={onDoble}
+        onDoubleClick={(e) => zoomEn(e.shiftKey ? 2 : 0.5, e.clientX, e.clientY)}
+        onClick={() => { if (!movido.current && onSeleccion) onSeleccion(null); }}
         style={{ width: "100%", height: "100%", display: "block", touchAction: "none", cursor: "grab" }}>
-        <defs>
-          <radialGradient id="hondura" cx="50%" cy="45%" r="72%">
-            <stop offset="0%" stopColor="#17435F" />
-            <stop offset="70%" stopColor="#102F45" />
-            <stop offset="100%" stopColor="#0A2233" />
-          </radialGradient>
-          <linearGradient id="tierraG" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#465939" />
-            <stop offset="100%" stopColor="#33422A" />
-          </linearGradient>
-          <radialGradient id="viñeta" cx="50%" cy="50%" r="75%">
-            <stop offset="60%" stopColor="#000" stopOpacity="0" />
-            <stop offset="100%" stopColor="#000" stopOpacity="0.45" />
-          </radialGradient>
-        </defs>
+        {defs}
+        {capaMundo}
+        {capaProvincias}
+        {capaAguas}
+        {capaRelieve}
+        {capaPaises}
+        {capaCiudades}
 
-        {/* océano con hondura */}
-        <rect x="-60" y="-40" width="480" height="260" fill="url(#hondura)" />
-
-        {/* retícula de meridianos y paralelos */}
-        <path d={reticula(vb.w > 150 ? 30 : vb.w > 60 ? 10 : vb.w > 20 ? 5 : 1)}
-          fill="none" stroke="#7FB4CE" strokeWidth={vb.w / 2600}
-          opacity={vb.w > 150 ? 0.16 : 0.11} />
-
-        {/* plataforma continental: tres halos que sugieren la profundidad */}
-        <path d={MUNDO_D} fill="none" stroke="#14415C" strokeWidth={vb.w / 24} strokeLinejoin="round" opacity="0.55" />
-        <path d={MUNDO_D} fill="none" stroke="#1B5375" strokeWidth={vb.w / 52} strokeLinejoin="round" opacity="0.6" />
-        <path d={MUNDO_D} fill="none" stroke="#276B8C" strokeWidth={vb.w / 130} strokeLinejoin="round" opacity="0.75" />
-        {/* tierra y contorno de los continentes */}
-        <path d={MUNDO_D} fill="url(#tierraG)" stroke="#070C06"
-          strokeWidth={vb.w / 420} strokeLinejoin="round" shapeRendering="geometricPrecision" />
-        <path d={MUNDO_D} fill="none" stroke="#C3D3A2"
-          strokeWidth={vb.w / 760} strokeLinejoin="round" shapeRendering="geometricPrecision" opacity="0.9" />
-        {/* relieve: cordilleras y mesetas */}
-        <path d={FISICO.montes} fill="#6B6350" opacity="0.30" stroke="none" />
-        <path d={FISICO.montes} fill="none" stroke="#8E8468"
-          strokeWidth={vb.w / 900} opacity="0.4" shapeRendering="geometricPrecision" />
-
-        {/* las 4.594 provincias del mundo: relleno tenue y bordes finos */}
-        {vb.w < 300 && (() => {
-          const op = Math.max(0, Math.min(1, (300 - vb.w) / 70));
-          const grupos = trazoProvinciasEn(vb.x, vb.y, vb.w, vb.h);
-          return (
-            <>
-              {/* cada país con su color */}
-              {grupos.map((g) => (
-                <path key={"pf" + g.pais} d={g.d} fill={g.col} opacity={op * 0.62} stroke="none" />
-              ))}
-              {/* bordes de provincia: realce oscuro y línea clara */}
-              {grupos.map((g) => (
-                <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409"
-                  strokeWidth={vb.w / 640} strokeLinejoin="round" strokeLinecap="round"
-                  shapeRendering="geometricPrecision" opacity={op * 0.5} />
-              ))}
-              {grupos.map((g) => (
-                <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#FFFDF2"
-                  strokeWidth={vb.w / 980} strokeLinejoin="round" strokeLinecap="round"
-                  shapeRendering="geometricPrecision" opacity={op * 0.95} />
-              ))}
-            </>
-          );
+        {/* números de la retícula, pegados al borde de lo que se ve */}
+        {capas.reticula && w < 200 && (() => {
+          const paso = w > 60 ? 10 : w > 20 ? 5 : 1;
+          const fs = px * 13, out = [];
+          for (let g = Math.ceil(vb.x / paso) * paso; g <= vb.x + vb.w; g += paso)
+            out.push(<text key={"gx" + g} x={g} y={vb.y + fs * 1.9} textAnchor="middle" fontSize={fs}
+              fill="#9FC4D8" opacity="0.5" style={{ fontFamily: mono }}>{fmtGrado(g - 180, "E", "O")}</text>);
+          for (let g = Math.ceil(vb.y / paso) * paso; g <= vb.y + vb.h; g += paso)
+            out.push(<text key={"gy" + g} x={vb.x + fs * 0.6} y={g - fs * 0.5} fontSize={fs}
+              fill="#9FC4D8" opacity="0.5" style={{ fontFamily: mono }}>{fmtGrado(90 - g, "N", "S")}</text>);
+          return <g style={{ pointerEvents: "none" }}>{out}</g>;
         })()}
-        {/* fronteras entre países: más gruesas y con el mismo realce */}
-        <path d={FRONT_PAIS} fill="none" stroke="#060A04"
-          strokeWidth={vb.w / 300} strokeLinejoin="round" strokeLinecap="round"
-          shapeRendering="geometricPrecision" opacity="0.7" />
-        <path d={FRONT_PAIS} fill="none" stroke="#FFF8DC"
-          strokeWidth={vb.w / 520} strokeLinejoin="round" strokeLinecap="round"
-          shapeRendering="geometricPrecision" opacity={vb.w > 260 ? 0.85 : 1} />
-        {/* aguas: lagos y ríos, por encima de las provincias */}
-        <path d={FISICO.lagos} fill="#1D5878" stroke="#3E86A6"
-          strokeWidth={vb.w / 1400} shapeRendering="geometricPrecision" />
-        {vb.w < 260 && (
-          <>
-            <path d={FISICO.rios} fill="none" stroke="#12384E"
-              strokeWidth={vb.w / 520} strokeLinejoin="round" strokeLinecap="round"
-              opacity={Math.min(0.7, (260 - vb.w) / 120)} shapeRendering="geometricPrecision" />
-            <path d={FISICO.rios} fill="none" stroke="#4E9BBF"
-              strokeWidth={vb.w / 1000} strokeLinejoin="round" strokeLinecap="round"
-              opacity={Math.min(0.95, (260 - vb.w) / 90)} shapeRendering="geometricPrecision" />
-          </>
+
+        {/* los vecinos, cada uno sobre tierra de verdad */}
+        <g style={{ pointerEvents: "none" }}>
+          {vecUbic.map((v, i) => (
+            <g key={"v" + i}>
+              <circle cx={v.x} cy={v.y} r={rVecino * 0.8}
+                fill={v.estado === "guerra" ? "#8B2E2A" : v.estado === "aliado" ? "#3F6B4A" : "#6E5A3A"}
+                stroke="rgba(0,0,0,0.55)" strokeWidth={rVecino * 0.14} />
+              {v.estado === "guerra" && (
+                <path d={`M${v.x - rVecino * 0.38},${v.y - rVecino * 0.38} L${v.x + rVecino * 0.38},${v.y + rVecino * 0.38} M${v.x + rVecino * 0.38},${v.y - rVecino * 0.38} L${v.x - rVecino * 0.38},${v.y + rVecino * 0.38}`}
+                  stroke="#F2C9C0" strokeWidth={rVecino * 0.17} strokeLinecap="round" />
+              )}
+              {w < 110 && (
+                <text x={v.x} y={v.y - rVecino * 1.35} textAnchor="middle" fontSize={rVecino * 1.15}
+                  fill="rgba(226,212,186,0.86)"
+                  style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.75)", strokeWidth: rVecino * 0.3 }}>{v.nombre}</text>
+              )}
+            </g>
+          ))}
+        </g>
+
+        {/* el reino: la forma real de cada provincia */}
+        <g style={{ pointerEvents: "none" }}>
+          {conTrazo.map((m) => (
+            <path key={"rf" + m.id} d={m.poly}
+              fill={m.ocupada ? `url(#${uid}Ocupada)` : (m.col || "#6E7A48")}
+              opacity={m.ocupada ? 0.85 : 0.8} stroke="none" />
+          ))}
+          {conTrazo.map((m) => (
+            <path key={"rb" + m.id} d={m.poly} fill="none" stroke="#0A0E06" strokeWidth={px * 4}
+              strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.8" />
+          ))}
+          {conTrazo.map((m) => (
+            <path key={"rc" + m.id} d={m.poly} fill="none"
+              stroke={m.ocupada ? "#E08A80" : m.id === seleccion ? "#FFF0B8" : "#FFD25A"}
+              strokeWidth={m.id === seleccion ? px * 6 : px * 2.3}
+              strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" />
+          ))}
+          {hover && hover !== seleccion && (() => {
+            const h = conTrazo.find((m) => m.id === hover);
+            return h ? <path key="rhov" d={h.poly} fill="#FFFFFF" opacity="0.13" stroke="none" /> : null;
+          })()}
+          {sel && sel.poly && (
+            <path d={sel.poly} fill="#FFE9A8" opacity="0.2" stroke="#FFF6D2"
+              strokeWidth={px * 3.5} strokeLinejoin="round" className="pm-latido" />
+          )}
+        </g>
+
+        {/* marcas y rótulos del reino */}
+        <g style={{ pointerEvents: "none" }}>
+          {mias.map((m) => {
+            const esSel = m.id === seleccion;
+            const disco = conDisco || !m.poly;
+            const r = rMarca * (m.capital ? 1.15 : 0.8);
+            const alto2 = m.capital ? r * 2.2 : disco ? rMarca * 1.5 : rMarca * 0.55;
+            return (
+              <g key={"rm" + m.id}>
+                {esSel && <circle cx={m.x} cy={m.y} r={r * 2.4} fill="none" stroke="#FFE9A8"
+                  strokeWidth={rMarca * 0.16} opacity="0.75" className="pm-latido" />}
+                {m.capital ? (
+                  <path d={estrella(m.x, m.y, r * 1.45)} fill={m.ocupada ? "#B4595F" : "#F0C74A"}
+                    stroke="rgba(20,14,6,0.8)" strokeWidth={rMarca * 0.14} />
+                ) : disco ? (
+                  <circle cx={m.x} cy={m.y} r={r} fill={m.ocupada ? "#7A3B44" : "#C9A227"}
+                    stroke="rgba(20,14,6,0.75)" strokeWidth={rMarca * 0.18} />
+                ) : (
+                  <circle cx={m.x} cy={m.y} r={rMarca * 0.2} fill={m.ocupada ? "#E0A9A2" : "#3A2E12"}
+                    opacity="0.75" />
+                )}
+                {rotulosMios.has(m) && (
+                  <text x={m.x} y={m.y - alto2} textAnchor="middle"
+                    fontSize={rMarca * (esSel ? 1.35 : 1.1)} fill={esSel ? "#FFF3C6" : "#F3E8CC"}
+                    style={{ fontWeight: esSel || m.capital ? 600 : 400,
+                      paintOrder: "stroke", stroke: "rgba(0,0,0,0.85)", strokeWidth: rMarca * 0.34 }}>{m.nombre}</text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+
+        {/* zona sensible al dedo: va última, para quedar por encima de todo */}
+        {onSeleccion && (
+          <g>
+            {conTrazo.map((m) => (
+              <path key={"rh" + m.id} d={m.poly} fill="transparent" stroke="transparent"
+                strokeWidth={px * 7.5} pointerEvents="all" style={{ cursor: "pointer" }}
+                onClick={tocar(m.id)} onPointerEnter={entrar(m.id)} onPointerLeave={salir}>
+                <title>{m.nombre}</title>
+              </path>
+            ))}
+            {mias.filter((m) => !m.poly).map((m) => (
+              <circle key={"rz" + m.id} cx={m.x} cy={m.y} r={rMarca * 1.6} fill="transparent"
+                pointerEvents="all" style={{ cursor: "pointer" }}
+                onClick={tocar(m.id)} onPointerEnter={entrar(m.id)} onPointerLeave={salir}>
+                <title>{m.nombre}</title>
+              </circle>
+            ))}
+          </g>
         )}
 
-        {/* picos y cordilleras con nombre */}
-        {vb.w < 160 && (() => {
-          const m = vb.w * 0.06;
-          const dentro = (x, y) => x > vb.x - m && x < vb.x + vb.w + m && y > vb.y - m && y < vb.y + vb.h + m;
-          const t = vb.w / 150;
-          const ps = FISICO.picos.filter((p) => dentro(p[1], p[2])).slice(0, 40);
-          const cs = vb.w < 120 ? FISICO.cordilleras.filter((c) => dentro(c[1], c[2])).slice(0, 14) : [];
-          return (
-            <g style={{ pointerEvents: "none" }}>
-              {cs.map((c, i) => (
-                <text key={"cd" + i} x={c[1]} y={c[2]} textAnchor="middle" fontSize={vb.w / 52}
-                  fill={c[3] ? "#C6BC9A" : "#D8C9A0"} opacity="0.62"
-                  style={{ fontStyle: "italic", letterSpacing: `${vb.w / 260}px`,
-                    paintOrder: "stroke", stroke: "rgba(0,0,0,0.6)", strokeWidth: vb.w / 400 }}>
-                  {c[0]}
-                </text>
-              ))}
-              {ps.map((p, i) => (
-                <g key={"pk" + i}>
-                  <path d={`M${p[1]},${p[2] - t * 1.15} L${p[1] + t},${p[2] + t * 0.75} L${p[1] - t},${p[2] + t * 0.75}Z`}
-                    fill="#D9CDB0" stroke="#221B0E" strokeWidth={t * 0.22} />
-                  {vb.w < 60 && (
-                    <text x={p[1]} y={p[2] + t * 2.6} textAnchor="middle" fontSize={vb.w / 78}
-                      fill="#E6DCC2" style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: vb.w / 300 }}>
-                      {p[0]} · {p[3]} m
-                    </text>
-                  )}
-                </g>
-              ))}
-            </g>
-          );
-        })()}
-
-        {/* nombres de país */}
-        {vb.w < 300 && vb.w > 6 && (() => {
-          const cs = centrosPaises();
-          const m = vb.w * 0.05;
-          const sep = vb.w / 7;
-          const puestos = [];
-          for (const c of cs) {
-            if (c.x < vb.x - m || c.x > vb.x + vb.w + m || c.y < vb.y - m || c.y > vb.y + vb.h + m) continue;
-            if (c.a < (vb.w * vb.h) / 900) continue;
-            if (puestos.some((q) => Math.abs(q.x - c.x) < sep && Math.abs(q.y - c.y) < sep * 0.5)) continue;
-            puestos.push(c);
-            if (puestos.length >= 26) break;
-          }
-          return puestos.map((c, i) => (
-            <text key={"pn" + i} x={c.x} y={c.y} textAnchor="middle"
-              fontSize={vb.w / 34} fill="#EADFC0" opacity="0.5"
-              style={{ pointerEvents: "none", letterSpacing: `${vb.w / 170}px`, textTransform: "uppercase",
-                paintOrder: "stroke", stroke: "rgba(0,0,0,0.65)", strokeWidth: vb.w / 320 }}>
-              {c.n}
-            </text>
-          ));
-        })()}
-
-        {/* las ciudades del mundo */}
-        {(() => {
-          const cs = ciudadesVisibles(vb.w, vb.x, vb.y, vb.w, vb.h);
-          if (!cs.length) return null;
-          const r0 = vb.w / 420;
-          // los rótulos se reparten: si dos caen muy cerca, solo se rotula el mayor
-          const sep = vb.w / 9;
-          const puestos = [];
-          for (const c of cs) {
-            c.verNombre = false;
-            if (vb.w >= 55) continue;
-            if (c.rango > (vb.w < 20 ? 8 : 5)) continue;
-            if (puestos.some((q) => Math.abs(q.x - c.x) < sep && Math.abs(q.y - c.y) < sep * 0.4)) continue;
-            c.verNombre = true;
-            puestos.push(c);
-            if (puestos.length > 90) break;
-          }
-          return (
-            <g>
-              {cs.map((c, i) => {
-                const grande = c.pob > 2000 || c.cap === 2;
-                const r = r0 * (c.cap === 2 ? 1.5 : grande ? 1.2 : 0.85);
-                return (
-                  <g key={"ci" + i}>
-                    {c.cap === 2 ? (
-                      <>
-                        <circle cx={c.x} cy={c.y} r={r * 2.2} fill="#0A0F08" opacity="0.5" />
-                        <circle cx={c.x} cy={c.y} r={r * 1.35} fill="none" stroke="#FFE9A8" strokeWidth={r * 0.34} />
-                        <circle cx={c.x} cy={c.y} r={r * 0.62} fill="#FFE9A8" stroke="#241A06" strokeWidth={r * 0.2} />
-                      </>
-                    ) : c.cap === 1 ? (
-                      <>
-                        <circle cx={c.x} cy={c.y} r={r * 1.8} fill="#0A0F08" opacity="0.45" />
-                        <rect x={c.x - r * 0.72} y={c.y - r * 0.72} width={r * 1.44} height={r * 1.44}
-                          fill="#EBDCA8" stroke="#241A06" strokeWidth={r * 0.26} />
-                      </>
-                    ) : (
-                      <>
-                        <circle cx={c.x} cy={c.y} r={r * 1.6} fill="#0A0F08" opacity="0.4" />
-                        <circle cx={c.x} cy={c.y} r={r * 0.8} fill="#D6D2BC" stroke="#241A06" strokeWidth={r * 0.24} />
-                      </>
-                    )}
-                    {c.verNombre && (
-                      <text x={c.x} y={c.y - r * 2.1} textAnchor="middle"
-                        fontSize={vb.w / 62}
-                        fill={c.cap === 2 ? "#FFF3C6" : "#EDE8D6"}
-                        style={{ pointerEvents: "none", paintOrder: "stroke",
-                          stroke: "rgba(0,0,0,0.9)", strokeWidth: vb.w / 210,
-                          fontWeight: c.cap === 2 ? 600 : 400,
-                          letterSpacing: c.cap === 2 ? `${vb.w / 700}px` : "0" }}>
-                        {c.n}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </g>
-          );
-        })()}
-
-        {/* tus provincias, con su forma real */}
-        {(marcas || []).filter((m) => m.poly).map((m, i) => (
-          <path key={"pf" + i} d={m.poly} fill={m.ocupada ? "#7A3B44" : (m.col || "#6E7A48")}
-            opacity={m.ocupada ? 0.62 : 0.78} stroke="none" />
-        ))}
-        {/* bordes internos: realce oscuro debajo, línea clara encima */}
-        {(marcas || []).filter((m) => m.poly).map((m, i) => (
-          <path key={"pb" + i} d={m.poly} fill="none" stroke="#0A0E06"
-            strokeWidth={vb.w / 300} strokeLinejoin="round" strokeLinecap="round"
-            shapeRendering="geometricPrecision" opacity="0.8" />
-        ))}
-        {(marcas || []).filter((m) => m.poly).map((m, i) => (
-          <path key={"pc" + i} d={m.poly} fill="none" stroke="#FFD25A"
-            strokeWidth={vb.w / 520} strokeLinejoin="round" strokeLinecap="round"
-            shapeRendering="geometricPrecision" opacity="1" />
-        ))}
-
-        {(vecinos || []).map((v, i) => (
-          <g key={"v" + i}>
-            <circle cx={v.x} cy={v.y} r={rMarca * 0.8}
-              fill={v.estado === "guerra" ? "#8B2E2A" : "#6E5A3A"} stroke="rgba(0,0,0,0.5)" strokeWidth={rMarca * 0.12} />
-            {vb.w < 110 && (
-              <text x={v.x} y={v.y - rMarca * 1.3} textAnchor="middle" fontSize={rMarca * 1.2}
-                fill="rgba(220,205,180,0.8)" style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.7)", strokeWidth: rMarca * 0.3 }}>
-                {v.nombre}
-              </text>
-            )}
-          </g>
-        ))}
-        {(marcas || []).map((m, i) => (
-          <g key={"m" + i}>
-            <circle cx={m.x} cy={m.y} r={rMarca * (m.capital ? 1.15 : 0.85)}
-              fill={m.ocupada ? "#7A3B44" : "#C9A227"} stroke="rgba(20,14,6,0.75)" strokeWidth={rMarca * 0.18} />
-            {vb.w < 150 && (
-              <text x={m.x} y={m.y - rMarca * 1.6} textAnchor="middle" fontSize={rMarca * 1.15}
-                fill="#EFE2C4" style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: rMarca * 0.32 }}>
-                {m.nombre}
-              </text>
-            )}
-          </g>
-        ))}
-        <rect x={vb.x} y={vb.y} width={vb.w} height={vb.h} fill="url(#viñeta)" style={{ pointerEvents: "none" }} />
+        <rect x={vb.x} y={vb.y} width={vb.w} height={vb.h} fill={`url(#${uid}Vinieta)`} style={{ pointerEvents: "none" }} />
       </svg>
-      {/* escala */}
-      <div style={{ position: "absolute", left: 10, bottom: 10, pointerEvents: "none",
-        fontFamily: mono, fontSize: 9.5, color: "rgba(230,220,195,0.75)", textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>
-        <div style={{ width: 54, height: 4, borderLeft: "1px solid rgba(230,220,195,0.75)",
-          borderRight: "1px solid rgba(230,220,195,0.75)", borderBottom: "1px solid rgba(230,220,195,0.75)" }} />
+
+      {/* ficha de la provincia elegida */}
+      {sel && (
+        <div className="pm-fade" style={{ position: "absolute", left: 10, top: 10, zIndex: 3,
+          width: acotar((med.w || 420) * 0.45, 148, 200),
+          padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.94)",
+          border: `1px solid ${sel.ocupada ? C.red + "88" : C.gold + "77"}`,
+          boxShadow: "0 6px 20px rgba(0,0,0,0.55)", pointerEvents: "none" }}>
+          <div style={{ fontFamily: serif, fontSize: 14, color: C.ink, lineHeight: 1.25 }}>
+            <span style={{ color: C.green }}>{(TERRENOS[sel.terreno] || TERRENOS.llanura).ico}</span> {sel.nombre}
+          </div>
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, marginTop: 3,
+            color: sel.ocupada ? C.red : sel.capital ? C.gold : C.brass }}>
+            {sel.ocupada ? "EN MANOS AJENAS" : sel.capital ? "CAPITAL DEL REINO" : "PROVINCIA"}
+          </div>
+          <div style={{ fontSize: 10.5, color: C.muted, fontFamily: mono, marginTop: 5, lineHeight: 1.5 }}>
+            {(TERRENOS[sel.terreno] || TERRENOS.llanura).n.toLowerCase()}
+            {sel.rio ? " · con río" : ""}{sel.costera ? " · costera" : ""}
+            {sel.terreno ? ` · fert ×${fertProv(sel).toFixed(2)}` : ""}
+          </div>
+          {fichaBreve ? (
+            <div style={{ fontFamily: mono, fontSize: 10.5, color: C.muted, marginTop: 5 }}>
+              <span style={{ color: C.ink }}>{fmtPob(sel.poblacion)}</span>
+              {sel.techo > 0 && sel.poblacion != null && ` · ${Math.round((sel.poblacion / sel.techo) * 100)}% del techo`}
+              {sel.lealtad != null && " · lealtad "}
+              {sel.lealtad != null && (
+                <span style={{ color: sel.lealtad < 30 ? C.red : sel.lealtad < 55 ? C.gold : C.green }}>{Math.round(sel.lealtad)}</span>
+              )}
+            </div>
+          ) : null}
+          {!fichaBreve && sel.poblacion != null && (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontFamily: mono, fontSize: 11, marginTop: 6 }}>
+              <span style={{ color: C.muted }}>habitantes</span>
+              <span style={{ color: C.ink }}>{fmtPob(sel.poblacion)}</span>
+            </div>
+          )}
+          {!fichaBreve && sel.techo > 0 && sel.poblacion != null && (() => {
+            const ocu = sel.poblacion / sel.techo;
+            return (
+              <>
+                <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, marginTop: 5, overflow: "hidden" }}>
+                  <div style={{ height: 4, borderRadius: 2, width: `${Math.min(100, ocu * 100)}%`,
+                    background: ocu >= 1 ? C.red : ocu > 0.92 ? C.gold : C.green }} />
+                </div>
+                <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, marginTop: 3 }}>
+                  {Math.round(ocu * 100)}% de lo que da su tierra
+                </div>
+              </>
+            );
+          })()}
+          {!fichaBreve && sel.lealtad != null && (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontFamily: mono, fontSize: 11, marginTop: 5 }}>
+              <span style={{ color: C.muted }}>lealtad</span>
+              <span style={{ color: sel.lealtad < 30 ? C.red : sel.lealtad < 55 ? C.gold : C.green }}>{Math.round(sel.lealtad)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* rosa de los vientos y lectura de posición */}
+      <div style={{ position: "absolute", right: 10, top: 10, display: "flex", alignItems: "center",
+        gap: 7, pointerEvents: "none" }}>
+        <div style={{ fontFamily: mono, fontSize: 9.5, color: "rgba(232,222,198,0.92)", textAlign: "right",
+          padding: "3px 7px", borderRadius: 6, background: "rgba(10,16,22,0.72)",
+          border: "1px solid rgba(200,180,140,0.18)", lineHeight: 1.5 }}>
+          <div>{fmtCoord(vb.x + vb.w / 2, vb.y + vb.h / 2)}</div>
+          <div style={{ opacity: 0.62 }}>{vb.w >= 300 ? "el mundo" : `${vb.w < 10 ? vb.w.toFixed(1) : Math.round(vb.w)}° de ancho`}</div>
+        </div>
+        <svg width="26" height="26" viewBox="0 0 26 26" style={{ opacity: 0.85 }}>
+          <circle cx="13" cy="13" r="11.5" fill="rgba(10,16,22,0.7)" stroke="rgba(200,180,140,0.4)" />
+          <path d="M13,3.5 L16,14 L13,11.7 L10,14Z" fill="#E3B341" />
+          <path d="M13,22.5 L10,12 L13,14.3 L16,12Z" fill="rgba(200,190,170,0.45)" />
+        </svg>
+      </div>
+
+      {/* mapa de situación: en qué parte del mundo estás mirando */}
+      {vb.w < 130 && (
+        <div title="ir a otro punto del mundo"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const v = vbRef.current;
+            volarA({ x: ((e.clientX - r.left) / r.width) * 360 - v.w / 2,
+              y: ((e.clientY - r.top) / r.height) * 180 - v.h / 2, w: v.w, h: 0 }, 420);
+          }}
+          style={{ position: "absolute", right: 10, top: 44, width: 108, height: 54, cursor: "pointer",
+            borderRadius: 5, overflow: "hidden", border: "1px solid rgba(200,180,140,0.3)",
+            boxShadow: "0 3px 12px rgba(0,0,0,0.5)" }}>
+          {MINI_MUNDO}
+          <div style={{ position: "absolute", pointerEvents: "none", boxSizing: "border-box",
+            left: `${acotar((vb.x / 360) * 100, 0, 99)}%`, top: `${acotar((vb.y / 180) * 100, 0, 99)}%`,
+            width: `${acotar((vb.w / 360) * 100, 1.5, 100)}%`, height: `${acotar((vb.h / 180) * 100, 1.5, 100)}%`,
+            border: "1px solid #E3B341", background: "rgba(227,179,65,0.18)" }} />
+        </div>
+      )}
+
+      {/* barra de escala */}
+      <div style={{ position: "absolute", left: 10, bottom: 10 + (margenInfIzq || 0), pointerEvents: "none",
+        fontFamily: mono, fontSize: 9.5, color: "rgba(230,220,195,0.78)", textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>
+        <div style={{ width: 64, height: 5, borderLeft: "1px solid rgba(230,220,195,0.78)",
+          borderRight: "1px solid rgba(230,220,195,0.78)", borderBottom: "1px solid rgba(230,220,195,0.78)" }} />
         <div style={{ marginTop: 2 }}>
           {(() => {
-            const gr = (vb.w * 54) / 320;                       // grados que abarca la barra
-            const km = gr * 111;
-            return km > 1000 ? `${Math.round(km / 100) * 100} km` : km > 100 ? `${Math.round(km / 50) * 50} km` : `${Math.round(km / 10) * 10} km`;
+            // 64 px de barra medidos de verdad —antes se daba por sentado que
+            // el mapa medía 320— y el grado se acorta con la latitud: en
+            // Islandia no mide lo que en el Congo.
+            const grados = (vb.w * 64) / (med.w || 320);
+            const km = grados * GRADO_KM * Math.max(0.12, Math.cos(enRad(90 - (vb.y + vb.h / 2))));
+            const red = km > 2000 ? 500 : km > 500 ? 100 : km > 100 ? 50 : km > 20 ? 10 : 1;
+            return `${(Math.round(km / red) * red).toLocaleString("es")} km`;
           })()}
         </div>
       </div>
-      <div style={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-        {[["+", () => zoom(0.72)], ["−", () => zoom(1.38)], ["◎", alCentro]].map(([t, f], i) => (
-          <button key={i} onClick={f}
-            style={{ width: 30, height: 30, borderRadius: 7, cursor: "pointer",
-              background: "rgba(10,16,22,0.82)", border: "1px solid rgba(200,180,140,0.3)",
-              color: "#D8C9A6", fontSize: t === "◎" ? 13 : 17, lineHeight: 1 }}>{t}</button>
+
+      {/* leyenda y capas */}
+      {panel && (
+        <div className="pm-fade pm-scroll" style={{ position: "absolute", right: 46, bottom: 8, width: 178, zIndex: 3,
+          padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.95)", border: `1px solid ${C.line}`,
+          boxShadow: "0 6px 20px rgba(0,0,0,0.55)", maxHeight: "82%", overflowY: "auto" }}>
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, marginBottom: 6 }}>─ CAPAS</div>
+          {[["provincias", "Provincias del mundo"], ["ciudades", "Ciudades"], ["fisico", "Relieve y ríos"],
+            ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
+            <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
+              fontSize: 11, color: capas[k] ? C.ink : C.muted, padding: "2px 0" }}>
+              <input type="checkbox" checked={!!capas[k]} onChange={() => setCapas((c) => ({ ...c, [k]: !c[k] }))}
+                style={{ position: "fixed", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} />
+              <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3, textAlign: "center",
+                lineHeight: "11px", fontSize: 9, color: "#0B1017",
+                border: `1px solid ${capas[k] ? C.gold : C.line}`, background: capas[k] ? C.gold : "transparent" }}>
+                {capas[k] ? "✓" : ""}
+              </span>
+              {t}
+            </label>
+          ))}
+          {terrenosReino.length > 0 && (
+            <>
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ TUS TIERRAS</div>
+              {terrenosReino.map((t) => (
+                <div key={t} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: C.muted, padding: "1px 0" }}>
+                  <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                    background: TERRENOS[t].col, border: "1px solid rgba(0,0,0,0.5)" }} />
+                  {TERRENOS[t].n}
+                  <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>×{TERRENOS[t].fert.toFixed(2)}</span>
+                </div>
+              ))}
+            </>
+          )}
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ MARCAS</div>
+          {[["★", C.gold, "capital"], ["●", C.gold, "provincia tuya"], ["▨", C.red, "ocupada"],
+            ["●", "#8A7350", "vecino"], ["✕", C.red, "en guerra con vos"]].map(([i, c, t], k) => (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: C.muted, padding: "1px 0" }}>
+              <span style={{ width: 12, flex: "0 0 12px", textAlign: "center", color: c }}>{i}</span>{t}
+            </div>
+          ))}
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 5px" }}>─ TECLAS</div>
+          <div style={{ fontSize: 10.5, color: C.muted, lineHeight: 1.6 }}>
+            ←↑↓→ moverse · <b>+ −</b> acercar<br /><b>0</b> tu reino · <b>1</b> el mundo · <b>Esc</b> soltar
+          </div>
+        </div>
+      )}
+
+      <div style={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 4 }}>
+        {BOTONES_MAPA.map(([t, tit], i) => (
+          <button key={t} title={tit} aria-label={tit}
+            onClick={[() => zoom(0.72), () => zoom(1.38), alReino, alMundo, () => setPanel((v) => !v)][i]}
+            style={{ width: 30, height: 30, borderRadius: 7, cursor: "pointer", padding: 0,
+              background: "rgba(10,16,22,0.86)", lineHeight: 1,
+              border: `1px solid ${i === 4 && panel ? C.gold : "rgba(200,180,140,0.3)"}`,
+              color: i === 4 && panel ? C.gold : "#D8C9A6", fontSize: i < 2 ? 17 : 13 }}>{t}</button>
         ))}
       </div>
     </div>
   );
+}
+
+// De provincias a marcas del mapa: la posición y la forma reales, más lo que
+// necesita la ficha que aparece al tocarlas.
+function marcasDeProvincias(provs, ciencia) {
+  const ps = (provs || []).filter((p) => p.lon != null);
+  return ps.map((p) => ({
+    ...mundoXY(p.lon, p.lat),
+    id: p.id, nombre: p.nombre, capital: p.capital, ocupada: p.ocupada, conquistada: p.conquistada,
+    terreno: p.terreno, rio: p.rio, costera: p.costera,
+    poblacion: p.poblacion, lealtad: p.lealtad, techo: techoProvincia(p, ps, ciencia),
+    col: (TERRENOS[p.terreno] || TERRENOS.llanura).col, poly: p.poly,
+  }));
 }
 
 // Lista de países jugables, con cuántas provincias tiene cada uno.
@@ -2730,7 +3281,10 @@ const GlobalStyle = () => (
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
     @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
     @keyframes glowBrass { 0%,100% { box-shadow: 0 0 12px rgba(212,175,55,0.25); } 50% { box-shadow: 0 0 22px rgba(212,175,55,0.5); } }
+    @keyframes latido { 0%,100% { opacity: 0.85; } 50% { opacity: 0.28; } }
     .pm-fade { animation: fadeUp 0.45s ease both; }
+    .pm-latido { animation: latido 1.9s ease-in-out infinite; }
+    .pm-mapa:focus-visible { box-shadow: inset 0 0 0 2px rgba(212,175,55,0.55); }
     .pm-card { transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
     .pm-card:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
     .pm-cta { transition: transform 0.12s ease, filter 0.12s ease; }
@@ -2739,7 +3293,7 @@ const GlobalStyle = () => (
     .pm-scroll::-webkit-scrollbar { width: 6px; }
     .pm-scroll::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.3); border-radius: 3px; }
     .pm-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
-    @media (prefers-reduced-motion: reduce) { .pm-fade, .pm-card, .pm-cta { animation: none !important; transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) { .pm-fade, .pm-card, .pm-cta, .pm-latido { animation: none !important; transition: none !important; } }
   `}</style>
 );
 
@@ -4260,12 +4814,8 @@ export default function PaxMundi() {
   const centroMundo = s.region && PAIS_PROV[s.region] ? centroPais(s.region)
     : (s.provincias || []).length && s.provincias[0].lon != null
     ? mundoXY(s.provincias[0].lon, s.provincias[0].lat) : { x: 190, y: 45 };
-  // los vecinos se reparten alrededor del reino, a distancia de su poder
-  const vecinosMundo = (s.vecinos || []).map((v, i) => {
-    const a = (i / Math.max(1, (s.vecinos || []).length)) * Math.PI * 2 + 0.6;
-    const d = 9 + (10 - (v.poder || 5)) * 1.1;
-    return { ...v, x: centroMundo.x + Math.cos(a) * d, y: centroMundo.y + Math.sin(a) * d * 0.72 };
-  });
+  // el mapa ubica a los vecinos por su cuenta: los reparte alrededor del
+  // reino a distancia de su poder, pero apoyándolos en tierra de verdad
   const panelStyle = { background: "rgba(17,24,33,0.93)", border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.35)" };
 
   return (
@@ -4275,10 +4825,12 @@ export default function PaxMundi() {
       <div style={{ position: "fixed", inset: 0, zIndex: 0 }}>
         <MapaMundi
           centro={centroMundo}
-          marcas={(s.provincias || []).filter((p) => p.lon != null).map((p) => ({
-            ...mundoXY(p.lon, p.lat), nombre: p.nombre, capital: p.capital, ocupada: p.ocupada,
-            col: (TERRENOS[p.terreno] || TERRENOS.llanura).col, poly: p.poly }))}
-          vecinos={vecinosMundo}
+          marcas={marcasDeProvincias(s.provincias, s.ciencia)}
+          vecinos={s.vecinos}
+          paisPropio={s.region}
+          seleccion={provSel}
+          onSeleccion={(id) => { setProvSel(id); if (id) setTab("prov"); }}
+          margenInfIzq={46}
           alto="100%" />
       </div>
       {/* velo para que el texto se lea sobre el mapa */}
@@ -6012,14 +6564,18 @@ export default function PaxMundi() {
                 </div>
 
                 <div style={{ marginBottom: 12, borderRadius: 9, overflow: "hidden",
-                  border: `1px solid ${C.line}`, height: 260 }}>
+                  border: `1px solid ${C.line}`, height: 340 }}>
                   <MapaMundi
                     centro={centroMundo}
-                    marcas={provs.filter((p) => p.lon != null).map((p) => ({
-                      ...mundoXY(p.lon, p.lat), nombre: p.nombre, capital: p.capital,
-                      ocupada: p.ocupada, col: (TERRENOS[p.terreno] || TERRENOS.llanura).col, poly: p.poly }))}
-                    vecinos={vecinosMundo}
+                    marcas={marcasDeProvincias(provs, s.ciencia)}
+                    vecinos={s.vecinos}
+                    paisPropio={s.region}
+                    seleccion={provSel}
+                    onSeleccion={setProvSel}
                     alto="100%" />
+                </div>
+                <div style={{ fontSize: 10.5, color: C.muted, marginBottom: 12, marginTop: -6, fontStyle: "italic" }}>
+                  Tocá una provincia en el mapa o en la lista: se resaltan juntas.
                 </div>
 
                 <div style={{ fontSize: 10, letterSpacing: 1.8, textTransform: "uppercase", color: C.muted,
