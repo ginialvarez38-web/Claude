@@ -4526,15 +4526,15 @@ const VOZ_FAC = {
 // El siglo cambia por dónde corren las noticias y quién las anota.
 function tono(anio) {
   if (anio < 400) return { medio: "(el heraldo|los correos a pie|el mensajero de la ciudad)",
-    registro: "(las tablillas|el archivo del templo|la piedra del ágora)", junta: "(la asamblea|el consejo de ancianos)" };
+    registro: "(las tablillas|el archivo del templo|la piedra del ágora)", junta: "(la asamblea|el consejo de ancianos|el ágora)" };
   if (anio < 1500) return { medio: "(el pregonero|los correos|un fraile de camino)",
-    registro: "(el libro del concejo|la cancillería|los cartularios)", junta: "(la curia|el consejo|las cortes)" };
+    registro: "(el libro del concejo|la cancillería|los cartularios)", junta: "(la curia|el consejo real|la corte)" };
   if (anio < 1900) return { medio: "(la gaceta|la posta|los pliegos de cordel)",
-    registro: "(los legajos|la secretaría de estado|el archivo)", junta: "(el consejo de ministros|la cámara)" };
+    registro: "(los legajos|la secretaría de estado|el archivo)", junta: "(el consejo de ministros|la cámara|el gabinete)" };
   if (anio < 1995) return { medio: "(el télex|la radio|los partes de agencia)",
-    registro: "(los expedientes|el ministerio|el archivo central)", junta: "(el gabinete|el comité)" };
+    registro: "(los expedientes|el ministerio|el archivo central)", junta: "(el gabinete|el comité central|el politburó)" };
   return { medio: "(los despachos|la prensa|las redes)",
-    registro: "(los registros|el ministerio|la base de datos)", junta: "(el gabinete|el consejo)" };
+    registro: "(los registros|el ministerio|la base de datos)", junta: "(el gabinete|el consejo de gobierno)" };
 }
 
 const CIFRAS = ["cero", "un", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve",
@@ -4596,7 +4596,15 @@ function elenco(s, h, rnd, mem) {
       return (/a$/.test(n.split(" ")[0]) ? "la nueva " : "el nuevo ") + n; },
     ministro: () => (h.ministro ? h.ministro.nombre : (mins.length ? alAzar(rnd, mins).nombre : "el ministro")),
     donde: () => (h.donde ? h.donde.nombre : (provs.length ? alAzar(rnd, provs).nombre : "las provincias")),
+    // los informes de un turno pasivo traen su propio estamento y su propio
+    // ministro; si no, se usa el del hecho
     facA: () => (h.faccion ? VOZ_FAC[h.faccion.id].a : "a los estamentos"),
+    maloCargo: () => (h.malo ? `el ${h.malo.cargo.toLowerCase()} ${h.malo.nombre}` : "el consejero de turno"),
+    tema: () => h.tema || "el asunto",
+    zona: () => { if (h.zona) { dichas.add(h.zona); return h.zona; } return provFresca(); },
+    vec: () => h.vec || "el vecino",
+    obra: () => h.obra || "la obra",
+    sede: () => h.sede || "la escuela",
     facDe: () => (h.faccion ? VOZ_FAC[h.faccion.id].de : "de los estamentos"),
     facEl: () => (h.faccion ? VOZ_FAC[h.faccion.id].el : "los estamentos"),
     facGente: () => (h.faccion ? VOZ_FAC[h.faccion.id].gente : "(los concejos|las casas)"),
@@ -5004,7 +5012,9 @@ const DETALLE = [
 // principio de una oración hay que levantarlos. Tras dos puntos, no: en
 // castellano sigue en minúscula.
 function pulir(t) {
-  const x = t.replace(/\.\s*\./g, ".").replace(/,\s*\./g, ".")
+  const x = t.replace(/\bde el\b/g, "del").replace(/\bDe el\b/g, "Del")
+    .replace(/\ba el\b/g, "al").replace(/\bA el\b/g, "Al")
+    .replace(/\.\s*\./g, ".").replace(/,\s*\./g, ".")
     .replace(/([.!?])\s+([a-záéíóúüñ])/g, (_, sig, c) => `${sig} ${c.toUpperCase()}`)
     .replace(/\s+/g, " ").trim();
   return x.charAt(0).toUpperCase() + x.slice(1);
@@ -5027,7 +5037,25 @@ function nombresPropios(s) {
   for (const x of ((s.edu || {}).sabios || [])) meter(x.nombre);
   for (const v of (s.vecinos || [])) meter(v.nombre);
   for (const q of (s.provincias || [])) meter(q.nombre);
+  // los saberes, las obras y las sedes también son nombres: aparecen en los
+  // informes de un turno pasivo y no deben pasar a minúscula
+  for (const id of Object.keys((s.ciencia || {}).maduros || {})) meter((MED_IDX[id] || {}).nombre);
+  for (const id of ((s.ciencia || {}).crisis || [])) meter((MED_IDX[id] || {}).nombre);
+  for (const x of (s.proyectos || [])) meter(x.nombre);
+  for (const x of ((s.edu || {}).sedes || [])) meter(x.nombre);
   return n;
+}
+
+// Cose dos frases con un conector. La segunda pasa a minúscula salvo que
+// empiece por un nombre propio de la partida.
+function coser(partes, i, paso, propios) {
+  if (i < 1) return;
+  const con = deBolsa("conector", CONECTOR, paso);
+  const cola = partes[i].replace(/\.$/, "");
+  const primera = cola.split(/[\s,.:]/)[0];
+  const seguido = propios && propios.has(primera) ? cola : cola.charAt(0).toLowerCase() + cola.slice(1);
+  partes[i - 1] = partes[i - 1].replace(/\.$/, "") + ", " + con + " " + seguido + ".";
+  partes.splice(i, 1);
 }
 
 function narrar(hechos, s, rnd, res) {
@@ -5075,14 +5103,7 @@ function narrar(hechos, s, rnd, res) {
     else partes.push(det);
   }
   // y de vez en cuando dos tiempos se cosen en una sola oración
-  if (partes.length >= 2 && rnd() < 0.3) {
-    const i = partes.length - 1;
-    const con = deBolsa("conector", CONECTOR, paso);
-    const cola = partes[i].replace(/\.$/, "");
-    partes[i - 1] = partes[i - 1].replace(/\.$/, "") + ", " + con + " " +
-      cola.charAt(0).toLowerCase() + cola.slice(1) + ".";
-    partes.splice(i, 1);
-  }
+  if (partes.length >= 2 && rnd() < 0.3) coser(partes, partes.length - 1, paso, propios);
 
   return pulir(partes.join(" "));
 }
@@ -5229,6 +5250,152 @@ function aplicarVecinos(vecs, cambios) {
 }
 
 // Cuando el jugador deja pasar el tiempo, el mundo habla solo.
+// ═══ EL AÑO QUE PASÓ SIN VOS ═════════════════════════════════
+// Un turno sin órdenes no es un turno vacío: es justo aquel en que el mundo
+// actúa por su cuenta. La simulación ya sabe cómo vino la cosecha, qué vecino
+// sube, qué estamento murmura, qué están a punto de descubrir los sabios y
+// cuánto pesa la deuda. Nada de eso llegaba a la crónica, que se limitaba a
+// decir que no había pasado nada.
+//
+// Cada observador mira una cosa del estado, dice si tiene algo que contar
+// —y con cuánta urgencia— y aporta sus propios huecos. El turno pasivo se
+// arma con los dos o tres que más pesan, así que el texto sigue a la partida
+// en vez de rellenar.
+const INFORMES = [
+  // ——— la tierra y la gente ———
+  { id: "hambre", peso: (s, c) => (c.pobTecho > 1 ? 9 : c.pobTecho > 0.93 ? 6 : 0),
+    huecos: (s, c) => ({ zona: (c.provPeor || {}).nombre || "el campo" }),
+    fr: ["En {zona} (el pan no alcanza|se come lo que se guardaba para sembrar|hay más bocas que cosecha)",
+      "La tierra de {zona} ya no da para tanta gente, y (se nota en los caminos|el precio del grano lo dice antes que nadie)",
+      "{zona} pasa el año (contando el grano|con el pósito vacío|mirando al cielo)",
+      "Se muere de hambre en {zona} (sin que nadie lo declare|discretamente|como todos los años, pero más)"] },
+  { id: "holgura", peso: (s, c) => (c.pobTecho < 0.55 ? 4 : 0),
+    huecos: (s, c) => ({ zona: (c.provVacia || {}).nombre || "las comarcas del norte" }),
+    fr: ["En {zona} sobra tierra y faltan brazos: (se paga el jornal al doble|hay campos sin roturar desde hace años)",
+      "{zona} tiene más monte que labranza [y nadie que lo desbroce]",
+      "Faltan manos en {zona}; (los señores se disputan a los jornaleros|se traen colonos de donde se puede)"] },
+  { id: "crece", peso: (s, c) => (c.pobTecho > 0.6 && c.pobTecho < 0.9 ? 3 : 0),
+    huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "la capital" }),
+    fr: ["El reino crece despacio: (se levantan arrabales nuevos en {zona}|hay más bautizos que entierros, por una vez)",
+      "En {zona} se abren calles donde había huerta",
+      "Nacen más de los que mueren, y eso —dicen los viejos— nunca dura"] },
+
+  // ——— los vecinos ———
+  { id: "vecino_sube", peso: (s) => ((s.vecinos || []).some((v) => (v.impulso || 0) > 0.35) ? 6 : 0),
+    huecos: (s) => ({ vec: (s.vecinos || []).slice().sort((a, b) => (b.impulso || 0) - (a.impulso || 0))[0].nombre }),
+    fr: ["{vec} crece (más deprisa de lo que conviene|a ojos vistas) y (empieza a exigir|habla distinto que hace diez años)",
+      "En {vec} (se arman|se levantan plazas fuertes|se cobra más y se gasta mejor); aquí se toma nota",
+      "Los emisarios de {vec} (ya no piden: proponen|llegan con más escolta de la necesaria)"] },
+  { id: "vecino_cae", peso: (s) => ((s.vecinos || []).some((v) => (v.impulso || 0) < -0.35) ? 5 : 0),
+    huecos: (s) => ({ vec: (s.vecinos || []).slice().sort((a, b) => (a.impulso || 0) - (b.impulso || 0))[0].nombre }),
+    fr: ["{vec} se hunde: (busca aliados donde antes ponía condiciones|vende lo que puede|pierde tierras sin combatir)",
+      "De {vec} llegan (nobles arruinados|mercaderes que ya no vuelven|noticias cada vez peores)",
+      "{vec} (ya no es lo que era|se deshace por dentro), y en la corte se calcula qué se puede sacar de eso"] },
+  { id: "vecino_hostil", peso: (s) => ((s.vecinos || []).some((v) => (v.relacion || 0) < -35 && v.estado !== "guerra") ? 5 : 0),
+    huecos: (s) => ({ vec: (s.vecinos || []).slice().sort((a, b) => (a.relacion || 0) - (b.relacion || 0))[0].nombre }),
+    fr: ["Con {vec} no hay guerra, pero tampoco trato: (la frontera se cierra sola|los agravios se acumulan sin cobrarse)",
+      "{vec} (retira a su embajador|deja de contestar las cartas|arma la raya sin declararlo)",
+      "Todo el mundo sabe que con {vec} esto acaba mal; nadie dice cuándo"] },
+
+  // ——— la guerra ———
+  { id: "frente", peso: (s) => (s.guerra ? 10 : 0),
+    huecos: (s, c) => ({ vec: s.guerra.vecino, gana: (s.guerra.frente || 0) > 8, pierde: (s.guerra.frente || 0) < -8 }),
+    fr: ["En el frente contra {vec} (no se mueve nada|se gana terreno palmo a palmo|se cede sin que nadie lo llame retirada)",
+      "La guerra con {vec} sigue su cuenta: (marchas, esperas y hambre|más muertos por fiebre que por hierro)",
+      "Del frente llegan (partes que se contradicen|listas de bajas y poco más|peticiones de todo lo que falta)",
+      "Contra {vec} se combate (sin grandes batallas|por posiciones que cambian de dueño cada mes)"] },
+  { id: "ocupada", peso: (s) => ((s.provincias || []).some((p) => p.ocupada) ? 7 : 0),
+    huecos: (s) => ({ zona: (s.provincias || []).find((p) => p.ocupada).nombre }),
+    fr: ["{zona} sigue en manos ajenas: (se cobra allí en moneda extranjera|los que huyeron no vuelven)",
+      "De {zona}, ocupada, llegan (cartas que no se pueden contestar|noticias que nadie quiere leer)",
+      "Bajo ocupación, {zona} (paga dos veces|aprende a callar|manda emisarios a escondidas)"] },
+  { id: "tropa_ociosa", peso: (s) => (!s.guerra && unidadesTotales(s.ejercito) > 6 ? 3 : 0),
+    fr: ["El ejército pasa el año (en cuarteles|de guarnición|sin más enemigo que el aburrimiento) [y cuesta lo mismo]",
+      "Tanta tropa sin guerra (da problemas en las villas|se come el presupuesto|termina en riñas de taberna)"] },
+
+  // ——— el reino por dentro ———
+  { id: "faccion_mal", peso: (s, c) => { const f = c.faccionHostil; return f && (s.facciones || {})[f.id] < 38 ? 7 : 0; },
+    huecos: (s, c) => ({ fid: c.faccionHostil.id }),
+    fr: ["{facGente} (murmuran más de la cuenta|se reúnen sin licencia|hablan de agravios viejos)",
+      "El descontento {facDe} (ya no se disimula|se oye en cada plaza|llega a palacio por escrito)",
+      "{facUno} dice en público lo que hace un año no se atrevía a pensar",
+      "{facGente} (retrasan lo que deben|cumplen lo justo|obedecen sin ganas)"] },
+  { id: "faccion_bien", peso: (s, c) => { const f = c.faccionFuerte; return f && (s.facciones || {})[f.id] > 72 ? 3 : 0; },
+    huecos: (s, c) => ({ fid: c.faccionFuerte.id }),
+    fr: ["{facGente} están (más contentos de lo habitual|del lado de la corona), y se les nota",
+      "Con {facEl} no hay problema este año [y eso, en este reino, es noticia]"] },
+  { id: "ministro_malo", peso: (s) => (((s.gobierno || {}).miembros || []).some((m) => (m.competencia || 5) <= 3) ? 4 : 0),
+    huecos: (s) => ({ malo: ((s.gobierno || {}).miembros || []).slice().sort((a, b) => (a.competencia || 5) - (b.competencia || 5))[0] }),
+    fr: ["{maloCargo} (pierde papeles|firma lo que no debe|cobra donde no toca) y nadie lo corrige",
+      "En el despacho de {maloCargo} (se acumulan expedientes|se decide poco y tarde)",
+      "Se comenta lo de {maloCargo}, pero (nadie se lo dice a {sob}|sigue en el cargo)"] },
+  { id: "soberano_viejo", peso: (s) => { const e = s.soberano && s.soberano.nacio != null ? s.anio - s.soberano.nacio : 40; return e > 58 ? 5 : 0; },
+    fr: ["{sob}, con sus {edad} años, (despacha menos y descansa más|delega lo que antes hacía en persona)",
+      "En la corte se habla, en voz baja, de (la sucesión|quién manda cuando {sob} falte)",
+      "La edad de {sob} (se nota en las audiencias|es ya asunto de estado)"] },
+  { id: "soberano_joven", peso: (s) => { const e = s.soberano && s.soberano.nacio != null ? s.anio - s.soberano.nacio : 40; return e < 24 ? 4 : 0; },
+    fr: ["{sob} tiene {edad} años y (medio consejo gobierna en su nombre|se le nota la prisa)",
+      "Con un soberano tan joven, {facGente} prueban hasta dónde pueden llegar"] },
+  { id: "reinado_largo", peso: (s) => (s.soberano && s.anio - (s.soberano.desde || s.anio) > 28 ? 3 : 0),
+    fr: ["Van ya (veintitantos|casi treinta) años de reinado; (media población no conoció otro|los agravios se han hecho costumbre)",
+      "Nadie recuerda cómo se gobernaba antes de {sob}"] },
+
+  // ——— hacienda ———
+  { id: "tesoro_flaco", peso: (s, c) => (c.oroDisp < c.ingreso * 0.4 ? 6 : 0),
+    fr: ["Las arcas (no dan para más|se vacían antes de acabar el año); (se aplazan pagos|se paga en especie)",
+      "{minCargo} lleva meses (haciendo cuentas imposibles|tapando un agujero con otro)",
+      "No hay caudal: (los sueldos van con retraso|las obras se paran|se vende lo que no está clavado)"] },
+  { id: "tesoro_lleno", peso: (s, c) => (c.oroDisp > c.ingreso * 4 ? 3 : 0),
+    fr: ["Hay dinero en las arcas [y ya empiezan a proponer en qué gastarlo]",
+      "El tesoro está (más lleno de lo prudente|como no se lo veía hace años), y eso también trae visitas"] },
+  { id: "deuda", peso: (s, c) => ((s.deuda || 0) > c.ingreso * 2 ? 6 : 0),
+    fr: ["La deuda (pesa más que el ingreso de dos años|se lleva la mitad de lo que entra)",
+      "Los acreedores (mandan emisarios|piden garantías nuevas|empiezan a hablar entre ellos)",
+      "Se paga interés sobre interés, y {minCargo} ya no sabe a quién debe qué"] },
+  { id: "credito_vetado", peso: (s) => ((s.creditoVetado || 0) > s.anio ? 6 : 0),
+    fr: ["Nadie presta a esta corona: (la palabra empeñada se rompió una vez y basta|el descrédito dura más que la deuda)",
+      "Las casas de cambio (se cierran al emisario real|piden por adelantado lo que antes fiaban)"] },
+  { id: "inflacion", peso: (s) => ((s.devaluaciones || 0) > 0 ? 4 + (s.devaluaciones || 0) : 0),
+    fr: ["El {moneda} vale (cada vez menos|lo que digan los cambistas): (los sueldos fijos no alcanzan|nadie firma a plazo largo)",
+      "Se recuerda todavía (la rebaja de la moneda|lo que pasó con la ceca), y se desconfía",
+      "Los precios suben (sin que nadie los suba|más deprisa que las rentas)"] },
+  { id: "tributo_cobra", peso: (s) => ((s.tributos || []).some((t) => t.monto > 0) ? 3 : 0),
+    huecos: (s) => ({ vec: (s.tributos || []).find((t) => t.monto > 0).hacia }),
+    fr: ["Las parias de {vec} llegan (puntuales|con retraso y de mala gana|menos completas cada año)"] },
+  { id: "tributo_paga", peso: (s) => ((s.tributos || []).some((t) => t.monto <= 0) ? 4 : 0),
+    huecos: (s) => ({ vec: (s.tributos || []).find((t) => t.monto <= 0).hacia }),
+    fr: ["Se paga otra vez a {vec} lo pactado. (En la corte nadie lo llama tributo|Duele más el nombre que el oro)"] },
+  { id: "factorias", peso: (s) => ((s.factorias || []).length ? 3 : 0),
+    huecos: (s) => ({ vec: (s.factorias || [])[0] }),
+    fr: ["De la factoría en {vec} llegan (géneros y noticias|letras de cambio|más informes que beneficios)"] },
+
+  // ——— el saber ———
+  { id: "ciencia_madura", peso: (s) => (Object.keys((s.ciencia || {}).maduros || {}).length ? 6 : 0),
+    huecos: (s) => ({ tema: (MED_IDX[Object.keys(s.ciencia.maduros)[0]] || {}).nombre || "algo" }),
+    fr: ["{sabio} anda cerca de algo: (se habla de {tema} en la corte|falta poco para {tema})",
+      "En el gabinete de {sabio} (se repite un experimento por décima vez|se discute {tema} sin descanso)",
+      "{tema} (está a un paso|ya no parece imposible), y eso cambia conversaciones"] },
+  { id: "ciencia_crisis", peso: (s) => (((s.ciencia || {}).crisis || []).length ? 5 : 0),
+    huecos: (s) => ({ tema: (MED_IDX[s.ciencia.crisis[0]] || {}).nombre || "lo que se daba por cierto" }),
+    fr: ["Lo que se tenía por seguro sobre {tema} (ya no convence a nadie|se cae a pedazos)",
+      "{sabio} discute con medio mundo: {tema} (no explica lo que se observa|hace agua por todas partes)",
+      "Hay pelea abierta en torno a {tema}, y (los viejos maestros no ceden|los jóvenes tampoco)"] },
+  { id: "sabios", peso: (s) => (((s.edu || {}).sabios || []).length ? 3 : 0),
+    fr: ["{sabio} (pide más fondos|se queja del frío de la biblioteca|amenaza con irse a otra corte)",
+      "En la corte, {sabio} (enseña a quien quiera oír|copia libros que nadie más sabe leer)"] },
+  { id: "sin_saber", peso: (s) => (!Object.keys((s.edu || {}).instituciones || {}).length ? 4 : 0),
+    fr: ["No hay en el reino (casa de estudios|escuela digna de ese nombre); (los que quieren aprender se van|los libros se copian mal)",
+      "Los pocos que saben leer (están todos en la iglesia|se cuentan con los dedos)"] },
+  { id: "sede_pobre", peso: (s) => (((s.edu || {}).sedes || []).some((x) => x.desfinanciada) ? 5 : 0),
+    huecos: (s) => ({ sede: (((s.edu || {}).sedes || []).find((x) => x.desfinanciada) || {}).nombre || "la escuela" }),
+    fr: ["{sede} (no cobra desde hace meses|pierde maestros uno tras otro|cierra por temporadas)",
+      "En {sede} (se enseña sin cobrar|los alumnos pagan la leña)"] },
+  { id: "proyecto", peso: (s) => ((s.proyectos || []).some((p) => p.estado === "activo") ? 4 : 0),
+    huecos: (s) => ({ obra: (s.proyectos || []).find((p) => p.estado === "activo").nombre }),
+    fr: ["Las obras de «{obra}» (siguen|se arrastran|avanzan más despacio de lo prometido)",
+      "De «{obra}» se habla (mucho y se ve poco|en cada consejo)"] },
+];
+
 const SIN_ORDEN = [
   "El reino sigue su curso sin que (la corona levante la voz|salga una sola cédula de palacio|nadie mande nada).",
   "Pasan (las semanas|los meses|las estaciones). (La corte intriga|Se despacha lo de siempre|Nadie decide nada) y nadie espera órdenes.",
@@ -5241,7 +5408,7 @@ const SIN_ORDEN = [
   "{junta} se reúne (dos veces|una sola vez) y no acuerda nada [que valga la pena anotar].",
   "El gobierno se limita a (lo que no puede aplazarse|firmar lo que ya estaba firmado|cobrar y pagar).",
   "{minCargo} despacha solo, (sin consultar|porque no hay a quién consultar), lo urgente.",
-  "Se deja pasar el tiempo (a propósito|por cansancio|porque no hay dinero para más).",
+  "Se deja pasar el tiempo (a propósito|por cansancio|sin que nadie lo decida del todo).",
   "Ningún pregón, ninguna cédula: (el reino respira|los concejos hacen lo que quieren).",
   "{sob} pasa el tiempo (de caza|enfermo|en otra parte) y la corte se acomoda a su ausencia.",
 ];
@@ -5279,14 +5446,45 @@ const SIN_ORDEN_COLA = {
     "Un año de esos que solo se recuerdan porque no pasó nada."],
 };
 function narrarSinOrden(s, c, rnd) {
+  const mem = { provs: new Set(), sob: false };
+  const paso = s.turno || 0;
+  const partes = [];
+
+  // Se abre con el tono del año y se sigue con lo que de verdad pasó.
   const hostil = c.faccionHostil;
-  const E = elenco(s, { faccion: s.guerra ? null : hostil }, rnd);
   const cual = s.guerra ? "guerra" : c.pobTecho > 0.95 ? "hambre"
     : (hostil && (s.facciones || {})[hostil.id] < 35) ? "hostil" : "calma";
-  const paso = s.turno || 0;
-  return pulir(expandir(deBolsa("sinOrden", SIN_ORDEN, paso), E, rnd) + " " +
-               expandir(deBolsa("cola:" + cual, SIN_ORDEN_COLA[cual], paso), E, rnd));
+  const E0 = elenco(s, { faccion: cual === "hostil" ? hostil : null }, rnd, mem);
+  partes.push(expandir(deBolsa("sinOrden", SIN_ORDEN, paso), E0, rnd));
+
+  // Los observadores que tienen algo que decir, ordenados por urgencia y con
+  // algo de azar para que dos años parecidos no den la misma crónica.
+  const candidatos = INFORMES
+    .map((i) => ({ i, p: i.peso(s, c) * (0.6 + rnd() * 0.8) }))
+    .filter((x) => x.p > 0)
+    .sort((a, b) => b.p - a.p);
+  const cuantos = candidatos.length >= 3 && rnd() < 0.55 ? 3 : 2;
+  const nombrados = new Set();
+  const puestos = [];
+  for (const { i } of candidatos) {
+    if (puestos.length >= cuantos) break;
+    const ex = i.huecos ? i.huecos(s, c) : {};
+    if (ex.vec && nombrados.has(ex.vec)) continue;   // no dos veces el mismo vecino
+    if (ex.vec) nombrados.add(ex.vec);
+    puestos.push({ i, ex });
+  }
+  for (const { i, ex: extra } of puestos) {
+    const faccion = extra.fid ? FACCIONES.find((f) => f.id === extra.fid) : null;
+    const e = elenco(s, { ...extra, faccion }, rnd, mem);
+    partes.push(expandir(deBolsa("inf:" + i.id, i.fr, paso), e, rnd) + ".");
+  }
+  if (partes.length === 1) partes.push(expandir(deBolsa("cola:" + cual, SIN_ORDEN_COLA[cual], paso), E0, rnd));
+
+  // dos observaciones seguidas suenan a lista; a veces se cosen
+  if (partes.length >= 3 && rnd() < 0.45) coser(partes, 2, paso, nombresPropios(s));
+  return pulir(partes.join(" "));
 }
+
 
 // El ritmo de proyectos e investigaciones sale del estado, no de una opinión.
 function ritmoLocal(p, s, c, rnd, tipo) {
