@@ -846,6 +846,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // cuerpos de letra se piden en píxeles y se traducen con esto: antes iban
   // en unidades de mapa y en un teléfono salía todo tres veces más fino.
   const px = w / (med.w || 320);
+  // Cuánto detalle admite la vista: 0 de lejos, 1 de cerca. Las líneas finas
+  // entran de a poco y engordan un punto al acercarse, en vez de aparecer
+  // de golpe y con el mismo grosor a cualquier distancia.
+  const cerca = acotar((200 - w) / 130, 0, 1);
   const bloque = Math.max(0.25, w / 6);
   const rx = Math.floor((vb.x - w * 0.08) / bloque) * bloque;
   const ry = Math.floor((vb.y - vb.h * 0.08) / bloque) * bloque;
@@ -869,6 +873,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         <stop offset="60%" stopColor="#000" stopOpacity="0" />
         <stop offset="100%" stopColor="#000" stopOpacity="0.45" />
       </radialGradient>
+      {/* La Antártida se cierra sobre el polo, y ese cierre no es una costa
+          sino el borde del dato: una recta cruzando el mundo entero. Los
+          trazos se recortan antes de llegar; el relleno sigue hasta abajo. */}
+      <clipPath id={`${uid}SinPolo`}>
+        <rect x="-90" y="-70" width="560" height="246" />
+      </clipPath>
       {/* rayado para lo que está en manos ajenas */}
       <pattern id={`${uid}Ocupada`} width={px * 35} height={px * 35} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
         <rect width={px * 35} height={px * 35} fill="#6E323B" />
@@ -890,9 +900,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       <path d={MUNDO_D} fill="none" stroke="#1B5375" strokeWidth={px * 23} strokeLinejoin="round" opacity="0.6" />
       <path d={MUNDO_D} fill="none" stroke="#276B8C" strokeWidth={px * 9.2} strokeLinejoin="round" opacity="0.75" />
       <path d={MUNDO_D} fill={`url(#${uid}Tierra)`} stroke="#070C06"
-        strokeWidth={px * 2.9} strokeLinejoin="round" shapeRendering="geometricPrecision" />
-      <path d={MUNDO_D} fill="none" stroke="#C3D3A2"
-        strokeWidth={px * 1.6} strokeLinejoin="round" shapeRendering="geometricPrecision" opacity="0.9" />
+        strokeWidth={px * 3.4} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+      <path d={MUNDO_D} fill="none" stroke="#CCDAAE" clipPath={`url(#${uid}SinPolo)`}
+        strokeWidth={px * 1.9} strokeLinejoin="round" shapeRendering="geometricPrecision" opacity="0.92" />
       {capas.fisico && (
         <>
           <path d={FISICO.montes} fill="#6B6350" opacity="0.30" stroke="none" />
@@ -904,41 +914,47 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   ), [w, px, uid, capas.reticula, capas.fisico]);
 
   // Las 4.594 provincias del mundo, agrupadas por país.
+  // Las 4.594 provincias del mundo. La división interior es el escalón más
+  // bajo de la jerarquía: iba en blanco puro y con casi el grosor de una
+  // frontera, y el mapa entero parecía una reja. Ahora es un hilo cálido que
+  // aparece de a poco y nunca le gana a la costa ni al límite de un país.
   const capaProvincias = useMemo(() => {
     if (!capas.provincias || w >= 300) return null;
-    const op = acotar((300 - w) / 70, 0, 1);
+    const op = acotar((300 - w) / 120, 0, 1);
     const grupos = trazoProvinciasEn(rx, ry, rw, rh);
+    const fino = px * (0.5 + 0.35 * cerca);
     return (
       <g style={{ pointerEvents: "none" }}>
         {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col} opacity={op * 0.62} stroke="none" />)}
         {grupos.map((g) => (
-          <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={px * 1.9}
-            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={op * 0.5} />
+          <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={fino * 2.4}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={op * (0.22 + 0.16 * cerca)} />
         ))}
         {grupos.map((g) => (
-          <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#FFFDF2" strokeWidth={px * 1.2}
-            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={op * 0.95} />
+          <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#E9DEC2" strokeWidth={fino}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={op * (0.56 + 0.34 * cerca)} />
         ))}
       </g>
     );
-  }, [w, px, claveVista, capas.provincias]);
+  }, [w, px, cerca, claveVista, capas.provincias]);
 
   // Fronteras y aguas: por encima de las provincias.
   const capaAguas = useMemo(() => (
     <g style={{ pointerEvents: "none" }}>
-      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={px * 4}
-        strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.7" />
-      <path d={FRONT_PAIS} fill="none" stroke="#FFF8DC" strokeWidth={px * 2.3}
-        strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity={w > 260 ? 0.85 : 1} />
+      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={px * 3.1}
+        strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.62" />
+      <path d={FRONT_PAIS} fill="none" stroke="#F7EDD2" clipPath={`url(#${uid}SinPolo)`}
+        strokeWidth={px * (1.4 + 0.35 * cerca)}
+        strokeLinejoin="round" strokeLinecap="round" opacity={w > 260 ? 0.8 : 0.95} />
       {capas.fisico && (
         <>
           <path d={FISICO.lagos} fill="#1D5878" stroke="#3E86A6" strokeWidth={px * 0.86} shapeRendering="geometricPrecision" />
           {w < 260 && (
             <>
-              <path d={FISICO.rios} fill="none" stroke="#12384E" strokeWidth={px * 2.3}
+              <path d={FISICO.rios} fill="none" stroke="#12384E" strokeWidth={px * 1.8}
                 strokeLinejoin="round" strokeLinecap="round" opacity={Math.min(0.7, (260 - w) / 120)}
                 shapeRendering="geometricPrecision" />
-              <path d={FISICO.rios} fill="none" stroke="#4E9BBF" strokeWidth={px * 1.2}
+              <path d={FISICO.rios} fill="none" stroke="#4E9BBF" strokeWidth={px * 0.95}
                 strokeLinejoin="round" strokeLinecap="round" opacity={Math.min(0.95, (260 - w) / 90)}
                 shapeRendering="geometricPrecision" />
             </>
@@ -946,7 +962,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         </>
       )}
     </g>
-  ), [w, px, capas.fisico]);
+  ), [w, px, cerca, capas.fisico]);
 
   // Picos y cordilleras con nombre.
   const capaRelieve = useMemo(() => {
@@ -1041,6 +1057,11 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // ——— el reino ———
   const mias = useMemo(() => (marcas || []).filter((m) => m && m.x != null), [marcas]);
   const conTrazo = useMemo(() => mias.filter((m) => m.poly), [mias]);
+  // Todo el reino en un solo trazo: un path con muchos subtrazos se rasteriza
+  // de una vez, así que los bordes compartidos no se pintan dos veces.
+  const trazoReino = useMemo(() => conTrazo.map((m) => m.poly).join(" "), [conTrazo]);
+  const trazoOcupado = useMemo(() =>
+    conTrazo.filter((m) => m.ocupada).map((m) => m.poly).join(" "), [conTrazo]);
   const sel = useMemo(() => mias.find((m) => m.id === seleccion) || null, [mias, seleccion]);
   const vecUbic = useMemo(() => ubicarVecinos(vecinos, centro, paisPropio),
     [vecinos, centro.x, centro.y, paisPropio]);
@@ -1073,7 +1094,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // Cuando la forma de la provincia ya se distingue, el disco encima sobra:
   // veintiocho discos tapaban justo lo que habían venido a señalar. Solo
   // vuelven cuando el reino está tan lejos que sus contornos no se leen.
-  const conDisco = !anchoTipico || anchoTipico < px * 22;
+  const conDisco = !anchoTipico || anchoTipico < px * 12;
   // En un mapa bajo —el de la pestaña de provincias— la ficha entera se come
   // media vista: ahí va en una línea.
   const fichaBreve = med.h > 0 && med.h < 380;
@@ -1136,27 +1157,40 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           ))}
         </g>
 
-        {/* el reino: la forma real de cada provincia */}
+        {/* El reino como un cuerpo, no como una cuadrícula. Las provincias no
+            comparten vértices, así que el contorno exterior no se puede sacar
+            comparando segmentos; se consigue de otra manera: se traza todo el
+            reino con una línea muy ancha y encima se pintan los rellenos. Un
+            borde interior tiene reino a los dos lados y queda tapado del todo;
+            uno exterior solo tiene reino de un lado y le sobrevive la mitad de
+            afuera. Eso es el perímetro. Las divisiones internas vuelven después,
+            finas. */}
         <g style={{ pointerEvents: "none" }}>
+          <path d={trazoReino} fill="none" stroke="#080C05" strokeWidth={px * 7.5}
+            strokeLinejoin="round" strokeLinecap="round" opacity="0.5" />
+          <path d={trazoReino} fill="none" stroke="#FFD25A" strokeWidth={px * 4.2}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" />
+          {/* base opaca: además de tapar la mitad interior del trazo, hace que
+              una misma tierra se vea igual caiga sobre el país que caiga */}
+          <path d={trazoReino} fill="#222B1A" stroke="none" />
           {conTrazo.map((m) => (
             <path key={"rf" + m.id} d={m.poly}
               fill={m.ocupada ? `url(#${uid}Ocupada)` : (m.col || "#6E7A48")}
-              opacity={m.ocupada ? 0.85 : 0.8} stroke="none" />
-          ))}
-          {conTrazo.map((m) => (
-            <path key={"rb" + m.id} d={m.poly} fill="none" stroke="#0A0E06" strokeWidth={px * 4}
-              strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.8" />
-          ))}
-          {conTrazo.map((m) => (
-            <path key={"rc" + m.id} d={m.poly} fill="none"
-              stroke={m.ocupada ? "#E08A80" : m.id === seleccion ? "#FFF0B8" : "#FFD25A"}
-              strokeWidth={m.id === seleccion ? px * 6 : px * 2.3}
-              strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" />
+              opacity={m.ocupada ? 1 : 0.88} stroke="none" />
           ))}
           {hover && hover !== seleccion && (() => {
             const h = conTrazo.find((m) => m.id === hover);
-            return h ? <path key="rhov" d={h.poly} fill="#FFFFFF" opacity="0.13" stroke="none" /> : null;
+            return h ? <path key="rhov" d={h.poly} fill="#FFFFFF" opacity="0.12" stroke="none" /> : null;
           })()}
+          {/* divisiones internas: la mitad de fino que el perímetro */}
+          <path d={trazoReino} fill="none" stroke="#0A0E06" strokeWidth={px * (1.5 + 0.6 * cerca)}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.3" />
+          <path d={trazoReino} fill="none" stroke="#F3D68C" strokeWidth={px * (0.8 + 0.4 * cerca)}
+            strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.9" />
+          {trazoOcupado && (
+            <path d={trazoOcupado} fill="none" stroke="#E89189" strokeWidth={px * (1.5 + 0.6 * cerca)}
+              strokeLinejoin="round" strokeLinecap="round" shapeRendering="geometricPrecision" opacity="0.95" />
+          )}
           {sel && sel.poly && (
             <path d={sel.poly} fill="#FFE9A8" opacity="0.2" stroke="#FFF6D2"
               strokeWidth={px * 3.5} strokeLinejoin="round" className="pm-latido" />
