@@ -2217,7 +2217,7 @@ const DILEMAS = [
     texto: (s, c) => `Un barco, una caravana, unos peregrinos: nadie sabe. En tres semanas hay muertos en cuatro barrios. Sois ${fmtPob(c.pob)}.`,
     ops: [
       { t: "Cuarentena estricta", ef: { pob: -0.03, stats: { economia: -8, estabilidad: -3 }, fac: { mercaderes: -14, pueblo: 8 },
-        txt: "Se cierran puertas y puertos. Muere menos gente y se arruina el comercio del año." } },
+        txt: "Llega la peste (por los puertos|con los arrieros|de las tierras del sur|en un barco que nadie quiso quemar) y (se lleva a quien alcanza|vacía calles enteras|no distingue casa rica de pobre)." } },
       { t: "Que la vida siga", ef: { pob: -0.11, stats: { estabilidad: -10 }, fac: { pueblo: -16, mercaderes: 6 },
         txt: "No se cierra nada. Los carros de muertos pasan dos veces al día." } },
       { t: "Procesiones y rogativas", ef: { pob: -0.13, fac: { clero: 18, pueblo: 4 }, stats: { estabilidad: 3 },
@@ -4451,6 +4451,28 @@ function aplicarEfectos(n, ef, rnd) {
 //   · composición — cada turno se arma con varios tiempos (quién manda, qué
 //     pasa, quién reacciona, qué se ve), no con una oración suelta.
 
+// Sorteo en bolsa. Al azar puro, dos frases iguales pueden caer con dos
+// oraciones de por medio —medido: pasaba—. Barajando la lista y repartiendo
+// sin reponer, una de n frases no vuelve hasta que salieron las otras n-1.
+// Se calcula, no se guarda: la ronda sale del número de turno, así que sigue
+// siendo reproducible y no hace falta memoria entre partidas.
+const _bolsas = new Map();
+function deBolsa(clave, lista, paso) {
+  const n = lista.length;
+  if (n <= 1) return lista[0];
+  const ronda = Math.floor(paso / n);
+  const ck = clave + "|" + ronda;
+  let orden = _bolsas.get(ck);
+  if (!orden) {
+    const r = dado(ck);
+    orden = [...Array(n).keys()];
+    for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = orden[i]; orden[i] = orden[j]; orden[j] = t; }
+    if (_bolsas.size > 400) _bolsas.clear();
+    _bolsas.set(ck, orden);
+  }
+  return lista[orden[((paso % n) + n) % n]];
+}
+
 // Expande la gramática: primero los paréntesis más internos, después los
 // corchetes opcionales, al final los huecos.
 function expandir(t, E, rnd) {
@@ -4523,7 +4545,7 @@ const CIFRAS = ["cero", "un", "dos", "tres", "cuatro", "cinco", "seis", "siete",
 const enLetra = (n) => (n >= 0 && n <= 20 && Number.isInteger(n) ? CIFRAS[n] : String(n));
 
 // Todo lo que la narración puede nombrar sale de la partida en curso.
-function elenco(s, h, rnd) {
+function elenco(s, h, rnd, mem) {
   const provs = (s.provincias || []).filter((p) => p.nombre);
   const mins = ((s.gobierno || {}).miembros || []).filter((m) => m.nombre);
   const sabios = ((s.edu || {}).sabios || []).filter((x) => x.nombre);
@@ -4532,8 +4554,11 @@ function elenco(s, h, rnd) {
   const sob = s.soberano || {};
   const nom = sob.nombre ? `${sob.nombre}${sob.ordinal ? " " + ROMANOS[Math.min(19, sob.ordinal - 1)] : ""}` : "el soberano";
   const cual = (xs, campo) => () => (xs.length ? (alAzar(rnd, xs)[campo] || "") : "");
-  // nombrar dos veces la misma provincia en tres frases suena a plantilla
-  const dichas = new Set();
+  // memoria compartida por todos los tiempos de una narración: nombrar dos
+  // veces la misma provincia —o repetir «Alfonso VIII, Alfonso VIII»— es lo
+  // que más delata que detrás hay una plantilla
+  const M = mem || { provs: new Set(), sob: false };
+  const dichas = M.provs;
   const provFresca = () => {
     const libres = provs.filter((x) => !dichas.has(x.nombre));
     const el = (libres.length ? alAzar(rnd, libres) : (provs.length ? alAzar(rnd, provs) : null));
@@ -4542,7 +4567,11 @@ function elenco(s, h, rnd) {
   };
   return {
     ...t,
-    sob: nom,
+    // la primera vez con nombre y ordinal; después, por el cargo
+    sob: () => { if (M.sob) return (s.gobierno || {}).forma === "República" ? "el cónsul"
+                   : (s.gobierno || {}).forma === "Teocracia" ? "el sumo sacerdote"
+                   : (s.gobierno || {}).forma === "Imperio" ? "el emperador" : "el rey";
+                 M.sob = true; return nom; },
     sobTit: `${(s.gobierno || {}).forma === "República" ? "El cónsul" : (s.gobierno || {}).forma === "Teocracia" ? "El sumo sacerdote" : (s.gobierno || {}).forma === "Imperio" ? "El emperador" : "El rey"} ${nom}`,
     edad: sob.nacio != null ? String(s.anio - sob.nacio) : "cuarenta",
     reino: (s.nacion || {}).nombre || "el reino",
@@ -4579,123 +4608,162 @@ function elenco(s, h, rnd) {
 
 // ——— el acto: lo que se ordenó, contado de muchas maneras ———
 const ACTO = {
-  recauda: ["(Los recaudadores|Los cobradores|Los alguaciles del fisco) (salen a los caminos|parten por los pueblos|recorren los concejos) y (vuelven con|reúnen|arrancan) {oro}",
-    "Se (pregona|publica|lee) la nueva (contribución|derrama|imposición) [en cada plaza] y las arcas suman {oro}",
-    "{minCargo} presenta la cuenta: {oro}, [y] (aún faltan concejos por pagar|menos de lo prometido|más de lo que nadie esperaba)",
-    "La derrama se cobra (sin miramientos|casa por casa|con la tropa detrás): {oro} para el tesoro"],
-  motin_fiscal: ["En {donde} (apedrean a los recaudadores|queman el padrón|echan a los cobradores a palos)",
-    "Los cobradores no llegan a entrar en {donde}: (les cierran las puertas|los reciben con hoces|el concejo se planta)",
-    "{donde} se amotina (contra la nueva carga|antes de pagar el primer maravedí) y (la corona debe ceder|hay que mandar tropa)"],
-  alivio_fiscal: ["Se (perdona|rebaja|condona) parte de la carga y (en los concejos se bendice al soberano|los mercados vuelven a llenarse|el pan baja de precio)",
-    "Rebajadas las tasas, (vuelve a moverse el trato|los arrieros vuelven a los caminos|se abren tiendas que estaban cerradas)",
-    "El alivio corre de boca en boca (antes que el pregón|antes de que {medio} lo anuncie)"],
-  confisca: ["Se incautan los bienes {facDe}: {oro} (entran en el tesoro|cambian de dueño en una tarde)",
-    "Los alguaciles (sellan las arcas|inventarían las tierras|precintan los almacenes) {facDe} y se llevan {oro}",
-    "{facEl} (ve|mira) cómo se le lleva la corona {oro} [sin más papel que una cédula]"],
-  capital_huye: ["{facGente} (sacan|ponen a salvo) lo que pueden antes de que se lo quiten",
-    "El dinero {facDe} (desaparece|cruza la frontera|se esconde bajo tierra): nadie confía ya en la palabra de la corona",
-    "{facUno} liquida todo en una semana y (se marcha|no vuelve a prestar un maravedí)"],
-  vende_cargos: ["Se (subastan|rematan|venden) (oficios y regidurías|varas de alguacil|escribanías): {oro}, y una administración algo peor",
+  recauda: ["(Los recaudadores|Los cobradores|Los alguaciles del fisco|Los arrendadores) (salen a los caminos|parten por los pueblos|recorren los concejos|se reparten las comarcas) y (vuelven con|reúnen|arrancan|juntan) {oro}",
+    "Se (pregona|publica|lee|fija en las puertas) la nueva (contribución|derrama|imposición|sisa) [en cada plaza] y las arcas suman {oro}",
+    "{minCargo} presenta la cuenta: {oro}, [y] (aún faltan concejos por pagar|menos de lo prometido|más de lo que nadie esperaba|con dos comarcas todavía sin cobrar)",
+    "La derrama se cobra (sin miramientos|casa por casa|con la tropa detrás|contando cabezas de ganado): {oro} para el tesoro",
+    "Entre (protestas|silencios|excusas) entran {oro} [y una lista larga de morosos]"],
+  motin_fiscal: ["En {donde} (apedrean a los recaudadores|queman el padrón|echan a los cobradores a palos|cierran las puertas de la villa)",
+    "Los cobradores no llegan a entrar en {donde}: (les cierran las puertas|los reciben con hoces|el concejo se planta|alguien tocó a rebato antes)",
+    "{donde} se amotina (contra la nueva carga|antes de pagar el primer maravedí|con el cura al frente) y (la corona debe ceder|hay que mandar tropa|el cobro se suspende)"],
+  alivio_fiscal: ["Se (perdona|rebaja|condona|aplaza) parte de la carga y (en los concejos se bendice al soberano|los mercados vuelven a llenarse|el pan baja de precio|vuelven los que se habían ido)",
+    "Rebajadas las (tasas|sisas|cargas), (vuelve a moverse el trato|los arrieros vuelven a los caminos|se abren tiendas que estaban cerradas)",
+    "El alivio corre de boca en boca (antes que el pregón|antes de que {medio} lo anuncie|y llega deformado a {otraProv})"],
+  confisca: ["Se incautan los bienes {facDe}: {oro} (entran en el tesoro|cambian de dueño en una tarde|se cuentan dos veces por si acaso)",
+    "Los alguaciles (sellan las arcas|inventarían las tierras|precintan los almacenes|tasan las alhajas) {facDe} y se llevan {oro}",
+    "{facEl} (ve|mira|contempla) cómo se le lleva la corona {oro} [sin más papel que una cédula]",
+    "Por orden firmada {estacion} se embargan {oro} {facDe} [y se promete devolverlo algún día]"],
+  capital_huye: ["{facGente} (sacan|ponen a salvo|entierran) lo que pueden antes de que se lo quiten",
+    "El dinero {facDe} (desaparece|cruza la frontera|se esconde bajo tierra|cambia de nombre): nadie confía ya en la palabra de la corona",
+    "{facUno} liquida todo en (una semana|dos días) y (se marcha|no vuelve a prestar un maravedí|manda a los hijos fuera)"],
+  vende_cargos: ["Se (subastan|rematan|venden) (oficios y regidurías|varas de alguacil|escribanías|juros y ejecutorias): {oro}, y una administración algo peor",
     "Los títulos se dan a quien los pague. El tesoro suma {oro} [y la corte se llena de caras nuevas]",
-    "{minCargo} coloca (media docena|una veintena) de oficios y trae {oro}"],
-  presta: ["Los banqueros adelantan {oro} (contra las rentas del año que viene|con el diezmo en prenda|a un interés que nadie dice en voz alta)",
-    "Se firma el empréstito: {oro} ahora, y una hipoteca sobre el futuro",
-    "{facGente} de la lonja ponen {oro} sobre la mesa [y una lista de condiciones]"],
+    "{minCargo} coloca (media docena|una veintena|más oficios de los que existen) y trae {oro}",
+    "Se crean cargos que no hacían falta solo para venderlos: {oro} (hoy|de golpe), problemas mañana"],
+  presta: ["Los banqueros adelantan {oro} (contra las rentas del año que viene|con el diezmo en prenda|a un interés que nadie dice en voz alta|con dos plazas fuertes de garantía)",
+    "Se firma el empréstito: {oro} ahora, y una hipoteca sobre (el futuro|lo que aún no se ha cosechado)",
+    "{facGente} de la lonja ponen {oro} sobre la mesa [y una lista de condiciones]",
+    "Cuesta (tres reuniones|un viaje|más humillación de la esperada), pero salen {oro}"],
   sin_credito: ["Ningún banquero se sienta a la mesa: la corona ya faltó a su palabra",
-    "Las casas de cambio (cierran la puerta al emisario|responden con evasivas|piden garantías imposibles)"],
+    "Las casas de cambio (cierran la puerta al emisario|responden con evasivas|piden garantías imposibles|se declaran sin fondos)",
+    "Se busca dinero en (tres plazas|todas partes) y no aparece [ni al doble de interés]"],
   amortiza: ["Se saldan {oro} de la deuda y (los acreedores respiran|la lonja lo celebra|el crédito mejora al día siguiente)",
-    "La corona paga {oro}. (Es la primera vez en años|Nadie lo esperaba tan pronto)"],
+    "La corona paga {oro}. (Es la primera vez en años|Nadie lo esperaba tan pronto|Se hace notar, que para eso se paga)",
+    "{minCargo} lleva {oro} a los acreedores (en persona|con escolta) [y pide plazo para el resto]"],
   nada_que_pagar: ["No hay deuda que amortizar, ni oro con que hacerlo"],
-  devalua: ["Se rebaja la ley de la moneda: {oro} para el tesoro y (desconfianza para todos|un mercado que no sabe qué precio poner)",
-    "La ceca mezcla más cobre del debido. (Nadie tarda en notarlo|Los cambistas lo huelen en una semana)",
+  devalua: ["Se rebaja la ley de la moneda: {oro} para el tesoro y (desconfianza para todos|un mercado que no sabe qué precio poner|contratos que ya no valen)",
+    "La ceca (mezcla más cobre del debido|acuña más ligera). (Nadie tarda en notarlo|Los cambistas lo huelen en una semana|En {otraProv} ya no la aceptan)",
     "El nuevo {moneda} pesa lo mismo y vale menos. En {capital} lo saben antes que en palacio"],
   monopolio: ["Se estanca el ramo y la corona cobra {oro} por las licencias",
-    "El monopolio se pregona; (los gremios lo maldicen y lo pagan|aparece el contrabando esa misma noche)"],
+    "El monopolio se pregona; (los gremios lo maldicen y lo pagan|aparece el contrabando esa misma noche|los precios suben antes que la tinta se seque)",
+    "Se concede en exclusiva (a una compañía|a dos casas|a quien mejor pagó): {oro}"],
   aranceles: ["Se cierran las aduanas a las mercancías de {vecino}",
-    "Los géneros de {vecino} pagan ahora (el doble|el triple) en las puertas [y aparecen por los pasos de montaña]"],
-  catastro: ["(Escribanos y medidores|Los amojonadores) recorren el reino: por primera vez se sabe qué hay",
-    "El catastro descubre (tierras que nunca habían pagado nada|un tercio más de labranza de la declarada)",
-    "Se anota en {registro} lo que hasta ahora era palabra dada"],
-  declara_guerra: ["Se declara la guerra a {vecino}. (Los pendones salen de la capital|Las levas empiezan esa misma semana)",
+    "Los géneros de {vecino} pagan ahora (el doble|el triple|lo que diga el aduanero) en las puertas [y aparecen por los pasos de montaña]",
+    "Queda gravado todo lo que venga de {vecino}. (El contrabando se organiza en un mes|Los precios lo pagan aquí)"],
+  catastro: ["(Escribanos y medidores|Los amojonadores|Comisionados con cuerda y vara) recorren el reino: por primera vez se sabe qué hay",
+    "El catastro descubre (tierras que nunca habían pagado nada|un tercio más de labranza de la declarada|pueblos enteros que no figuraban)",
+    "Se anota en {registro} lo que hasta ahora era (palabra dada|costumbre|puro cálculo)"],
+  declara_guerra: ["Se declara la guerra a {vecino}. (Los pendones salen de la capital|Las levas empiezan esa misma semana|Se cierran los pasos)",
     "El heraldo lee la declaración ante la corte de {vecino} [y no espera respuesta]",
-    "Rota la paz con {vecino}, {sob} (manda cerrar las fronteras|convoca a las mesnadas)"],
+    "Rota la paz con {vecino}, {sob} (manda cerrar las fronteras|convoca a las mesnadas|nombra a los capitanes esa misma noche)",
+    "La guerra con {vecino} se declara (por una frontera|por una ofensa vieja|por lo que se dice en público y por lo que no)"],
   ya_en_guerra: ["Ya se combate contra {vecinoNom}: no hay manos para otra guerra"],
-  sin_vecino: ["No hay a quién dirigir la orden: la corte no encuentra destinatario"],
-  no_hay_guerra: ["No hay guerra que librar; la orden se queda sin objeto"],
-  firma_paz: ["Se firma la paz con {vecinoNom}. (Las campanas suenan todo el día|Nadie sabe si durará)",
-    "Los plenipotenciarios sellan la paz con {vecinoNom} (tras semanas de regateo|en tres días|sin mirarse a la cara)"],
+  sin_vecino: ["No hay a quién dirigir la orden: la corte no encuentra destinatario",
+    "La orden no señala con quién, y nadie en {junta} se atreve a suponerlo"],
+  no_hay_guerra: ["No hay guerra que librar; la orden se queda sin objeto",
+    "Se manda hacer la guerra a nadie. {minCargo} archiva la cédula [sin comentarios]"],
+  firma_paz: ["Se firma la paz con {vecinoNom}. (Las campanas suenan todo el día|Nadie sabe si durará|Los soldados tardan meses en volver)",
+    "Los plenipotenciarios sellan la paz con {vecinoNom} (tras semanas de regateo|en tres días|sin mirarse a la cara|en una aldea de frontera)",
+    "Acaba la guerra con {vecinoNom}. (Se cuentan los muertos después|El tratado deja todo como estaba, y cuesta explicarlo)"],
   paz_rechazada: ["{vecinoNom} rechaza la propuesta: cree que puede sacar más",
-    "Los emisarios vuelven (con las manos vacías|humillados) de la corte de {vecinoNom}"],
-  recluta: ["Se levantan {n} cuerpos de {rama}. (Los tambores no paran en las plazas|Las madres miran pasar la columna)",
-    "Alistan {n} de {rama} {estacion}; (muchos van por el pan|van los que no tienen tierra)",
+    "Los emisarios vuelven (con las manos vacías|humillados|sin haber sido recibidos) de la corte de {vecinoNom}",
+    "{vecinoNom} contesta con (condiciones imposibles|silencio|una lista de exigencias) [y sigue la guerra]"],
+  recluta: ["Se levantan {n} cuerpos de {rama}. (Los tambores no paran en las plazas|Las madres miran pasar la columna|Se pagan enganches en metálico)",
+    "Alistan {n} de {rama} {estacion}; (muchos van por el pan|van los que no tienen tierra|se llevan hasta a los que sobran en casa)",
     "{n} unidades nuevas de {rama} juran bandera [ante {sob}]",
-    "La leva de {rama} da {n} cuerpos, (menos de los prometidos|más de los previstos|justo los que hacían falta)"],
+    "La leva de {rama} da {n} cuerpos, (menos de los prometidos|más de los previstos|justo los que hacían falta|y una cuarta parte deserta antes de llegar)",
+    "Se arman {n} de {rama} con (lo que había|prisa|dinero prestado) [y armas de dos generaciones atrás]"],
   rama_imposible: ["Nadie en el reino sabe todavía formar {rama}"],
-  sin_medios: ["No hay (oro ni brazos|caudal ni hombres) para levantar más tropa"],
-  licencia: ["Se licencian {n} de {rama}; (vuelven a sus pueblos sin paga atrasada|se van con lo puesto)",
-    "{n} unidades de {rama} se disuelven. El tesoro respira, (los oficiales no|los caminos se llenan de licenciados)"],
+  sin_medios: ["No hay (oro ni brazos|caudal ni hombres|dinero ni voluntarios) para levantar más tropa",
+    "Se intenta la leva y (no acude nadie|no alcanza el dinero|los concejos se niegan)"],
+  licencia: ["Se licencian {n} de {rama}; (vuelven a sus pueblos sin paga atrasada|se van con lo puesto|nadie les da las gracias)",
+    "{n} unidades de {rama} se disuelven. El tesoro respira, (los oficiales no|los caminos se llenan de licenciados|las villas se quejan)",
+    "Quedan disueltos {n} cuerpos de {rama} (de un día para otro|con la paga a medias)"],
   nada_que_licenciar: ["No hay tropas de esa clase que licenciar"],
-  fortifica: ["Se levantan obras en {prov}: (fosos, cortinas y un baluarte nuevo|una muralla que se ve desde lejos)",
-    "Los canteros trabajan en {prov} de sol a sol [y aún así no llegan al invierno]"],
-  asedio_fracasa: ["El sitio se rompe con pérdidas y los sitiadores se retiran (de noche|bajo la lluvia)",
-    "La plaza aguanta. Se levanta el cerco (antes de que llegue el invierno|con la mitad de los hombres)"],
-  plaza_tomada: ["La plaza cae tras (semanas de cerco|un asalto de madrugada)",
-    "Se abre brecha y la guarnición capitula [con honores]"],
-  victoria_campo: ["El choque se resuelve a favor: el enemigo (deja el campo y la artillería|se retira en desorden)",
-    "La línea enemiga cede al (segundo|tercer) empuje. Es una victoria clara",
-    "Se gana el campo {estacion}, y con él (los bagajes|los pasos del río|la iniciativa)"],
-  derrota_campo: ["La ofensiva se deshace contra una línea mejor plantada. Se pierden muchos",
-    "El ataque fracasa y la retirada se hace (de noche, en desorden|dejando atrás a los heridos)",
-    "Sale mal desde la primera hora: (el terreno|la lluvia|un flanco mal cubierto) y ya no hay modo de rehacerlo"],
+  fortifica: ["Se levantan obras en {prov}: (fosos, cortinas y un baluarte nuevo|una muralla que se ve desde lejos|torres en cada revuelta del camino)",
+    "Los canteros trabajan en {prov} de sol a sol [y aún así no llegan al invierno]",
+    "Se refuerza {prov} con (lo que hay|maestros traídos de fuera|piedra de una cantera nueva)"],
+  asedio_fracasa: ["El sitio se rompe con pérdidas y los sitiadores se retiran (de noche|bajo la lluvia|dejando la artillería)",
+    "La plaza aguanta. Se levanta el cerco (antes de que llegue el invierno|con la mitad de los hombres|sin haber abierto brecha)",
+    "Falla (la mina|el asalto|el abastecimiento) y el cerco se deshace solo"],
+  plaza_tomada: ["La plaza cae tras (semanas de cerco|un asalto de madrugada|un hambre que no se cuenta)",
+    "Se abre brecha y la guarnición capitula [con honores]",
+    "Entra la tropa en la plaza (al tercer asalto|por una puerta que alguien abrió|sin resistencia digna de ese nombre)"],
+  victoria_campo: ["El choque se resuelve a favor: el enemigo (deja el campo y la artillería|se retira en desorden|pierde los bagajes)",
+    "La línea enemiga cede al (segundo|tercer|primer) empuje. Es una victoria (clara|cara|que costará explicar en números)",
+    "Se gana el campo {estacion}, y con él (los bagajes|los pasos del río|la iniciativa|dos leguas de tierra)"],
+  derrota_campo: ["La ofensiva se deshace contra una línea mejor plantada. Se pierden (muchos|más de los que se dirá)",
+    "El ataque fracasa y la retirada se hace (de noche, en desorden|dejando atrás a los heridos|sin que nadie dé la orden)",
+    "Sale mal desde la primera hora: (el terreno|la lluvia|un flanco mal cubierto|una orden que llegó tarde) y ya no hay modo de rehacerlo"],
   repliegue: ["Se acortan las líneas y se atrinchera lo que se puede conservar",
-    "El repliegue (salva tropa y entrega terreno|se hace en orden, que ya es algo)"],
+    "El repliegue (salva tropa y entrega terreno|se hace en orden, que ya es algo|deja dos aldeas al enemigo)",
+    "Se abandona (la posición|el saliente|lo ganado el año pasado) para no perder el ejército"],
   saqueo: ["Las columnas vuelven cargadas: {oro} y una comarca arrasada detrás",
-    "Se saquea sin miramientos. {oro} para el tesoro, y (una fama peor|un odio que dura generaciones)"],
-  nombra_general: ["Un nuevo general recibe el bastón de mando [de manos de {sob}]",
-    "Se confía el ejército a otro nombre. (Los veteranos lo aprueban|La corte murmura)"],
+    "Se saquea sin miramientos. {oro} para el tesoro, y (una fama peor|un odio que dura generaciones|dos aldeas que ya no existen)",
+    "El botín se reparte (mal|delante de todos|antes de contarlo): {oro} llegan a las arcas"],
+  nombra_general: ["Un nuevo general recibe (el bastón de mando|el mando del ejército|la vara) [de manos de {sob}]",
+    "Se confía el ejército a otro nombre. (Los veteranos lo aprueban|La corte murmura|Nadie se atreve a decir lo que piensa)",
+    "El mando pasa a (un hombre de la casa|un veterano de tres campañas|alguien que nadie esperaba)",
+    "{sob} nombra general (por consejo de {minCargo}|contra el parecer de medio consejo|sin consultarlo con nadie)"],
   cupo_generales: ["No hay estado mayor que sostenga otro general"],
-  tratado: ["Se firma tratado de comercio con {vecino}: los géneros cruzan sin trabas",
-    "(Los mercaderes celebran|La lonja aplaude) el acuerdo con {vecino}",
-    "Queda abierto el trato con {vecino} [y con él los puertos]"],
+  tratado: ["Se firma tratado de comercio con {vecino}: los géneros cruzan (sin trabas|con menos aduana|por fin)",
+    "(Los mercaderes celebran|La lonja aplaude|Los arrieros ya cuentan las ganancias) el acuerdo con {vecino}",
+    "Queda abierto el trato con {vecino} [y con él los puertos]",
+    "El tratado con {vecino} se firma (tras meses de correo|en dos sesiones|con más letra pequeña de la que nadie leyó)"],
   tratado_rechazado: ["{vecino} deja el tratado sobre la mesa sin firmarlo"],
   en_guerra_con: ["No se comercia con {vecino}: se combate contra ellos"],
   alianza: ["Se sella alianza con {vecino}: sus banderas y las nuestras, juntas",
-    "{vecino} acepta la alianza. Es un cambio de tablero [que no todos celebran]"],
+    "{vecino} acepta la alianza. Es un cambio de tablero [que no todos celebran]",
+    "La alianza con {vecino} se anuncia (con solemnidad|discretamente|antes de estar del todo cerrada)"],
   alianza_rechazada: ["{vecino} agradece la propuesta y no se compromete a nada"],
-  boda: ["Se concierta el enlace con la casa de {vecino}. (Habrá fiestas|La dote se discute más que el amor)",
-    "La boda con {vecino} se anuncia (antes de estar cerrada del todo|con toda la pompa que el tesoro aguanta)"],
+  boda: ["Se concierta el enlace con la casa de {vecino}. (Habrá fiestas|La dote se discute más que el amor|Los novios no se han visto)",
+    "La boda con {vecino} se anuncia (antes de estar cerrada del todo|con toda la pompa que el tesoro aguanta|sin fecha todavía)",
+    "Se cambian (retratos|promesas|garantías) con la casa de {vecino} y el enlace queda hecho"],
   desaire: ["La casa de {vecino} declina el enlace. (El desaire se comenta en todas partes|Nadie lo olvidará pronto)"],
   tributo_logrado: ["{vecino} acepta pagar: {oro} ahora y una renta cada año",
     "Las parias de {vecino} empiezan a llegar [con retraso y de mala gana]"],
   tributo_negado: ["{vecino} responde que no paga tributo a nadie [y arma la frontera]"],
   paga_tributo: ["Se compra la calma de {vecino} con oro. En la corte nadie lo llama tributo"],
-  embajada: ["Parte una embajada a {vecino} con (regalos y buenas palabras|paños, halcones y una carta larga)",
-    "Los presentes a {vecino} valen más que muchas promesas"],
-  espia_exito: ["La red en {vecino} empieza a rendir: se sabe qué preparan [y con cuánto]",
-    "Un secretario de {vecino} vende lo que oye (por menos de lo que vale|a cambio de un salvoconducto)"],
+  embajada: ["Parte una embajada a {vecino} con (regalos y buenas palabras|paños, halcones y una carta larga|más oro del que se admite)",
+    "Los presentes a {vecino} valen más que muchas promesas",
+    "Se manda a {vecino} (un emisario de confianza|el mejor hablador de la corte|a alguien de quien se puede prescindir)"],
+  espia_exito: ["La red en {vecino} empieza a rendir: se sabe (qué preparan|con cuánto cuentan|quién manda de verdad)",
+    "Un secretario de {vecino} vende lo que oye (por menos de lo que vale|a cambio de un salvoconducto|por rencor, que sale más barato)",
+    "Llegan de {vecino} (cartas copiadas|listas de tropas|rumores que resultan ciertos)"],
   espia_descubierto: ["Descubren a los agentes en {vecino}. El escándalo es mayúsculo",
-    "Los espías caen y {vecino} exige explicaciones [que nadie sabe dar]"],
+    "Los espías caen y {vecino} exige explicaciones [que nadie sabe dar]",
+    "Se pierde la red en {vecino} (en una noche|por un descuido|porque alguien habló de más)"],
   rompe: ["Se rompen las relaciones con {vecino} y se llama al embajador"],
   reprime: ["Se escarmienta {facA} sin contemplaciones",
-    "La tropa entra donde {facGente} se reunían. (Hay presos y algo peor|Nadie cuenta los muertos)",
-    "{sob} manda (ahorcar a los cabecillas|cerrar las casas|prender a los que hablaron)"],
+    "La tropa entra donde {facGente} se reunían. (Hay presos y algo peor|Nadie cuenta los muertos|Se cierran las puertas por dentro)",
+    "{sob} manda (ahorcar a los cabecillas|cerrar las casas|prender a los que hablaron|desterrar a los más ruidosos)",
+    "El escarmiento es (público|rápido|más duro de lo que hacía falta) y {facGente} lo entienden"],
   represion_fracasa: ["La represión enciende lo que quería apagar: {facGente} se alzan",
     "El escarmiento sale al revés y el desorden (se extiende|salta a las provincias vecinas)"],
-  amnistia: ["Se abre la cárcel a los presos {facDe}. (Hay abrazos en las plazas|Muchos no tienen adónde ir)",
-    "El perdón alcanza {facA}; (algunos lo llaman debilidad|el clero predica a favor)"],
+  amnistia: ["Se abre la cárcel a los presos {facDe}. (Hay abrazos en las plazas|Muchos no tienen adónde ir|Salen menos de los que entraron)",
+    "El perdón alcanza {facA}; (algunos lo llaman debilidad|el clero predica a favor|los agraviados no opinan igual)",
+    "Se borra lo pasado {facA} (por cédula|sin condiciones|con condiciones que nadie va a vigilar)"],
   reparte_grano: ["Se abren los pósitos en {prov}: pan para quien no lo tiene",
-    "El grano de la corona llega a {prov} (antes que el hambre|justo a tiempo|tarde para algunos)"],
-  fiestas: ["Hay (fiestas, toros y vino|juegos y luminarias) a costa del tesoro",
-    "Se celebran (juegos|festejos) durante días. (Nadie habla de otra cosa|Por una semana nadie se acuerda de los impuestos)"],
+    "El grano de la corona llega a {prov} (antes que el hambre|justo a tiempo|tarde para algunos|en carros mal escoltados)",
+    "Se reparte (trigo|centeno|lo que hay) en {prov} [y se pelean por el sitio en la fila]",
+    "{minCargo} organiza el reparto en {prov} (con orden|como puede|mejor de lo que se esperaba)"],
+  fiestas: ["Hay (fiestas, toros y vino|juegos y luminarias|música en las plazas) a costa del tesoro",
+    "Se celebran (juegos|festejos|corridas) durante días. (Nadie habla de otra cosa|Por una semana nadie se acuerda de los impuestos)",
+    "{sob} paga (tres días|una semana) de fiesta [y se deja ver en todas]"],
   reforma: ["Se promulga la reforma: un solo fuero donde había veinte",
-    "Las nuevas ordenanzas (recortan privilegios|ordenan lo que estaba suelto) [y encienden a media corte]"],
+    "Las nuevas ordenanzas (recortan privilegios|ordenan lo que estaba suelto|ponen por escrito la costumbre) [y encienden a media corte]",
+    "Se publica (el código|la pragmática|el nuevo ordenamiento) y (nadie lo ha leído entero|los letrados se frotan las manos)",
+    "La ley nueva entra en vigor {estacion} y tarda años en llegar a {otraProv}"],
   privilegio: ["Se otorgan mercedes {facA}, que lo celebra ruidosamente",
-    "{facEl} recibe franquicias que los demás miran con envidia"],
-  destituye: ["{ministro} es apartado del cargo (sin muchas explicaciones|de un día para otro)",
-    "Cae {ministro}. La corte toma nota de quién manda"],
+    "{facEl} recibe (franquicias|exenciones|tierras) que los demás miran con envidia",
+    "Por cédula quedan libres {facDe} (de la carga|del servicio|de rendir cuentas)"],
+  destituye: ["{ministro} es apartado del cargo (sin muchas explicaciones|de un día para otro|con una pensión que compra su silencio)",
+    "Cae {ministro}. La corte toma nota de quién manda",
+    "Se releva a {ministro} (por incompetente|por sospechoso|porque estorbaba) [y se le agradece el servicio]"],
   sin_ministro: ["No hay gabinete que remover"],
   coloniza: ["Se reparten tierras en {prov} a quien quiera roturarlas",
-    "Llegan pobladores a {prov}; se levantan las primeras casas [antes del invierno]"],
+    "Llegan pobladores a {prov}; se levantan las primeras casas [antes del invierno]",
+    "Se puebla {prov} con (gente de otras comarcas|licenciados del ejército|familias que no tenían nada)"],
   funda_sede: ["Se funda {meta} en {prov}. Los primeros maestros llegan (en otoño|con las lluvias|a lo largo del año)",
     "{metaEl} abre sus puertas en {prov} [con más buenas intenciones que libros]",
     "{sob} dota {meta} en {prov} (con rentas de por vida|con lo que sobró de las obras|sin decir de dónde sale el dinero)",
@@ -4703,50 +4771,114 @@ const ACTO = {
     "{minCargo} encuentra por fin el sitio y el dinero: {meta} en {prov}"],
   sin_oro_sede: ["No hay caudal para fundar {meta}", "Las cuentas no dan para {meta}, y {minCargo} lo dice sin rodeos"],
   llega_sabio: ["Un sabio de renombre acepta la pensión y se instala en la corte",
-    "Llega a la corte un erudito que otros reyes querían para sí"],
+    "Llega a la corte un erudito que otros reyes querían para sí",
+    "Se trae de (muy lejos|una corte rival|un monasterio olvidado) a alguien que sabe lo que aquí nadie sabía"],
   sin_oro_sabio: ["Ningún sabio se mueve por lo que la corona puede pagar"],
   catedra: ["Se dota una cátedra y se pagan las primeras becas",
-    "La nueva cátedra atrae estudiantes de fuera del reino [y quejas de los de dentro]"],
+    "La nueva cátedra atrae estudiantes de fuera del reino [y quejas de los de dentro]",
+    "Se financian (lecturas|estudios|copias de libros) que hasta ahora pagaba quien podía"],
   enfoca_saber: ["Se orienta el gasto del saber hacia lo que la corona necesita",
-    "{sabio} y los suyos reciben instrucciones más concretas —y fondos"],
+    "{sabio} y los suyos reciben instrucciones más concretas —y fondos",
+    "Se manda estudiar (lo útil|lo que hace falta en la guerra|lo que da dinero) y dejar el resto"],
   censura: ["Se prohíben libros y se queman algunos. (El clero aplaude|Nadie protesta en voz alta)",
-    "El índice de obras vedadas crece; los impresores (emigran|imprimen igual, de noche)"],
-  expedicion_vuelve: ["La expedición vuelve con (cartas, mercancías y noticias del mundo|más preguntas que respuestas)",
-    "Los navíos regresan: menos de los que salieron, pero cargados"],
-  expedicion_perdida: ["De la expedición no vuelve nadie. Se pierde el dinero y la ilusión"],
+    "El índice de obras vedadas crece; los impresores (emigran|imprimen igual, de noche|piden licencia para todo)",
+    "Se manda revisar (lo que se imprime|lo que se enseña|lo que se predica) [y a quien lo escribe]"],
+  expedicion_vuelve: ["La expedición vuelve con (cartas, mercancías y noticias del mundo|más preguntas que respuestas|tres hombres menos y un mapa nuevo)",
+    "Los navíos regresan: menos de los que salieron, pero cargados",
+    "Vuelven (con la costa levantada|con plantas que nadie conoce|hablando de tierras que nadie cree)"],
+  expedicion_perdida: ["De la expedición no vuelve nadie. Se pierde (el dinero y la ilusión|todo menos la historia)",
+    "La expedición (se pierde|no vuelve|se da por muerta) y con ella (el caudal invertido|dos naves y ciento veinte hombres)"],
   caminos: ["Se empiedran caminos y se levantan puentes hacia {prov}",
-    "Las calzadas nuevas acortan (a la mitad|en dos jornadas) el viaje a {prov}"],
-  puerto: ["Se draga y amplía el puerto de {prov}",
-    "Los astilleros de {prov} (no dan abasto|trabajan de noche con antorchas)"],
+    "Las calzadas nuevas acortan (a la mitad|en dos jornadas) el viaje a {prov}",
+    "Se abre camino de carro hasta {prov}, (donde solo había senda|por primera vez)"],
+  puerto: ["Se (draga|amplía|reconstruye) el puerto de {prov}",
+    "Los astilleros de {prov} (no dan abasto|trabajan de noche con antorchas|contratan a quien sepa clavar una tabla)",
+    "El nuevo muelle de {prov} admite (naves de más porte|el doble de carga)"],
   regadio: ["Se abren acequias en {prov}: la vega da dos cosechas",
-    "El agua llega por canal a {prov} y la tierra cambia de color"],
+    "El agua llega por canal a {prov} y la tierra cambia de color",
+    "Se (cava|entuba|levanta) el riego de {prov} [y se pleitea por el turno del agua antes de terminarlo]"],
   templo: ["Se consagra un templo nuevo en {prov}. Se ve desde una legua",
-    "Las obras del templo de {prov} emplean a media comarca [durante años]"],
-  mercado: ["Se franquea un mercado en {prov} y acuden tratantes de todas partes"],
-  hospital: ["Se abre un hospital en {prov}: los pobres ya tienen dónde morir con techo"],
-  factoria: ["Se establece factoría en {vecino}: almacenes, agentes y crédito propio"],
+    "Las obras del templo de {prov} emplean a media comarca [durante años]",
+    "Se levanta en {prov} (una iglesia|un monasterio|una capilla) que (nadie esperaba|costará tres generaciones)"],
+  mercado: ["Se franquea un mercado en {prov} y acuden tratantes de todas partes",
+    "El mercado nuevo de {prov} (dobla el trato en un año|se llena antes de estar terminado)",
+    "Se concede feria a {prov}, (con exención de portazgo|dos veces al año)"],
+  hospital: ["Se abre un hospital en {prov}: los pobres ya tienen dónde morir con techo",
+    "El hospital de {prov} (se llena el primer día|lo atienden dos frailes y una viuda)",
+    "Se funda en {prov} (una casa de misericordia|un lazareto|un hospital de pobres)"],
+  factoria: ["Se establece factoría en {vecino}: almacenes, agentes y crédito propio",
+    "Nuestros mercaderes abren casa en {vecino} (con licencia|a la fuerza|tras años de intentarlo)",
+    "La factoría de {vecino} empieza a (mover género|dar beneficios|servir de oídos)"],
   ya_hay_factoria: ["Ya hay factoría nuestra en {vecino}"],
-  flota: ["Se arma una flota mercante. (Los seguros bajan y los fletes también|Media lonja pone dinero)"],
+  flota: ["Se (arma|contrata|bota) una flota (mercante|de carga|de altura). (Los seguros bajan y los fletes también|Media lonja pone dinero|Nadie quiere quedarse fuera)",
+    "Se compran (naves|bajeles|cascos) donde se puede y se arman como se sabe",
+    "La flota nueva (sale a la mar antes de estar lista|dobla lo que el reino podía cargar|se paga con dinero de todos)"],
   boato: ["La corte despliega un boato que deja en silencio a los embajadores",
-    "Se encargan (retratos, arcos y un desfile|tapices y una entrada triunfal) que el reino recordará"],
-  mecenazgo: ["Pintores y poetas encuentran mesa en palacio"],
+    "Se encargan (retratos, arcos y un desfile|tapices y una entrada triunfal|una capilla y un sepulcro) que el reino recordará",
+    "{sob} se muestra (a caballo|bajo palio|entre antorchas) y la imagen vale por diez decretos"],
+  mecenazgo: ["(Pintores|Poetas|Músicos) y (poetas|escultores|comediantes) encuentran mesa en palacio",
+    "Se protege a (los pintores|los músicos|los poetas|los que tallan piedra) con pensión y encargo",
+    "La corte se llena de (gente de talento|gente que dice tenerlo|italianos, flamencos y algún local)"],
   peregrina: ["{sob} peregrina en persona. El clero no lo olvidará",
-    "Se convoca {junta} y se traen reliquias de lejos"],
-  sin_oro: ["No hay caudal para tanto: la orden queda a medias"],
+    "Se convoca {junta} y se traen reliquias de lejos",
+    "El soberano (se descalza en el último tramo|va sin escolta|lleva a media corte detrás) y todos toman nota"],
+  sin_oro: ["No hay caudal para tanto: la orden queda a medias",
+    "Las arcas no dan. (Se hace la mitad|Se aplaza|Se busca dinero y no aparece)",
+    "{minCargo} enseña las cuentas y no hay más que hablar"],
   gesto: ["La orden se cumple como se puede, y {facGente} toman nota",
-    "La corte ejecuta el mandato (sin entenderlo del todo|a su manera)",
+    "La corte ejecuta el mandato (sin entenderlo del todo|a su manera|con más celo que criterio)",
     "Se hace lo mandado. Los efectos, si los hay, tardarán en verse",
-    "{minCargo} interpreta la orden a su gusto y nadie lo corrige"],
+    "{minCargo} interpreta la orden (a su gusto|como le conviene) y nadie lo corrige",
+    "Nadie sabe muy bien qué se ha ordenado, pero (se obedece|se escribe en {registro}|se pregona igual)",
+    "La cédula se cumple (a medias|con retraso|solo donde conviene)"],
 };
 
 // ——— quién manda: la apertura ———
 const APERTURA = [
-  "{sobTit} firma la cédula {estacion}.", "Por orden de {sob},", "Desde palacio se manda que sí:",
-  "{minCargo} lo propone y {sob} lo firma [sin leerlo].", "El consejo delibera media noche y cede:",
-  "Contra el parecer de {minCargo},", "{sob}, que ya tiene {edad} años, no lo consulta con nadie:",
-  "Se anuncia por {medio}:", "La orden sale de palacio antes del alba.",
-  "Tras semanas de dudas,", "{sobTit} lo decide de golpe, y",
+  "{sobTit} (firma|sella|rubrica) la cédula {estacion}.",
+  "Por (orden|mandato|voluntad) de {sob},",
+  "Desde palacio se manda (que sí|sin más trámite|contra todo pronóstico):",
+  "{minCargo} lo propone y {sob} (lo firma|lo aprueba|asiente) [sin leerlo].",
+  "{junta} (delibera media noche|discute dos sesiones|se resiste) y (cede|acaba cediendo):",
+  "Contra el (parecer|consejo|criterio) de {minCargo},",
+  "{sob}, que ya tiene {edad} años, (no lo consulta con nadie|no está para consultas):",
+  "Se anuncia por {medio} (sin adornos|con más pompa de la debida):",
+  "La orden sale de palacio (antes del alba|con el correo de la tarde|en manos de un solo jinete).",
+  "Tras (semanas|meses) de (dudas|informes|silencio),",
+  "{sobTit} lo decide (de golpe|en una tarde|entre dos audiencias), y",
+  "{minCargo} lo había pedido (tres veces|desde hace años); (a la cuarta|por fin),",
+  "Sin (debate|testigos|constancia en {registro}),",
+  "Se lee en voz alta en {junta} y (nadie levanta la mano|nadie se atreve a discutir):",
+  "Contra lo que (aconsejaba la prudencia|se esperaba|dictaba la costumbre),",
+  "{sobTit} (despierta con la idea hecha|lo lleva pensando desde el invierno):",
+  "Cuesta (dos sesiones de {junta}|un mes de cartas|más de lo previsto), pero sale:",
+  "Lo que empezó como (rumor|ocurrencia|queja) acaba en cédula:",
+  "Con la (firma|tinta|cera) todavía fresca,",
+  "Antes de que nadie (pueda oponerse|se entere|reúna firmas en contra),",
+  "{minCargo} redacta y {sob} (corrige de su puño|añade una cláusula que nadie pidió).",
+  "Se decide en (una tarde|dos horas) lo que llevaba (años|una generación) discutiéndose:",
+  "Nadie recuerda de quién fue la idea, pero",
+  "{sobTit} lo consulta con {sabio} y (con nadie más|con quien no debía).",
+  "Después de (una cacería y dos copas|una misa larga|una noche sin dormir),",
+  "La orden llega a {otraProv} con {medio}, (tarde y mal copiada|cuando ya no hace falta).",
+  "Se despacha entre otros (veinte|treinta) asuntos:",
+  "{junta} lo aprueba (por cansancio|por unanimidad sospechosa|sin quórum).",
+  "Con más (urgencia que cálculo|voluntad que medios|prisa que acierto),",
+  "El asunto llevaba (meses|años) en {registro}. Se resuelve así:",
+  "{sobTit} (escucha, calla, y al día siguiente firma|pregunta poco y decide rápido).",
+  "Lo pide {facGente} y (por una vez se les hace caso|se les hace caso a medias):",
+  "A cambio de (un silencio|un favor|una promesa) que nadie explica,",
+  "{minCargo} se opone, pierde, y (lo firma igual|lo ejecuta a regañadientes).",
+  "En el mismo despacho donde se firmó lo contrario (hace un año|no hace tanto),",
+  "Se hace (sin pregón|en voz baja|de madrugada), para que no se hable:",
+  "Lo que decide la corona {estacion}:",
+  "Contra el consejo de (todos menos uno|los que entienden del asunto),",
+  "Sin más razón que (la voluntad de {sob}|la necesidad|lo que dicta el tesoro),",
+  "{sob} lo firma (con la mano izquierda, dicen|de pie, sin sentarse|delante de {minCargo}).",
+  "Se pone por escrito lo que ya se hacía (a escondidas|sin permiso):",
+  "En cuanto (llega el correo|acaba la misa|se vacía la sala),",
 ];
+
 // ——— quién reacciona: sale del estamento que más se movió ———
 const REACCION_BIEN = [
   "{facGente} lo celebran [más de lo que conviene].",
@@ -4755,6 +4887,24 @@ const REACCION_BIEN = [
   "{facGente} ofrecen (un donativo|una misa|hombres) sin que nadie se los pida.",
   "Por una vez, {facGente} no tienen nada que reprochar.",
   "{facUno} lo cuenta como si hubiera sido idea suya.",
+  "{facGente} mandan (un memorial de gracias|una comisión|dos carretas de regalos) a palacio.",
+  "{facUno} manda decir una misa (por {sob}|por el buen suceso).",
+  "En {otraProv} {facGente} sacan (los estandartes|las mesas a la calle).",
+  "{facGente} prometen (lo que no van a cumplir|más de lo que pueden) y de momento lo dicen en serio.",
+  "{facUno}, que llevaba años quejándose, calla por primera vez.",
+  "{facGente} lo ponen por escrito en {registro}, no vaya a ser que se olvide.",
+  "{facUno} se ofrece a pagar (la mitad|una parte) de su bolsillo.",
+  "{facGente} descubren de golpe que siempre estuvieron a favor.",
+  "Se canta un tedeum y {facGente} van todos.",
+  "{facUno} pide audiencia solo para dar las gracias.",
+  "{facGente} bajan el tono, que ya es mucho.",
+  "En {otraProv} lo festejan (tres días|hasta que se acaba el vino).",
+  "{facUno} propone (una estatua|un retrato|una inscripción) y nadie se opone.",
+  "{facGente} envían hijos a servir en la corte, que es como se agradece de verdad.",
+  "Hasta {facUno}, que nunca da el brazo a torcer, lo aprueba en público.",
+  "{facGente} dejan de mandar quejas por un tiempo.",
+  "{facUno} lo celebra con una fiesta que dura más de lo prudente.",
+  "{facGente} cierran filas detrás de {sob} [por ahora].",
 ];
 const REACCION_MAL = [
   "{facGente} no lo perdonan.",
@@ -4764,6 +4914,25 @@ const REACCION_MAL = [
   "Desde los púlpitos de {otraProv} se predica contra la medida.",
   "{facUno} pone a salvo lo suyo antes de que se note.",
   "{facGente} obedecen, y se acuerdan.",
+  "{facUno} deja de venir a la corte [sin dar explicaciones].",
+  "{facGente} cumplen la letra y se saltan el espíritu.",
+  "En {otraProv} aparecen pasquines contra {sob}.",
+  "{facUno} pide licencia para retirarse a sus tierras. Se la dan.",
+  "{facGente} empiezan a hablar de fueros antiguos que nadie recordaba.",
+  "{facUno} jura que no dijo lo que todos le oyeron decir.",
+  "{facGente} retrasan (los pagos|las levas|las cuentas) sin llegar a negarse.",
+  "Se murmura en {otraProv} que {sob} ya no es el que era.",
+  "{facUno} busca por primera vez quién le escuche fuera del reino.",
+  "{facGente} obedecen tan despacio que da lo mismo.",
+  "La noticia llega a {otraProv} y allí {facGente} la reciben peor todavía.",
+  "{facUno} pierde el poco respeto que le tenía a {minCargo}.",
+  "{facGente} escriben a {sob} en un tono que hace años no usaban.",
+  "{facUno} amenaza con marcharse. Esta vez puede que lo haga.",
+  "{facGente} llevan el asunto a {junta} y lo pierden, pero lo llevan.",
+  "En {otraProv} apedrean (la casa del recaudador|el escudo de la corona).",
+  "{facGente} se acuerdan de este día cada vez que se les pide algo.",
+  "{facUno} lo llama, delante de testigos, una equivocación.",
+  "{facGente} descubren que tienen más quejas de las que creían.",
 ];
 // ——— qué se ve: el detalle de época ———
 const DETALLE = [
@@ -4781,6 +4950,54 @@ const DETALLE = [
   "Dos hermanos se matan en {otraProv} por una linde, y la comarca habla de eso.",
   "{sob} no vuelve a mencionarlo.",
   "Los precios en {capital} no se mueven, que ya es noticia.",
+  "En {otraProv} se hunde un puente y hay que dar rodeo (media legua|toda una jornada).",
+  "{sabio} pide audiencia para hablar de otra cosa y no se la dan.",
+  "Una helada tardía se lleva (la flor de los frutales|media cosecha de vino) en {otraProv}.",
+  "{minCargo} manda copiar el documento tres veces, por si acaso.",
+  "Se pierde el original y hay que rehacerlo de memoria.",
+  "En {capital} nace un ternero de dos cabezas y medio pueblo va a verlo.",
+  "Un cambista de {otraProv} quiebra esa semana [y arrastra a otros dos].",
+  "Los caminos se llenan de (romeros|licenciados|buhoneros) y de los que viven de ellos.",
+  "{sob} pasa el mes en {otraProv}, cazando.",
+  "Muere de viejo el escribano que llevaba {registro} cuarenta años.",
+  "En {otraProv} el río baja tan bajo que se ven los cimientos del puente viejo.",
+  "{medio} llega a {otraProv} con un mes de retraso y ya nadie pregunta.",
+  "Se ve una luz en el cielo sobre {capital} tres noches seguidas.",
+  "{minCargo} y {min} no se hablan desde hace semanas y en {junta} se nota.",
+  "Los canteros de {otraProv} piden más jornal y lo consiguen a medias.",
+  "Se agota el papel en la cancillería y hay que comprarlo fuera.",
+  "En {otraProv} entierran a un niño cada día de esa semana, y nadie lo anota.",
+  "El precio del hierro sube y todos los presupuestos quedan cortos.",
+  "{sabio} escribe una carta larguísima que nadie contesta.",
+  "Un lobo baja hasta las casas en {otraProv} y se habla de eso un mes entero.",
+  "La corte se muda a {otraProv} para huir (del calor|de la peste) y todo se retrasa.",
+  "Se descubre que el tesorero anterior se llevaba (una parte|más de lo que se creía).",
+  "En {capital} hay tres bodas de importancia el mismo mes.",
+  "{minCargo} enferma y despacha desde la cama.",
+  "Los pozos de {otraProv} se secan y se abre uno nuevo con más fe que ciencia.",
+  "Llegan mercaderes de muy lejos con cosas que nadie sabe para qué sirven.",
+  "Se cae parte del tejado de {registro} y se mojan legajos de dos siglos.",
+  "En {otraProv} el concejo pleitea con el vecino por un molino.",
+  "{sob} manda tapiar una puerta de palacio y no dice por qué.",
+  "Un eclipse asusta a media población y {sabio} lo había anunciado sin que le creyeran.",
+  "Los sueldos de la corte se pagan (con dos meses de retraso|en especie).",
+  "En {otraProv} aparece muerto un hombre importante y se cierra el caso deprisa.",
+  "Se prohíbe el juego en {capital} y se juega igual, más caro.",
+  "Vuelven los que se habían ido a servir fuera, y traen malas costumbres.",
+  "En {otraProv} cae granizo del tamaño de nueces.",
+  "Un maestro de obras de {otraProv} propone algo que nadie entiende y se le paga por callar.",
+  "El cabildo de {otraProv} discute dos meses (dónde poner un altar|el orden de una procesión).",
+  "Se cierra el paso de la sierra hasta la primavera.",
+  "{min} compra tierras en {otraProv} con un dinero que no se sabe de dónde salió.",
+  "En {capital} se representa una obra que alude a todo esto y no la prohíben.",
+  "Nace un heredero en (una casa importante|el arrabal) y la fiesta dura tres días.",
+  "Los perros de {capital} amanecen envenenados y nadie averigua quién.",
+  "El invierno viene tan suave que la gente desconfía.",
+  "En {otraProv} se descubre una veta de (hierro|sal|plomo) y se pelean por ella antes de medirla.",
+  "{sabio} y {min} discuten en público sobre algo que ninguno entiende del todo.",
+  "Se hunde una mina en {otraProv} con doce dentro.",
+  "En {capital} no se habla de esto: se habla de (un duelo|un adulterio|una herencia).",
+  "Pasa un año entero antes de que en {otraProv} se cumpla la orden.",
 ];
 
 // Los huecos devuelven minúscula («el obispo», «los capitanes»); si caen al
@@ -4793,18 +5010,40 @@ function pulir(t) {
   return x.charAt(0).toUpperCase() + x.slice(1);
 }
 
+// Lo que más delata una plantilla no son las palabras sino la forma: si todos
+// los turnos son apertura + hecho + reacción, el ojo lo aprende aunque las
+// frases cambien. Así que también varía el armado.
+const CONECTOR = ["y por eso", "y con eso", "aunque", "mientras tanto", "de paso", "con todo",
+  "y a la vuelta", "y de rebote", "pero", "así que", "y al poco", "y desde entonces"];
+
 // Arma el turno con varios tiempos. No siempre los mismos, ni en el mismo
 // orden: una narración que empieza igual todas las veces se nota enseguida.
+function nombresPropios(s) {
+  const n = new Set();
+  const meter = (x) => { if (x) String(x).split(" ").forEach((w) => w.length > 2 && n.add(w)); };
+  meter((s.soberano || {}).nombre);
+  meter((s.nacion || {}).nombre);
+  for (const m of ((s.gobierno || {}).miembros || [])) meter(m.nombre);
+  for (const x of ((s.edu || {}).sabios || [])) meter(x.nombre);
+  for (const v of (s.vecinos || [])) meter(v.nombre);
+  for (const q of (s.provincias || [])) meter(q.nombre);
+  return n;
+}
+
 function narrar(hechos, s, rnd, res) {
   if (!hechos || !hechos.length) return "";
   const partes = [];
   const principal = hechos[0];
-  const E = elenco(s, principal, rnd);
+  const mem = { provs: new Set(), sob: false };
+  const E = elenco(s, principal, rnd, mem);
+  const paso = s.turno || 0;                        // el reparto avanza con el turno
+  const propios = nombresPropios(s);
 
   const conApertura = rnd() < 0.42;
   let prefijo = false;
   if (conApertura) {
-    const ap = expandir(alAzar(rnd, APERTURA), E, rnd);
+    const ap = expandir(deBolsa("apertura", APERTURA, paso), E, rnd);
+    if (ap.includes(String((s.soberano || {}).nombre || "\u0000"))) mem.sob = true;
     prefijo = !/\.$/.test(ap);
     partes.push(ap);
   }
@@ -4812,10 +5051,11 @@ function narrar(hechos, s, rnd, res) {
   for (const h of hechos) {
     const pool = ACTO[h.t];
     if (!pool) continue;
-    const e = elenco(s, h, rnd);
-    let frase = expandir(alAzar(rnd, pool), e, rnd);
+    const e = elenco(s, h, rnd, mem);
+    let frase = expandir(deBolsa("acto:" + h.t, pool, paso), e, rnd);
     // si la apertura no cerró la oración, lo que sigue continúa en minúscula
-    if (partes.length === 1 && prefijo)
+    // —pero un nombre propio se queda como está
+    if (partes.length === 1 && prefijo && !propios.has(frase.split(/[\s,.:]/)[0]))
       frase = frase.charAt(0).toLowerCase() + frase.slice(1);
     partes.push(frase + (/[.!?]$/.test(frase) ? "" : "."));
   }
@@ -4824,10 +5064,25 @@ function narrar(hechos, s, rnd, res) {
   const mov = Object.entries((res && res.fac) || {}).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
   if (mov && Math.abs(mov[1]) >= 5 && rnd() < 0.72) {
     const f = FACCIONES.find((x) => x.id === mov[0]);
-    const e = elenco(s, { ...principal, faccion: f }, rnd);
-    partes.push(expandir(alAzar(rnd, mov[1] > 0 ? REACCION_BIEN : REACCION_MAL), e, rnd));
+    const e = elenco(s, { ...principal, faccion: f }, rnd, mem);
+    partes.push(expandir(mov[1] > 0 ? deBolsa("reacBien", REACCION_BIEN, paso)
+                                    : deBolsa("reacMal", REACCION_MAL, paso), e, rnd));
   }
-  if (rnd() < 0.38) partes.push(expandir(alAzar(rnd, DETALLE), E, rnd));
+  // el detalle a veces abre la escena en vez de cerrarla
+  if (rnd() < 0.38) {
+    const det = expandir(deBolsa("detalle", DETALLE, paso), E, rnd);
+    if (!conApertura && rnd() < 0.4) partes.unshift(det);
+    else partes.push(det);
+  }
+  // y de vez en cuando dos tiempos se cosen en una sola oración
+  if (partes.length >= 2 && rnd() < 0.3) {
+    const i = partes.length - 1;
+    const con = deBolsa("conector", CONECTOR, paso);
+    const cola = partes[i].replace(/\.$/, "");
+    partes[i - 1] = partes[i - 1].replace(/\.$/, "") + ", " + con + " " +
+      cola.charAt(0).toLowerCase() + cola.slice(1) + ".";
+    partes.splice(i, 1);
+  }
 
   return pulir(partes.join(" "));
 }
@@ -4837,26 +5092,47 @@ function narrar(hechos, s, rnd, res) {
 // del reino hace verosímil. No es decoración: los que tienen consecuencias
 // las aplican.
 const SUCESOS = [
-  { id: "cometa", peso: () => 1, txt: "Un cometa cruza el cielo (durante nueve noches|dos semanas seguidas) y (nadie se pone de acuerdo en qué anuncia|los astrólogos discuten sin descanso)." },
+  { id: "cometa", peso: () => 1, txt: "Un cometa cruza el cielo (durante nueve noches|dos semanas seguidas|hasta la luna nueva) y (nadie se pone de acuerdo en qué anuncia|los astrólogos discuten sin descanso|se cierran los mercados por si acaso)." },
   { id: "peste", peso: (s, c) => (c.pobTecho > 0.85 ? 4 : 1), txt: "Llega la peste (por los puertos|con los arrieros|de las tierras del sur) y se lleva a quien alcanza.", d: { estabilidad: -6 }, pobPct: -0.04 },
-  { id: "buena_cosecha", peso: () => 2, txt: "El año viene generoso: (los graneros no dan abasto|se pierde grano por falta de dónde guardarlo).", d: { economia: 3 } },
-  { id: "incendio", peso: () => 1.5, txt: "Un incendio devora (un barrio entero de la capital|el arrabal de los curtidores|media calle de madera).", d: { economia: -3, estabilidad: -2 } },
-  { id: "hereje", peso: (s) => (s.stats.tecnologia > 45 ? 3 : 1), txt: "Un predicador reúne multitudes con doctrinas que (el clero condena|nadie sabe rebatir).", fac: { clero: -6, pueblo: 4 } },
-  { id: "descubrimiento", peso: (s) => (s.stats.tecnologia > 40 ? 3 : 0.5), txt: "(Un taller de la capital|Un molinero|Un boticario) da con un procedimiento que nadie había ensayado.", d: { tecnologia: 3 } },
-  { id: "muerte_noble", peso: () => 1.5, txt: "Muere sin herederos (un gran señor|una casa antigua) y (se disputa la herencia|los primos se arman).", fac: { nobleza: -5 } },
-  { id: "motin_pan", peso: (s, c) => (c.pobTecho > 0.95 ? 5 : 0.3), txt: "El precio del pan desata un motín (en el mercado|a las puertas del pósito|en tres plazas a la vez).", d: { estabilidad: -5 }, fac: { pueblo: -8 } },
-  { id: "feria", peso: (s) => (s.stats.economia > 55 ? 3 : 1), txt: "La feria anual atrae a tratantes de (medio continente|más allá de los pasos).", d: { economia: 2 }, fac: { mercaderes: 5 } },
-  { id: "milagro", peso: () => 1, txt: "Se habla de un milagro (en una aldea|junto a una fuente) y empiezan a llegar romeros.", fac: { clero: 6, pueblo: 4 } },
-  { id: "tormenta", peso: () => 1.5, txt: "Un temporal (echa a pique media flota pesquera|arranca los tejados de una comarca entera).", d: { economia: -2 } },
-  { id: "embajada_lejana", peso: (s) => (s.stats.prestigio > 55 ? 3 : 0.5), txt: "Llega una embajada de un reino lejano (solo para ver la corte|con regalos que nadie sabe nombrar).", d: { prestigio: 3 } },
+  { id: "buena_cosecha", peso: () => 2, txt: "El año viene generoso: (los graneros no dan abasto|se pierde grano por falta de dónde guardarlo|el pan baja hasta lo que nadie recordaba|hasta los jornaleros comen carne).", d: { economia: 3 } },
+  { id: "incendio", peso: () => 1.5, txt: "Un incendio devora (un barrio entero de la capital|el arrabal de los curtidores|media calle de madera|dos manzanas y el mercado) [y arde tres días].", d: { economia: -3, estabilidad: -2 } },
+  { id: "hereje", peso: (s) => (s.stats.tecnologia > 45 ? 3 : 1), txt: "Un predicador reúne multitudes con doctrinas que (el clero condena|nadie sabe rebatir|escandalizan más por quién las dice que por lo que dicen).", fac: { clero: -6, pueblo: 4 } },
+  { id: "descubrimiento", peso: (s) => (s.stats.tecnologia > 40 ? 3 : 0.5), txt: "(Un taller de la capital|Un molinero|Un boticario|Un relojero) da con (un procedimiento|una mezcla|un mecanismo) que nadie había ensayado.", d: { tecnologia: 3 } },
+  { id: "muerte_noble", peso: () => 1.5, txt: "Muere sin herederos (un gran señor|una casa antigua|el más rico del reino) y (se disputa la herencia|los primos se arman|tres tribunales se declaran competentes).", fac: { nobleza: -5 } },
+  { id: "motin_pan", peso: (s, c) => (c.pobTecho > 0.95 ? 5 : 0.3), txt: "El precio del pan desata un motín (en el mercado|a las puertas del pósito|en tres plazas a la vez|que dura dos días).", d: { estabilidad: -5 }, fac: { pueblo: -8 } },
+  { id: "feria", peso: (s) => (s.stats.economia > 55 ? 3 : 1), txt: "La feria anual atrae a tratantes de (medio continente|más allá de los pasos|donde nadie sabía que había gente) [y se agotan las posadas].", d: { economia: 2 }, fac: { mercaderes: 5 } },
+  { id: "milagro", peso: () => 1, txt: "Se habla de un milagro (en una aldea|junto a una fuente|en un camino de cabras) y (empiezan a llegar romeros|el obispo manda investigar|se levanta una ermita en un mes).", fac: { clero: 6, pueblo: 4 } },
+  { id: "tormenta", peso: () => 1.5, txt: "Un temporal (echa a pique media flota pesquera|arranca los tejados de una comarca entera|deja la costa sin un barco entero).", d: { economia: -2 } },
+  { id: "embajada_lejana", peso: (s) => (s.stats.prestigio > 55 ? 3 : 0.5), txt: "Llega una embajada de un reino lejano (solo para ver la corte|con regalos que nadie sabe nombrar|preguntando por rutas que aquí nadie ha hecho).", d: { prestigio: 3 } },
+  { id: "sequia", peso: () => 2, txt: "No llueve (en todo el otoño|desde la siega|desde que nadie recuerda) y (los pozos empiezan a fallar|el ganado baja a los ríos secos|se hacen rogativas en cada villa).", d: { economia: -3 }, fac: { pueblo: -5 } },
+  { id: "lobos", peso: () => 1.2, txt: "Un invierno duro echa a los lobos sobre (los rebaños|las majadas|los caminos) [y sobre algún pastor]." },
+  { id: "hallazgo", peso: () => 1.5, txt: "Se encuentra (una veta de plata|un tesoro enterrado|unas ruinas con inscripciones|una cantera de mármol) donde (nadie buscaba|solo había pastos).", d: { economia: 2, prestigio: 2 } },
+  { id: "bandidos", peso: (s) => (s.stats.estabilidad < 45 ? 4 : 1), txt: "Los caminos se hacen peligrosos: (partidas de bandidos|soldados licenciados que no vuelven a casa|gente que perdió la tierra) [y ya nadie viaja solo].", d: { economia: -3, estabilidad: -3 } },
+  { id: "rio_crecida", peso: () => 1.5, txt: "El río se sale de madre y (se lleva molinos y puentes|anega la vega entera|deja las casas bajas con barro hasta el techo).", d: { economia: -3 } },
+  { id: "cisma", peso: (s) => (s.stats.estabilidad < 50 ? 2.5 : 0.8), txt: "Dos autoridades religiosas (se disputan la misma silla|se excomulgan mutuamente|reclaman la misma obediencia) y (cada bando busca padrinos|el reino tiene que elegir|nadie sabe a quién obedecer).", fac: { clero: -8 } },
+  { id: "invento", peso: (s) => (s.stats.tecnologia > 35 ? 2.5 : 0.6), txt: "Llega (un artefacto|un procedimiento|un libro|una máquina) de fuera y en la corte se discute si (sirve de algo|es lícito|conviene copiarlo).", d: { tecnologia: 2 } },
+  { id: "boda_lejana", peso: () => 1.2, txt: "Una boda entre dos casas extranjeras (cambia el tablero|junta dos coronas|deshace una alianza) sin que nadie nos pregunte.", d: { diplomacia: -2 } },
+  { id: "motin_tropa", peso: (s) => (s.guerra ? 3.5 : 0.6), txt: "La tropa se amotina por (la paga atrasada|el vino aguado|un oficial odiado|el pan podrido) [y hay que ahorcar a dos para calmarlo].", d: { militar: -4, estabilidad: -3 }, fac: { ejercito: -10 } },
+  { id: "buen_vino", peso: () => 1.5, txt: "El vino sale (excelente|abundante|mejor que en diez años) y se (exporta hasta donde no llegaban las cubas|paga a precio de oro fuera).", d: { economia: 2 }, fac: { mercaderes: 4 } },
+  { id: "profecia", peso: () => 1, txt: "Corre una profecía sobre el fin de (la dinastía|los tiempos|el reino) y (no hay modo de callarla|medio pueblo la repite|se prende a quien la difunde, y sigue corriendo).", fac: { pueblo: -4, clero: 3 } },
+  { id: "epidemia_ganado", peso: () => 1.5, txt: "Una peste del ganado (vacía los establos|deja los campos sin bueyes de labor|obliga a quemar los rebaños).", d: { economia: -4 } },
+  { id: "refugiados", peso: () => 1.2, txt: "Llegan gentes huidas de (una guerra vecina|una hambruna|una persecución) y hay que decidir qué hacer con ellas.", fac: { pueblo: -3, clero: 5 } },
+  { id: "libro_prohibido", peso: (s) => (s.stats.tecnologia > 40 ? 2 : 0.6), txt: "Circula un libro que (el clero quiere quemar|nadie admite haber leído) y (medio mundo quiere leer|se copia a mano más deprisa de lo que se prohíbe).", d: { tecnologia: 2 }, fac: { clero: -5 } },
+  { id: "duelo_corte", peso: () => 1.3, txt: "Dos grandes de la corte se baten en duelo (por una ofensa vieja|por una herencia|por una palabra en público) y (muere uno|quedan los dos malheridos|el superviviente se destierra solo).", fac: { nobleza: -4 } },
+  { id: "buena_pesca", peso: () => 1.2, txt: "Los bancos de pesca vienen tan cargados que (se sala más de lo que se puede vender|los precios se hunden|no hay barriles suficientes).", d: { economia: 2 } },
+  { id: "terremoto", peso: () => 0.7, txt: "Un temblor (agrieta las torres|derriba media aldea|abre una grieta en la catedral) y se lee como (aviso del cielo|castigo|señal de algo peor).", d: { estabilidad: -4, economia: -3 } },
+  { id: "hereje_quemado", peso: () => 1, txt: "Se quema a un hereje (en la plaza mayor|sin mucho ruido|con toda la corte presente) y no todos aplauden.", fac: { clero: 6, pueblo: -3 } },
+  { id: "moneda_falsa", peso: (s) => ((s.devaluaciones || 0) > 0 ? 4 : 1), txt: "Aparece moneda falsa (en tal cantidad que nadie fía de la buena|tan bien hecha que engaña a los cambistas|en tres ciudades a la vez).", d: { economia: -4 }, fac: { mercaderes: -8 } },
+  { id: "peregrinacion", peso: () => 1.3, txt: "Una peregrinación multitudinaria (colapsa los caminos|deja dinero en cada venta del trayecto|trae la peste de regalo).", fac: { clero: 5 } },
+  { id: "nieve", peso: () => 1.2, txt: "Nieva como no se recordaba y el reino se detiene (tres semanas|hasta bien entrado marzo|con los pasos cerrados y el correo parado)." },
 ];
 function sucesoDelMundo(s, c, rnd) {
   if (rnd() > 0.45) return null;
-  const pesos = SUCESOS.map((x) => Math.max(0, x.peso(s, c)));
-  const total = pesos.reduce((a, b) => a + b, 0);
-  let t = rnd() * total;
-  for (let i = 0; i < SUCESOS.length; i++) { t -= pesos[i]; if (t <= 0) return SUCESOS[i]; }
-  return SUCESOS[0];
+  // se sortea por peso —lo verosímil según el estado— pero de una bolsa, para
+  // que la peste no caiga tres veces en diez años
+  const posibles = SUCESOS.filter((x) => x.peso(s, c) > 0.9);
+  const lista = posibles.length >= 6 ? posibles : SUCESOS;
+  return deBolsa("suceso", lista, s.turno || 0);
 }
 
 // ═══ EL TURNO COMPLETO ═══════════════════════════════════════
@@ -4954,32 +5230,62 @@ function aplicarVecinos(vecs, cambios) {
 
 // Cuando el jugador deja pasar el tiempo, el mundo habla solo.
 const SIN_ORDEN = [
-  "El reino sigue su curso sin que (la corona levante la voz|salga una sola cédula de palacio).",
-  "Pasan (las semanas|los meses). (La corte intriga|Se despacha lo de siempre) y nadie espera órdenes.",
-  "No hay decretos este tiempo: los asuntos se resuelven (como pueden|a su aire), provincia por provincia.",
-  "{sobTit} deja correr los días. {minCargo} lo interpreta (a su manera|como le conviene).",
-  "En palacio (se caza|se reza|se juega a las tablas) y el reino se administra solo.",
+  "El reino sigue su curso sin que (la corona levante la voz|salga una sola cédula de palacio|nadie mande nada).",
+  "Pasan (las semanas|los meses|las estaciones). (La corte intriga|Se despacha lo de siempre|Nadie decide nada) y nadie espera órdenes.",
+  "No hay decretos este tiempo: los asuntos se resuelven (como pueden|a su aire|por costumbre), provincia por provincia.",
+  "{sobTit} deja correr los días. {minCargo} lo interpreta (a su manera|como le conviene|con alivio).",
+  "En palacio (se caza|se reza|se juega a las tablas|se discute de otra cosa) y el reino se administra solo.",
   "Nada sale de {registro} este tiempo. En {otraProv} tampoco lo echan de menos.",
-  "{sobTit}, con sus {edad} años, (no está para decretos|prefiere no decidir nada este tiempo).",
+  "{sobTit}, con sus {edad} años, (no está para decretos|prefiere no decidir nada este tiempo|deja hacer).",
+  "La corona (calla|espera|mira). (Unos lo llaman prudencia|Otros, otra cosa|Nadie se atreve a preguntar).",
+  "{junta} se reúne (dos veces|una sola vez) y no acuerda nada [que valga la pena anotar].",
+  "El gobierno se limita a (lo que no puede aplazarse|firmar lo que ya estaba firmado|cobrar y pagar).",
+  "{minCargo} despacha solo, (sin consultar|porque no hay a quién consultar), lo urgente.",
+  "Se deja pasar el tiempo (a propósito|por cansancio|porque no hay dinero para más).",
+  "Ningún pregón, ninguna cédula: (el reino respira|los concejos hacen lo que quieren).",
+  "{sob} pasa el tiempo (de caza|enfermo|en otra parte) y la corte se acomoda a su ausencia.",
 ];
+
 const SIN_ORDEN_COLA = {
   guerra: ["En el frente, en cambio, no hay pausa.", "El frente no espera a que alguien firme nada.",
-    "Solo en la línea se sigue muriendo con puntualidad."],
+    "Solo en la línea se sigue muriendo con puntualidad.",
+    "La guerra sigue su cuenta, indiferente al despacho.",
+    "En la frontera nadie ha oído hablar de este silencio.",
+    "Los partes siguen llegando, y ninguno trae buenas noticias.",
+    "El ejército hace lo que puede sin que nadie le diga qué.",
+    "En el frente se decide más en un mes que en palacio en un año."],
   hambre: ["En el campo, el pan escasea y se nota.", "En {otraProv} el pan ya no alcanza.",
-    "Los caminos se llenan de gente que busca de comer."],
+    "Los caminos se llenan de gente que busca de comer.",
+    "En las aldeas se come lo que se guardaba para sembrar.",
+    "El precio del grano sube sin que nadie lo ordene.",
+    "En {otraProv} se abre el pósito sin esperar permiso.",
+    "Hay más entierros que bautizos, y eso se sabe sin contar.",
+    "Los que pueden se van, y los que no, aguantan."],
   hostil: ["{facGente} aprovechan el silencio para hacerse oír.",
     "{facUno} llena el hueco con discursos que nadie contesta.",
-    "El silencio de palacio {facGente} lo leen como permiso."],
+    "El silencio de palacio {facGente} lo leen como permiso.",
+    "{facGente} se reúnen más de lo que conviene y sin pedir licencia.",
+    "Donde no hay orden, {facGente} ponen la suya.",
+    "{facUno} empieza a hablar de lo que antes solo pensaba.",
+    "{facGente} descubren que nadie los está mirando.",
+    "La falta de gobierno {facGente} la aprovechan mejor que nadie."],
   calma: ["Es, para variar, un tiempo sin sobresaltos.", "No pasa nada digno de {registro}.",
-    "{medio} tiene que inventarse las noticias."],
+    "{medio} tiene que inventarse las noticias.",
+    "Un tiempo así no da crónicas, y quizá eso sea lo mejor.",
+    "El reino funciona solo, que es más de lo que suele.",
+    "Nada que anotar. En {otraProv} tampoco.",
+    "Se despacha lo de siempre y se cobra lo de siempre.",
+    "Los cronistas de estos años tendrán poco que contar.",
+    "Un año de esos que solo se recuerdan porque no pasó nada."],
 };
 function narrarSinOrden(s, c, rnd) {
   const hostil = c.faccionHostil;
   const E = elenco(s, { faccion: s.guerra ? null : hostil }, rnd);
   const cual = s.guerra ? "guerra" : c.pobTecho > 0.95 ? "hambre"
     : (hostil && (s.facciones || {})[hostil.id] < 35) ? "hostil" : "calma";
-  return pulir(expandir(alAzar(rnd, SIN_ORDEN), E, rnd) + " " +
-               expandir(alAzar(rnd, SIN_ORDEN_COLA[cual]), E, rnd));
+  const paso = s.turno || 0;
+  return pulir(expandir(deBolsa("sinOrden", SIN_ORDEN, paso), E, rnd) + " " +
+               expandir(deBolsa("cola:" + cual, SIN_ORDEN_COLA[cual], paso), E, rnd));
 }
 
 // El ritmo de proyectos e investigaciones sale del estado, no de una opinión.
