@@ -112,10 +112,22 @@ const TERRENOS = {
 const NOMBRES_PROV = ["Ribera", "Marca", "Vega", "Sierra", "Llano", "Confín", "Vado", "Páramo",
                       "Cuenca", "Otero", "Soto", "Alcor"];
 const CARDINALES = ["del Norte", "del Sur", "de Oriente", "de Poniente", "Alta", "Baja", "Media", "Vieja"];
-// Fertilidad efectiva: la tierra más el agua que la cruza.
+// Fertilidad efectiva: la tierra, el agua que la cruza y —esto es nuevo— el
+// clima que le toca. El terreno dice la forma del suelo; el bioma, si encima
+// de ese suelo crece algo. Una llanura del Sahel y una de Normandía tenían
+// hasta ahora la misma fertilidad porque las dos eran «llanura».
+// El factor va comprimido a propósito: el techo nacional se reparte entre las
+// provincias del reino, así que esto redistribuye gente hacia donde se puede
+// vivir sin cambiar cuánta gente cabe en total.
 function fertProv(p) {
   const t = TERRENOS[p.terreno] || TERRENOS.llanura;
-  return t.fert * (p.rio ? 1.22 : 1) * (p.costera ? 1.06 : 1);
+  const a = ambiente(p);
+  const clima = a && BIOMAS[a.bioma] ? 0.35 + 0.65 * BIOMAS[a.bioma].fert : 1;
+  // El río vale poco donde ya llueve y lo vale todo donde no: el regadío de
+  // un río exótico es lo que hace que un desierto dé dos cosechas.
+  const seco = a ? acotar(1 - a.lluvia / 550, 0, 1) : 0;
+  const agua = p.rio ? 1.22 + 0.75 * seco : 1;
+  return t.fert * clima * agua * (p.costera ? 1.06 : 1);
 }
 // El techo nacional se reparte por fertilidad: la suma es idéntica a la de antes.
 function techoProvincia(p, provincias, ciencia) {
@@ -283,11 +295,14 @@ function rejillaProvincias() {
 // Trazo de las provincias visibles. Se guarda en caché por recuadro redondeado,
 // así arrastrar un poco no obliga a reconstruir nada.
 const _cacheVista = new Map();
-function trazoProvinciasEn(x, y, w, h) {
+// Con `porBioma`, en vez de agrupar por país agrupa por lo que crece: el mismo
+// mapa deja de contar quién manda y pasa a contar dónde se puede vivir. Es la
+// misma geometría y la misma caché, cambia el criterio de reunión.
+function trazoProvinciasEn(x, y, w, h, porBioma) {
   const m = w * 0.12;                                    // margen para que no aparezcan de golpe
   const gx0 = Math.floor((x - m) / CELDA), gx1 = Math.floor((x + w + m) / CELDA);
   const gy0 = Math.floor((y - m) / CELDA), gy1 = Math.floor((y + h + m) / CELDA);
-  const clave = `${gx0},${gx1},${gy0},${gy1}`;
+  const clave = `${gx0},${gx1},${gy0},${gy1}` + (porBioma ? "|b" : "");
   if (_cacheVista.has(clave)) return _cacheVista.get(clave);
   const rej = rejillaProvincias();
   // se devuelve agrupado por país: un trazo por país, con su color
@@ -304,11 +319,13 @@ function trazoProvinciasEn(x, y, w, h) {
         // lo que no llega a un par de píxeles no se dibuja: no se vería igual
         if (g.area < (w * h) / 90000) continue;
         if (g.x1 < x - m || g.x0 > x + w + m || g.y1 < y - m || g.y0 > y + h + m) continue;
-        if (!porPais.has(g.pais)) porPais.set(g.pais, []);
-        porPais.get(g.pais).push(g.d);
+        const k = porBioma ? ambienteDe(i, g.x, g.y, g.terreno, g.costera, false).bioma : g.pais;
+        if (!porPais.has(k)) porPais.set(k, []);
+        porPais.get(k).push(g.d);
       }
     }
-  const salida = [...porPais.entries()].map(([p, ds]) => ({ pais: p, d: ds.join(" "), col: colorDePais(p) }));
+  const salida = [...porPais.entries()].map(([k, ds]) => ({ pais: k, d: ds.join(" "),
+    col: porBioma ? BIOMAS[k].col : colorDePais(k) }));
   if (_cacheVista.size > 60) _cacheVista.clear();        // no dejar crecer la caché sin límite
   _cacheVista.set(clave, salida);
   return salida;
@@ -786,6 +803,329 @@ function accidenteEn(x, y, tol) {
   return mar ? { t: "mar", n: mar } : null;
 }
 
+// ═══ SISTEMA MUNDIAL: LA FÍSICA DE CADA PROVINCIA ════════════
+// El mapa traía cuatro datos por provincia —terreno, si es costera, si la
+// cruza un río, cuánto mide— y con eso se decidía todo. Dos llanuras costeras
+// eran la misma llanura costera aunque una estuviera en Noruega y la otra en
+// Senegal.
+//
+// Acá se deriva el resto. No se inventa ni se sortea: sale de dónde está la
+// provincia de verdad. La latitud da la temperatura, la altura la corrige, la
+// distancia al mar dice cuánto se despega el verano del invierno, y de la
+// temperatura y la lluvia sale el bioma igual que en el diagrama de Whittaker.
+// Dos provincias con la misma latitud y distinta altura son distintas; dos con
+// la misma altura y distinta latitud, también. Es lo mínimo para que el
+// planeta deje de ser un tablero.
+//
+// Todo se calcula una vez por provincia y se guarda: la simulación consulta
+// esto en el camino caliente —el techo demográfico se recalcula cada turno—
+// así que no puede costar nada.
+
+// ——— dónde está el mar ———————————————————————————————————————
+// La distancia a la costa manda sobre el clima más que casi cualquier otra
+// cosa: es la diferencia entre Galicia y Castilla a la misma latitud.
+let _costas = null;
+function rejillaCostas() {
+  if (_costas) return _costas;
+  _costas = new Map();
+  for (let i = 0; i < PROV_MUNDO.length; i++) {
+    if (!PROV_MUNDO[i][4]) continue;                     // solo las costeras
+    const g = geomProvincia(i);
+    if (!g) continue;
+    const k = Math.floor(g.x / 10) + "," + Math.floor(g.y / 10);
+    if (!_costas.has(k)) _costas.set(k, []);
+    _costas.get(k).push([g.x, g.y]);
+  }
+  return _costas;
+}
+function aLaCosta(x, y) {
+  const rej = rejillaCostas();
+  const gx = Math.floor(x / 10), gy = Math.floor(y / 10);
+  let md = Infinity;
+  for (let r = 0; r <= 4 && md === Infinity; r++) {       // anillos, de adentro hacia afuera
+    for (let i = -r; i <= r; i++)
+      for (let j = -r; j <= r; j++) {
+        if (r > 0 && Math.max(Math.abs(i), Math.abs(j)) !== r) continue;
+        const l = rej.get(gx + i + "," + (gy + j));
+        if (!l) continue;
+        for (const [cx, cy] of l) {
+          const d = Math.hypot(cx - x, cy - y);
+          if (d < md) md = d;
+        }
+      }
+    if (md < (r + 1) * 10) break;                        // ya no puede mejorar fuera del anillo
+  }
+  return md === Infinity ? 45 : md;
+}
+
+// ——— cuánto se levanta el suelo ——————————————————————————————
+// No hay mapa de alturas, pero sí las 153 manchas de sierra y las 86 cumbres
+// con su altitud real. Con eso alcanza para separar una meseta de un valle:
+// el terreno pone la base y el relieve cercano la corrige.
+const ALTURA_BASE = { montana: 1450, meseta: 780, colina: 380, bosque: 240, estepa: 340,
+  llanura: 120, vega: 80, marisma: 12, delta: 8 };
+function alturaEn(x, y, terreno) {
+  let h = ALTURA_BASE[terreno] != null ? ALTURA_BASE[terreno] : 200;
+  // Caer dentro de una mancha de sierra suma, no impone: el borde de una
+  // cordillera no está a la altura de su eje. Antes forzaba 900 m y toda
+  // Andalucía quedaba a novecientos metros porque la mancha «Península
+  // Ibérica» la tapa entera.
+  const a = accidentes();
+  const k = Math.floor(x / CELDA_ACC) + "," + Math.floor(y / CELDA_ACC);
+  for (const q of a.areas.get(k) || [])
+    if (q.t === "sierra" && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && dentroDe(q.pts, x, y)) {
+      h += terreno === "montana" ? 900 : terreno === "meseta" || terreno === "colina" ? 260 : 120;
+      break;
+    }
+  // Una cumbre levanta el suelo a su alrededor, no solo su vértice: el Everest
+  // no sale de una llanura. Se suman las cercanas porque un macizo con cinco
+  // ochomiles está más alto que uno con uno solo.
+  let cerca = 0;
+  for (const p of FISICO.picos) {
+    const d = Math.hypot(p[1] - x, p[2] - y);
+    if (d < 7) cerca += p[3] * Math.pow(Math.max(0, 1 - d / 7), 2) * 0.30;
+  }
+  return Math.round(Math.min(5200, Math.max(h, Math.min(h + cerca, cerca * 1.1 + h * 0.4))));
+}
+
+// ——— el clima ————————————————————————————————————————————————
+// Temperatura media al nivel del mar por latitud, corregida por altura con el
+// gradiente de siempre (6,5 °C cada mil metros). La amplitud estacional crece
+// con la latitud y, sobre todo, con la distancia al mar: el invierno siberiano
+// no es cosa de latitud, es de continentalidad.
+// Temperatura y lluvia medias por latitud, tal como son en el planeta. Estuve
+// un rato tratando de que una fórmula cerrada diera la curva y no da: la
+// temperatura tiene una meseta tropical y un desplome en latitudes medias, y
+// la lluvia tiene tres máximos. Interpolar la tabla real es más corto, más
+// exacto y no hay que defenderlo.
+const T_ZONAL = [[0, 26.5], [10, 26.5], [20, 25], [30, 21], [40, 14],
+                 [50, 6], [60, 0], [70, -10], [80, -17], [90, -20]];
+const P_ZONAL = [[0, 2050], [10, 1650], [20, 900], [25, 620], [30, 620],
+                 [40, 820], [50, 900], [60, 650], [70, 340], [80, 190], [90, 150]];
+function interp(tabla, a) {
+  for (let i = 1; i < tabla.length; i++)
+    if (a <= tabla[i][0]) {
+      const [x0, y0] = tabla[i - 1], [x1, y1] = tabla[i];
+      return y0 + ((y1 - y0) * (a - x0)) / (x1 - x0);
+    }
+  return tabla[tabla.length - 1][1];
+}
+// El monzón asiático es la desviación más grande del planeta respecto de su
+// propia media zonal: Bengala está en la latitud del Sahara y recibe veinte
+// veces más agua. No hay modelo por bandas que lo saque, así que va escrito.
+const MONZON = [[62, 145, 5, 36, 1.6], [95, 145, 20, 42, 1.3]];
+// A sotavento de una cordillera, en el cinturón de los oestes, el aire baja
+// ya seco. Es lo que hace que la Patagonia sea estepa teniendo el Pacífico a
+// doscientos kilómetros, y lo mismo vale para la Gran Cuenca americana o para
+// el interior de Asia. Solo se aplica entre los 30 y los 60 grados, que es
+// donde soplan los oestes; en los alisios la sombra cae del otro lado y eso
+// no está modelado.
+function enSierra(x, y) {
+  const l = accidentes().areas.get(Math.floor(x / CELDA_ACC) + "," + Math.floor(y / CELDA_ACC));
+  if (!l) return false;
+  for (const q of l)
+    if (q.t === "sierra" && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && dentroDe(q.pts, x, y))
+      return true;
+  return false;
+}
+function sombraDeLluvia(x, y, lat) {
+  const a = Math.abs(lat);
+  if (a < 30 || a > 60) return 1;
+  if (enSierra(x, y)) return 1;                      // en la sierra llueve; detrás, no
+  for (const d of [2, 4, 6]) if (enSierra(x - d, y)) return 0.34 + 0.09 * d;
+  return 1;
+}
+function climaEn(lat, altura, contin, lon, relieve) {
+  const a = Math.abs(lat);
+  // El mar no solo amansa el año: también lo templa. La media zonal incluye
+  // océano, y una costa occidental en latitudes medias está muy por encima de
+  // ella —Bretaña y el Labrador están a la misma latitud—. Sin esto, media
+  // Europa salía a cuatro grados y quedaba clasificada como bosque boreal.
+  const marino = (1 - contin) * Math.min(6.5, a * 0.13);
+  const media = interp(T_ZONAL, a) + marino - (altura / 1000) * 6.5;
+  // Un mar helado no amansa nada. Medio año congelado, el Ártico deja de ser
+  // un mar a efectos del clima y la costa siberiana se comporta como interior:
+  // por eso Yakutsk tiene cuarenta grados entre julio y enero teniendo el mar
+  // más cerca que Berlín.
+  const hielo = acotar((a - 55) / 12, 0, 1);
+  const efectiva = contin + (1 - contin) * hielo;
+  const amplitud = Math.min(48, 0.55 * a * (0.42 + 0.9 * efectiva) + 2);
+  // Los grandes desiertos no están donde no llega el mar: están bajo los
+  // anticiclones subtropicales, en una banda estrecha alrededor de los 24°.
+  // Por eso la sequedad la manda la latitud y la continentalidad solo la
+  // agrava. Al revés —que mandara la distancia al mar— el Sahara salía verde,
+  // porque el Mediterráneo y el mar Rojo lo dejan a siete grados de una costa.
+  let seco = Math.exp(-Math.pow((a - 24) / 9, 2));
+  // Donde hay monzón no hay anticiclón subtropical: es justamente el sistema
+  // que lo desplaza. Así que el monzón no multiplica la lluvia del desierto,
+  // sino que primero cancela el desierto.
+  let monzon = 1;
+  if (lon != null)
+    for (const [lo0, lo1, la0, la1, k] of MONZON)
+      if (lon >= lo0 && lon <= lo1 && lat >= la0 && lat <= la1) { monzon = k; seco *= 0.15; break; }
+  let lluvia = interp(P_ZONAL, a) * (1 - 0.62 * seco) * (1 - contin * (0.30 + 0.55 * seco)) * monzon;
+  // La lluvia orográfica cae en la ladera que sube, no en la meseta que hay
+  // detrás: sumarla a todo lo que estuviera alto ponía a Castilla más lluviosa
+  // que Galicia.
+  if (relieve) lluvia += Math.min(450, altura * 0.16) * (1 - contin * 0.5);
+  return {
+    tMedia: +media.toFixed(1),
+    tVerano: +(media + amplitud / 2).toFixed(1),
+    tInvierno: +(media - amplitud / 2).toFixed(1),
+    amplitud: +amplitud.toFixed(1),
+    lluvia: Math.round(acotar(lluvia, 8, 4200)),
+  };
+}
+
+// ——— el bioma ————————————————————————————————————————————————
+// Whittaker de manual: con la temperatura media y la lluvia anual se sabe qué
+// crece. No hace falta nada más y no admite discusión.
+const BIOMAS = {
+  glaciar:   { n: "Glaciar",          ico: "❆", col: "#D8E4EC", fert: 0.05, mov: 0.45, hab: 3 },
+  tundra:    { n: "Tundra",           ico: "·", col: "#8FA08C", fert: 0.25, mov: 0.75, hab: 18 },
+  taiga:     { n: "Bosque boreal",    ico: "↑", col: "#2F5943", fert: 0.55, mov: 0.70, hab: 42 },
+  templado:  { n: "Bosque templado",  ico: "♣", col: "#3F6B45", fert: 1.10, mov: 0.85, hab: 82 },
+  medit:     { n: "Bosque mediterráneo", ico: "❧", col: "#7B8B4A", fert: 0.95, mov: 0.95, hab: 78 },
+  pradera:   { n: "Pradera",          ico: "▤", col: "#8FA254", fert: 1.30, mov: 1.05, hab: 76 },
+  estepa:    { n: "Estepa",           ico: "⋯", col: "#A8975E", fert: 0.60, mov: 1.05, hab: 45 },
+  sabana:    { n: "Sabana",           ico: "‥", col: "#B0A257", fert: 0.75, mov: 1.00, hab: 52 },
+  monzonico: { n: "Bosque monzónico", ico: "≋", col: "#4E8A55", fert: 1.35, mov: 0.80, hab: 66 },
+  selva:     { n: "Selva",            ico: "❦", col: "#1F6136", fert: 0.85, mov: 0.55, hab: 40 },
+  desierto:  { n: "Desierto",         ico: "∴", col: "#C9AE72", fert: 0.10, mov: 0.85, hab: 10 },
+  pantano:   { n: "Pantano",          ico: "◍", col: "#4E7A82", fert: 0.70, mov: 0.50, hab: 32 },
+  alpino:    { n: "Alta montaña",     ico: "▲", col: "#7C7A82", fert: 0.20, mov: 0.45, hab: 14 },
+};
+function biomaDe(t, lluvia, altura, terreno, amplitud, lat) {
+  if (altura > 2200 || (terreno === "montana" && t < 4)) return "alpino";
+  if (t < -8) return "glaciar";
+  if (t < 0) return "tundra";
+  if (terreno === "marisma" || (terreno === "delta" && lluvia > 900)) return "pantano";
+  if (t < 6) return lluvia > 280 ? "taiga" : "tundra";
+  if (t < 13) {
+    if (lluvia > 620) return "templado";
+    if (lluvia > 280) return "pradera";
+    return "estepa";
+  }
+  if (t < 22) {
+    // El mediterráneo no se define por cuánta agua cae sino por cuándo: verano
+    // seco, invierno suave. Sin lluvia mensual no se puede ver directamente,
+    // pero la combinación —templado, sin extremos, en la banda de los 30 a los
+    // 45 grados— solo se da donde está ese clima.
+    if (lat != null && Math.abs(lat) >= 28 && Math.abs(lat) <= 46 &&
+        amplitud < 22 && lluvia > 330 && lluvia <= 1050) return "medit";
+    if (lluvia > 850) return "templado";
+    if (lluvia > 380) return "pradera";
+    if (lluvia > 200) return "estepa";
+    return "desierto";
+  }
+  if (lluvia > 1700) return "selva";
+  if (lluvia > 1100) return "monzonico";
+  if (lluvia > 550) return "sabana";
+  if (lluvia > 250) return "estepa";
+  return "desierto";
+}
+
+// ——— lo que hay debajo ———————————————————————————————————————
+// Las reservas son finitas y no se ven hasta que se sabe buscarlas. Qué puede
+// haber lo decide la geología: metales donde el terreno se plegó, carbón e
+// hidrocarburos donde se depositó. Cuánto hay, un dado fijo por provincia:
+// distinto en cada una, el mismo en cada partida.
+const RECURSOS = {
+  hierro:   { n: "Hierro",       desde: -1200, donde: ["montana", "colina", "meseta"], ley: 1.0 },
+  cobre:    { n: "Cobre",        desde: -3000, donde: ["montana", "colina"], ley: 0.7 },
+  oro:      { n: "Oro",          desde: -3000, donde: ["montana", "colina", "vega"], ley: 0.25 },
+  plata:    { n: "Plata",        desde: -2000, donde: ["montana", "meseta"], ley: 0.3 },
+  sal:      { n: "Sal",          desde: -3000, donde: ["marisma", "delta", "estepa", "meseta"], ley: 0.8 },
+  carbon:   { n: "Carbón",       desde: 1650,  donde: ["colina", "llanura", "bosque"], ley: 0.9 },
+  petroleo: { n: "Petróleo",     desde: 1859,  donde: ["llanura", "marisma", "delta", "estepa"], ley: 0.6 },
+  gas:      { n: "Gas natural",  desde: 1900,  donde: ["llanura", "marisma", "estepa"], ley: 0.5 },
+  uranio:   { n: "Uranio",       desde: 1945,  donde: ["meseta", "montana", "estepa"], ley: 0.2 },
+  litio:    { n: "Litio",        desde: 1990,  donde: ["meseta", "estepa", "desierto"], ley: 0.2 },
+  raras:    { n: "Tierras raras", desde: 1985, donde: ["montana", "meseta"], ley: 0.15 },
+};
+function yacimientosDe(idx, terreno, bioma) {
+  const r = dado("yac|" + idx);
+  const out = {};
+  for (const [id, m] of Object.entries(RECURSOS)) {
+    const encaja = m.donde.includes(terreno) || m.donde.includes(bioma);
+    if (!encaja) { r(); continue; }
+    const t = r();
+    if (t > m.ley * 0.55) continue;                       // la mayoría de las provincias no tiene nada
+    out[id] = Math.round(40 + t * 900 / Math.max(0.15, m.ley));
+  }
+  return out;
+}
+
+// ——— cuánto se puede vivir acá ————————————————————————————————
+// Un solo número de 0 a 100 que resume el resto. No es decoración: de él salen
+// el techo de población, adónde emigra la gente y cuánto cuesta construir.
+function habitabilidadDe(cl, bioma, altura, agua, costera, rio) {
+  const b = BIOMAS[bioma];
+  let h = b.hab;
+  // Un río en tierra seca no es un río más: es la diferencia entre Egipto y
+  // el desierto que lo rodea. Donde llueve, el río aporta poco; donde no
+  // llueve, aporta todo.
+  if (rio && cl.lluvia < 550) h += 26 * (1 - cl.lluvia / 550);
+  // el frío del invierno pesa más que la media: se vive el peor mes
+  if (cl.tInvierno < -20) h -= 22;
+  else if (cl.tInvierno < -10) h -= 12;
+  else if (cl.tInvierno < -2) h -= 5;
+  if (cl.tVerano > 38) h -= 14;
+  else if (cl.tVerano > 32) h -= 6;
+  h += agua * 14 - 6;
+  if (altura > 3200) h -= 20;
+  else if (altura > 2000) h -= 9;
+  if (costera) h += 7;
+  // el trópico húmedo mata por enfermedad lo que regala en cosecha
+  if (cl.tMedia > 22 && cl.lluvia > 1400) h -= 10;
+  return Math.round(acotar(h, 0, 100));
+}
+
+// ——— la ficha completa, una vez por provincia ————————————————
+const _amb = new Map();
+function ambienteDe(idx, x, y, terreno, costera, rio) {
+  const clave = idx != null ? "i" + idx : `x${x.toFixed(2)},${y.toFixed(2)},${terreno}`;
+  if (_amb.has(clave)) return _amb.get(clave);
+  const lat = 90 - y;
+  const dCosta = aLaCosta(x, y);
+  const contin = acotar(dCosta / 16, 0, 1);
+  const altura = alturaEn(x, y, terreno);
+  const cl = climaEn(lat, altura, contin, x - 180,
+    terreno === "montana" || terreno === "colina" || terreno === "bosque");
+  const sombra = sombraDeLluvia(x, y, lat);
+  if (sombra < 1) cl.lluvia = Math.round(cl.lluvia * sombra);
+  const bioma = biomaDe(cl.tMedia, cl.lluvia, altura, terreno, cl.amplitud, lat);
+  // agua disponible: la que cae, la que pasa y la que se puede sacar del mar
+  const agua = acotar(cl.lluvia / 1400 + (rio ? 0.35 : 0) + (costera ? 0.05 : 0), 0, 1.35);
+  const a = {
+    altura, lat: +lat.toFixed(2), contin: +contin.toFixed(2), dCosta: +dCosta.toFixed(1),
+    ...cl, bioma, agua: +agua.toFixed(2),
+    pendiente: +acotar(altura / 3000, 0, 1).toFixed(2),
+    habitabilidad: habitabilidadDe(cl, bioma, altura, agua, costera, rio),
+    yacimientos: idx != null ? yacimientosDe(idx, terreno, bioma) : {},
+  };
+  if (_amb.size > 9000) _amb.clear();
+  _amb.set(clave, a);
+  return a;
+}
+// El ambiente de una provincia del juego. Las provincias inventadas —las de
+// una nación que no existe— no tienen índice en el mundo real, pero sí
+// coordenadas: alcanza.
+function ambiente(p) {
+  if (!p) return null;
+  if (p._amb) return p._amb;
+  const x = p.x != null ? p.x : 190, y = p.y != null ? p.y : 45;
+  return ambienteDe(p.idx, x, y, p.terreno || "llanura", !!p.costera, !!p.rio);
+}
+// Qué de lo que hay debajo se sabe ver en este siglo.
+function yacimientosVisibles(p, anio) {
+  const a = ambiente(p);
+  if (!a) return [];
+  return Object.entries(a.yacimientos)
+    .filter(([id]) => anio >= RECURSOS[id].desde)
+    .map(([id, r]) => ({ id, n: RECURSOS[id].n, reservas: r }));
+}
+
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
 // Se arrastra con un dedo, se acerca con dos o con la rueda, y también
 // obedece al teclado. Cada capa se recuerda por separado: al arrastrar solo
@@ -914,7 +1254,7 @@ const MINI_MUNDO = (
     <path d={MUNDO_D} fill="#3E5137" stroke="#728F5C" strokeWidth="0.5" />
   </svg>
 );
-const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true };
+const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true, bioma: false };
 // Cada clase de accidente con su color y su palabra: el rótulo dice qué es
 // antes de decir cómo se llama, que es lo que uno quiere saber primero cuando
 // toca una mancha azul en el medio de la nada.
@@ -929,7 +1269,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -1337,12 +1677,16 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // frontera, y el mapa entero parecía una reja. Ahora es un hilo cálido que
   // aparece de a poco y nunca le gana a la costa ni al límite de un país.
   const capaProvincias = useMemo(() => {
-    if (!capas.provincias || w >= 300) return null;
-    const op = acotar((300 - w) / 120, 0, 1);
-    const grupos = trazoProvinciasEn(rx, ry, rw, rh);
+    // El mapa físico es lo único que tiene sentido mirar de un planeta entero,
+    // así que la vista de biomas no se apaga al alejarse: es la única capa de
+    // provincias que sigue viva al ver el mundo completo.
+    if (capas.bioma ? !capas.provincias : !capas.provincias || w >= 300) return null;
+    const op = capas.bioma ? 1 : acotar((300 - w) / 120, 0, 1);
+    const grupos = trazoProvinciasEn(rx, ry, rw, rh, capas.bioma);
     return (
       <g style={{ pointerEvents: "none" }}>
-        {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col} opacity={op * 0.62} stroke="none" />)}
+        {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col}
+          opacity={op * (capas.bioma ? 0.88 : 0.62)} stroke="none" />)}
         {grupos.map((g) => (
           <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={fino * 2.2}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
@@ -1355,7 +1699,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         ))}
       </g>
     );
-  }, [w, px, fino, cerca, claveVista, capas.provincias]);
+  }, [w, px, fino, cerca, claveVista, capas.provincias, capas.bioma]);
 
   // Fronteras y aguas: por encima de las provincias.
   const capaAguas = useMemo(() => (
@@ -1495,6 +1839,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const sel = useMemo(() => mias.find((m) => m.id === seleccion) || null, [mias, seleccion]);
   const vecUbic = useMemo(() => ubicarVecinos(vecinos, centro, paisPropio),
     [vecinos, centro.x, centro.y, paisPropio]);
+  const biomasEnVista = useMemo(() => {
+    if (!capas.bioma) return [];
+    const v = [];
+    for (const g of trazoProvinciasEn(rx, ry, rw, rh, true))
+      if (!v.includes(g.pais)) v.push(g.pais);
+    return v.sort((a, b) => BIOMAS[b].fert - BIOMAS[a].fert);
+  }, [claveVista, capas.bioma]);
   const terrenosReino = useMemo(() => {
     const vistos = [];
     for (const m of mias) if (m.terreno && TERRENOS[m.terreno] && !vistos.includes(m.terreno)) vistos.push(m.terreno);
@@ -1766,6 +2117,37 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             {sel.rio ? " · con río" : ""}{sel.costera ? " · costera" : ""}
             {sel.terreno ? ` · fert ×${fertProv(sel).toFixed(2)}` : ""}
           </div>
+          {/* La física de la provincia. Antes decía «llanura costera» y con eso
+              se acababa: una llanura costera de Noruega y otra de Senegal eran
+              la misma casilla. */}
+          {(() => {
+            const a = ambiente(sel);
+            if (!a) return null;
+            const b = BIOMAS[a.bioma];
+            const yac = yacimientosVisibles(sel, anio || 1200);
+            return (
+              <>
+                <div style={{ fontSize: 10.5, fontFamily: mono, marginTop: 4, lineHeight: 1.5, color: C.muted }}>
+                  <span style={{ color: b.col }}>{b.ico} {b.n.toLowerCase()}</span>
+                  {a.altura > 250 ? ` · ${a.altura} m` : ""}
+                </div>
+                <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.muted }}>
+                  {a.tInvierno.toFixed(0)}° a {a.tVerano.toFixed(0)}° · {a.lluvia} mm
+                </div>
+                <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.muted }}>
+                  habitable{" "}
+                  <span style={{ color: a.habitabilidad < 25 ? C.red : a.habitabilidad < 55 ? C.gold : C.green }}>
+                    {a.habitabilidad}
+                  </span>
+                </div>
+                {yac.length > 0 && (
+                  <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.brass }}>
+                    {yac.map((y) => y.n.toLowerCase()).join(" · ")}
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {fichaBreve ? (
             <div style={{ fontFamily: mono, fontSize: 10.5, color: C.muted, marginTop: 5 }}>
               <span style={{ color: C.ink }}>{fmtPob(sel.poblacion)}</span>
@@ -1865,8 +2247,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.95)", border: `1px solid ${C.line}`,
           boxShadow: "0 6px 20px rgba(0,0,0,0.55)", maxHeight: "82%", overflowY: "auto" }}>
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, marginBottom: 6 }}>─ CAPAS</div>
-          {[["provincias", "Provincias del mundo"], ["ciudades", "Ciudades"], ["fisico", "Relieve y ríos"],
-            ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
+          {[["provincias", "Provincias del mundo"], ["bioma", "Pintar por bioma"], ["ciudades", "Ciudades"],
+            ["fisico", "Relieve y ríos"], ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
             <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
               fontSize: 11, color: capas[k] ? C.ink : C.muted, padding: "2px 0" }}>
               <input type="checkbox" checked={!!capas[k]} onChange={() => setCapas((c) => ({ ...c, [k]: !c[k] }))}
@@ -1879,7 +2261,22 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               {t}
             </label>
           ))}
-          {terrenosReino.length > 0 && (
+          {/* La leyenda del mapa físico solo aparece cuando el mapa es físico:
+              una lista de trece biomas encima de un mapa político no ayuda. */}
+          {capas.bioma && (
+            <>
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ BIOMAS</div>
+              {biomasEnVista.map((b) => (
+                <div key={b} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: C.muted, padding: "1px 0" }}>
+                  <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                    background: BIOMAS[b].col, border: "1px solid rgba(0,0,0,0.5)" }} />
+                  {BIOMAS[b].n}
+                  <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>×{BIOMAS[b].fert.toFixed(2)}</span>
+                </div>
+              ))}
+            </>
+          )}
+          {terrenosReino.length > 0 && !capas.bioma && (
             <>
               <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ TUS TIERRAS</div>
               {terrenosReino.map((t) => (
@@ -8002,6 +8399,7 @@ export default function PaxMundi() {
       {/* el mundo, siempre detrás */}
       <div style={{ position: "fixed", inset: 0, zIndex: 0 }}>
         <MapaMundi
+          anio={s.anio}
           centro={centroMundo}
           marcas={marcasDeProvincias(s.provincias, s.ciencia)}
           vecinos={s.vecinos}
@@ -9744,6 +10142,7 @@ export default function PaxMundi() {
                 <div style={{ marginBottom: 12, borderRadius: 9, overflow: "hidden",
                   border: `1px solid ${C.line}`, height: 340 }}>
                   <MapaMundi
+                    anio={s.anio}
                     centro={centroMundo}
                     marcas={marcasDeProvincias(provs, s.ciencia)}
                     vecinos={s.vecinos}
