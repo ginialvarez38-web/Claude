@@ -4874,6 +4874,10 @@ function generalLocal(rnd, anio, usados) {
 function aplicarEfectos(n, ef, rnd) {
   if (!ef) return n;
   const e = { ...n };
+  // La memoria es corta a propósito: una crónica se acuerda de lo de hace unos
+  // años, no de todo. Seis entradas bastan para decir «otra vez» o «la misma
+  // Zamora de la otra vez», que es de lo único que sirve acordarse.
+  if (ef.memoria) e.memoria = [...(n.memoria || []), ef.memoria].slice(-6);
   if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
   if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
   if (ef.pi) e.ciencia = { ...e.ciencia, pi: Math.max(0, (e.ciencia.pi || 0) + ef.pi) };
@@ -5081,7 +5085,12 @@ function elenco(s, h, rnd, mem) {
     vecino: () => (h.vecino ? (h.vecino.nombre || h.vecino) : (vecs.length ? alAzar(rnd, vecs).nombre : "el vecino")),
     otroVecino: cual(vecs, "nombre"),
     moneda: monedaDe(s.anio).n,
-    oro: () => fmtDinero(Math.abs(h.oro || 0), s.anio),
+    // Un contable dice siempre la cifra exacta; un cronista, a veces, dice
+    // «cerca de». La cifra sigue estando —el jugador la necesita— pero deja de
+    // caer con la misma forma tres turnos seguidos.
+    oro: () => { const c = fmtDinero(Math.abs(h.oro || 0), s.anio); const r = rnd();
+      return r < 0.7 ? c : r < 0.8 ? "cerca de " + c : r < 0.87 ? "algo más de " + c
+        : r < 0.94 ? c + " mal contados" : "no llegan a " + c; },
     rama: () => (h.rama ? h.rama.n.toLowerCase() : "tropa"),
     n: () => enLetra(h.n),
     // universidad y academia son femeninas; colegio e instituto, masculinos
@@ -5521,10 +5530,283 @@ function pulir(t) {
 const CONECTOR = ["y por eso", "y con eso", "aunque", "mientras tanto", "de paso", "con todo",
   "y a la vuelta", "y de rebote", "pero", "así que", "y al poco", "y desde entonces"];
 
+// ——— quién escribe: la crónica tiene autor ————————————————————
+// Un año contado por un fraile no se parece a uno contado por un memorialista
+// con mala idea. El cronista se sortea con el reinado, así que cambia solo
+// cuando muere un soberano: dos siglos de partida pasan por cuatro o cinco
+// voces distintas. Eso hace más contra la repetición que cualquier cantidad
+// de sinónimos, porque no cambia el vocabulario: cambia quién mira.
+const CRONISTAS = [
+  { id: "fraile", desde: -900, hasta: 1560,
+    // Las aperturas no abren subordinada: el acto llega en indicativo y
+    // «Quiso Dios que alistan» no es castellano. Todas terminan en coma o en
+    // un «que» que admite indicativo.
+    abre: ["Con (ayuda|licencia|permisión) de Dios,", "No sin permisión del cielo,",
+           "Por voluntad de lo alto,", "Por los pecados de todos,", "Con más miedo que fe,"],
+    yo: ["quien esto escribe lo vio", "lo anoto como me lo (contaron|refirieron)",
+         "no lo escribo por gusto", "Dios me perdone si me alargo",
+         "lo pongo aquí por no dejarlo perder", "otro lo contará mejor"],
+    remate: ["Dios sabrá si estuvo (bien|a tiempo|de más).",
+             "Y no fue sin aviso.", "Quede escrito para memoria.",
+             "Otros dirán si fue justo; yo no.",
+             "Hubo aquel año más (rogativas|procesiones|ayunos) que cosecha.",
+             "Lo demás está en manos que no son las nuestras.",
+             "Sea todo para bien (de las almas|del reino|de quien venga después).",
+             "Se cantó un tedeum, que es lo que se hace cuando no se sabe qué hacer.",
+             "El que quiera juicio, que lo busque más arriba.",
+             "No se puede pedir al tiempo que explique lo que hace.",
+             "Y así se cerró el año, ni mejor ni peor que el otro.",
+             "De estas cosas se acuerda uno cuando ya no sirven de nada."] },
+  { id: "escribano", desde: -900, hasta: 1700,
+    abre: ["Consta en registro que", "Según se asentó,", "Por mandato y con testigos,",
+           "Se hizo saber, y así consta, que", "Sin oposición asentada,"],
+    yo: ["lo copio del asiento", "no consta lo demás", "así se me ordenó anotarlo",
+         "el margen quedó en blanco", "falta la fecha, que nadie puso"],
+    remate: ["Lo demás no consta.", "Se archivó sin (más trámite|otra diligencia|leerlo dos veces).",
+             "Firmaron los que sabían firmar.", "El asiento quedó sin cerrar.",
+             "No hay constancia de que alguien lo revisara.",
+             "Queda copia en (la cancillería|el arca de tres llaves|el registro viejo).",
+             "Se anotó al margen y ahí sigue.",
+             "La cuenta no cuadraba, y así se asentó.",
+             "Nadie pidió el traslado, que era lo que había que pedir.",
+             "El escrito se guardó donde se guarda lo que no conviene.",
+             "Faltan dos folios y nadie los ha echado en falta.",
+             "Se cobró la escribanía, que de eso sí hay recibo."] },
+  { id: "juglar", desde: -900, hasta: 1650,
+    abre: ["Óigase lo que pasó:", "Quien quiera saberlo, sepa que", "No se hable de otra cosa:",
+           "Contaré lo que se cuenta:", "Y no acaba ahí:"],
+    yo: ["así me lo dijeron a mí", "yo lo canto como lo oí", "el que estuvo no lo niega",
+         "no me hagan repetirlo", "y aún me quedo corto"],
+    remate: ["Y aún se canta.", "Con eso hicieron (copla|romance|chanza).",
+             "Quien lo vio, lo cuenta mejor que yo.",
+             "Hubo quien se rió y hubo quien lloró.", "Ya se verá en qué para.",
+             "De aquello salieron tres coplas y ninguna buena.",
+             "En las ventas del camino no se hablaba de otra cosa.",
+             "Los niños lo jugaban en la plaza a la semana siguiente.",
+             "Se contó de mil maneras y ninguna se parecía a la otra.",
+             "Al año ya nadie sabía cómo había empezado.",
+             "Lo mejor de la historia es lo que nadie puede probar.",
+             "Buen final para una noche de invierno, si fuera cuento."] },
+  { id: "secretario", desde: 1350, hasta: 1900,
+    abre: ["Conviene advertir que", "Sin ruido y sin papeles,", "Con la prudencia debida,",
+           "Por razones que no se pusieron por escrito,", "Contra el parecer de algunos,"],
+    yo: ["me abstengo de juzgarlo", "no me toca a mí decirlo", "lo consigno sin comentario",
+         "hay más, pero no aquí", "prefiero no poner nombres"],
+    remate: ["Se juzgó prudente no insistir.",
+             "El asunto no volvió a mencionarse en la mesa.",
+             "Convino a todos darlo por (cerrado|olvidado|resuelto).",
+             "Nadie quiso ser el primero en objetar.",
+             "Quedó dicho en voz baja lo que no se puso por escrito.",
+             "Se agradeció el celo de todos y se pasó al punto siguiente.",
+             "La decisión no lleva firma, que es como se toman las difíciles.",
+             "Hubo quien salió del despacho más aliviado de lo que convenía aparentar.",
+             "Se dejó para la sesión siguiente, y la sesión siguiente no se celebró.",
+             "El acuerdo se redactó de modo que cada uno pudiera entender lo suyo.",
+             "Nadie preguntó por el coste, y no fue por descuido.",
+             "Se guardaron las formas, que era lo urgente."] },
+  { id: "memorialista", desde: 1600, hasta: 1960,
+    abre: ["He de decir que", "Contra lo que después se dijo,", "Por más que hoy se niegue,",
+           "Yo estaba allí cuando", "Nadie lo recuerda así, pero"],
+    yo: ["y no exagero", "conste que no me creyeron entonces",
+         "lo escribo porque nadie más lo hará", "tengo mis razones para acordarme",
+         "el que lo niegue que lo desmienta"],
+    remate: ["Después dijeron que era inevitable.",
+             "Nadie se acuerda ya de quién lo propuso.",
+             "Los que aplaudieron fueron los primeros en olvidarlo.",
+             "Aún tardaríamos años en entender lo que aquello costaba.",
+             "Lo llamaron acierto cuando salió bien.",
+             "Yo lo vi de otra manera, y sigo viéndolo así.",
+             "Se escribió mucho sobre esto y casi todo era falso.",
+             "Con los años se volvió una anécdota; entonces no lo era.",
+             "Faltaba lo peor y ninguno lo sospechaba.",
+             "El que avisó quedó de agorero, como siempre.",
+             "Nada de esto figura en los papeles oficiales.",
+             "Si alguien lo lee dentro de cien años, que no se ría demasiado."] },
+  { id: "gacetillero", desde: 1680, hasta: 1990,
+    abre: ["Se supo el mismo día que", "Sin que nadie lo esperara,", "Contra todo pronóstico,",
+           "Corrió la noticia:", "A primera hora ya se sabía:"],
+    yo: ["según fuentes de la casa", "nos consta de buena tinta", "no hemos podido confirmarlo",
+         "lo publicamos con reservas", "el desmentido llegó tarde"],
+    remate: ["La noticia dio dos vueltas al reino antes de la noche.",
+             "Se desmintió tres veces y tres veces se repitió.",
+             "Los pliegos se agotaron (antes del mediodía|en dos horas|donde había con qué comprarlos).",
+             "Hubo quien lo supo antes que la corte.", "Nadie salió a explicarlo.",
+             "Al día siguiente ya era otra la noticia.",
+             "Se vendió más papel ese día que en todo el mes.",
+             "La versión buena no la publicó nadie.",
+             "En provincias tardaron una semana en enterarse, y mejor así.",
+             "Los corrillos duraron más que el asunto.",
+             "Quedó por ver quién había filtrado qué.",
+             "Se prometió una aclaración para el número siguiente."] },
+  { id: "corresponsal", desde: 1850, hasta: 2100,
+    abre: ["Todo indica que", "A la hora de escribir esto,", "Según las cuentas oficiales,",
+           "Fuentes del gobierno confirman que", "Sin comparecencia previa,"],
+    yo: ["escribo con lo que hay", "no ha sido posible contrastarlo",
+         "quedan cifras sin publicar", "nadie ha querido ponerse al teléfono",
+         "escribo esto a falta de datos mejores"],
+    remate: ["El balance definitivo tardará meses.",
+             "Nadie del gobierno quiso ponerle nombre a la decisión.",
+             "Los datos se publicaron tarde y a medias.",
+             "La versión oficial y la de la calle no coinciden.",
+             "Se prometió una explicación que no llegó.",
+             "La rueda de prensa duró once minutos y no admitió preguntas.",
+             "En privado admiten lo que en público niegan.",
+             "El coste real no aparece en ninguna partida.",
+             "Los afectados se enteraron por la radio.",
+             "Queda por saber quién asume esto cuando salga mal.",
+             "Se anunció como provisional y nadie cree que lo sea.",
+             "La oposición pidió comparecencia; se archivó la petición."] },
+  { id: "archivo", desde: 1930, hasta: 2200,
+    abre: ["El expediente registra que", "Consta en el acta que", "Sin deliberación previa,",
+           "Con arreglo a lo dispuesto,", "A propuesta no consignada,"],
+    yo: ["el resto figura reservado", "faltan piezas en el legajo",
+         "sin firma que lo respalde", "el original no aparece",
+         "consta copia, no consta orden"],
+    remate: ["El expediente se cerró sin conclusiones.",
+             "Faltan las actas de aquella semana.", "Nadie firmó el informe final.",
+             "Se clasificó y ahí sigue.", "Los números no cuadran y nadie los revisó.",
+             "La ponencia se disolvió sin publicar nada.",
+             "El anexo con los costes no se adjuntó.",
+             "Figura como «asunto resuelto» sin decir cómo.",
+             "La versión definitiva difiere del borrador en lo esencial.",
+             "Se solicitó auditoría y no consta respuesta.",
+             "El sello es posterior a la fecha del documento.",
+             "Queda pendiente de revisión desde entonces."] },
+];
+function cronista(s) {
+  const a = (s || {}).anio || 1200;
+  const aptos = CRONISTAS.filter((c) => a >= c.desde && a <= c.hasta);
+  const lista = aptos.length ? aptos : [CRONISTAS[CRONISTAS.length - 1]];
+  const r = dado(`${(s.nacion || {}).nombre || "pm"}|${(s.soberano || {}).desde || 0}|cronista`);
+  return lista[Math.floor(r() * lista.length) % lista.length];
+}
+
+// ——— cuándo: una crónica ancla los hechos en el año ————————————
+// «Se subieron los impuestos» es un dato. «Por San Miguel se subieron los
+// impuestos» es una crónica. Cuesta cinco palabras y cambia todo, porque
+// coloca al lector en un momento en vez de en una tabla.
+const MES_ESTACION = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 0];
+const CUANDO_VIEJO = [
+  ["aquel invierno", "por Navidad", "antes de Reyes", "con las nieves todavía en los puertos",
+   "entrado el año", "en lo más crudo del invierno"],
+  ["entrada la primavera", "por San Marcos", "cuando el trigo apuntaba", "con los caminos ya secos",
+   "pasada la Pascua", "al abrirse el tiempo"],
+  ["en plena siega", "por Santiago", "con los calores", "antes de la trilla", "aquel verano",
+   "cuando no corría el aire"],
+  ["pasada la vendimia", "por San Miguel", "con las primeras lluvias", "al cerrar el año agrícola",
+   "aquel otoño", "cuando ya se contaba el grano"],
+];
+const CUANDO_NUEVO = [
+  ["aquel invierno", "en los primeros días del año", "con el año recién empezado", "en pleno enero"],
+  ["en primavera", "antes de que acabara el curso", "con el buen tiempo", "por abril"],
+  ["en pleno verano", "en agosto", "con medio país de vacaciones", "aquel verano"],
+  ["ya en otoño", "al volver de las vacaciones", "con el presupuesto sobre la mesa", "por octubre"],
+];
+const CUANDO_SUELTO = ["aquel año", "a mitad de año", "no había acabado el año cuando",
+  "sin que se cumpliera el año", "antes de que nadie lo esperara"];
+function cuando(s, rnd, paso) {
+  const est = MES_ESTACION[mesDe(s.dia)] || 0;
+  const tabla = (s.anio || 1200) < 1700 ? CUANDO_VIEJO : CUANDO_NUEVO;
+  return rnd() < 0.22 ? deBolsa("cuandoS", CUANDO_SUELTO, paso)
+                      : deBolsa("cuando" + est, tabla[est], paso);
+}
+
+// ——— la memoria: una crónica se acuerda de lo que ya contó ——————
+// Sin memoria, cada turno empieza el mundo de nuevo, y repetir la misma orden
+// tres años seguidos produce tres textos que fingen no conocerse. Con memoria,
+// la repetición deja de ser un defecto del generador y pasa a ser un hecho del
+// reino: «otra vez», «por tercer año», «la misma Zamora de la otra vez».
+const ECO_ACTO = {
+  recauda: "se cobró la derrama", motin_fiscal: "los cobradores salieron a pedradas",
+  alivio_fiscal: "se perdonó el tributo", confisca: "se entró en las casas",
+  presta: "se firmó el préstamo", devalua: "se rebajó la moneda",
+  reprime: "entró la tropa", represion_fracasa: "el escarmiento salió al revés",
+  amnistia: "se abrieron las cárceles", reparte_grano: "se repartió el grano",
+  fiestas: "hubo fiestas", recluta: "se hizo la leva", licencia: "se licenció a la tropa",
+  fortifica: "se levantaron los muros", saqueo: "se saqueó",
+  plaza_tomada: "cayó la plaza", derrota_campo: "se perdió la batalla",
+  victoria_campo: "se ganó la batalla", caminos: "se abrieron los caminos",
+  puerto: "se armó el puerto", regadio: "se trajo el agua", templo: "se levantó el templo",
+  mercado: "se abrió el mercado", hospital: "se abrió el hospital",
+  funda_sede: "se fundó la casa de estudios", coloniza: "se pobló de nuevo",
+  censura: "se quemaron libros", privilegio: "se dio el privilegio",
+  reforma: "se cambió la ley", destituye: "cayó un ministro",
+};
+function ecos(s, h) {
+  const mem = (s.memoria || []).slice(-6);
+  const mismo = mem.filter((m) => m.t === h.t).length;
+  const lugar = h.provincia && h.provincia.nombre;
+  const antes = lugar ? [...mem].reverse().find((m) => m.lugar === lugar && m.nota && m.t !== h.t) : null;
+  return { mismo, antes, lugar };
+}
+// El reconocimiento va como frase aparte y no como prefijo del acto: metido
+// delante chocaba con la entrada —«Entrado el año, van tres años, los
+// arrendadores…»— y además, dicho aparte, suena a lo que es: el cronista
+// levantando la vista del renglón.
+const OTRA_VEZ = ["No es la primera vez.", "Ya se hizo el año pasado.", "Otra vez lo mismo.",
+  "Se repite lo del año anterior.", "Y van dos."];
+const TERCERA = ["Van tres años seguidos.", "Es ya la tercera vez.",
+  "Nadie se molesta en discutirlo: van tres.", "Por tercer año consecutivo, lo mismo.",
+  "Se ha vuelto costumbre, que es lo peor que puede pasarle a una medida."];
+
+// Une dos tiempos de la narración. Que todo vaya separado por punto es lo que
+// hace que una crónica suene a lista de datos: el que escribe de verdad
+// subordina, explica con dos puntos, y solo a veces corta seco.
+function unir(a, b, modo, propios, paso) {
+  const izq = String(a).replace(/[.;:,]\s*$/, "");
+  const der = String(b).replace(/[.;:,]\s*$/, "");
+  const primera = der.split(/[\s,.:]/)[0];
+  const baja = propios && propios.has(primera) ? der : der.charAt(0).toLowerCase() + der.slice(1);
+  if (modo === "dosPuntos") return izq + ": " + baja + ".";
+  if (modo === "puntoYcoma") return izq + "; " + baja + ".";
+  return izq + ", " + deBolsa("conector", CONECTOR, paso) + " " + baja + ".";
+}
+// Cose el párrafo. Nunca lo cose entero —un turno todo subordinado cansa
+// igual que uno todo picado—: une una o dos costuras y deja el resto suelto.
+function armar(trozos, rnd, paso, propios) {
+  const ts = trozos.filter((x) => x && String(x).trim());
+  let uniones = ts.length >= 3 ? (rnd() < 0.6 ? 2 : 1) : ts.length === 2 && rnd() < 0.55 ? 1 : 0;
+  const usados = new Set();
+  let vez = 0;
+  while (uniones-- > 0 && ts.length >= 2) {
+    const i = 1 + Math.floor(rnd() * (ts.length - 1));
+    const r = rnd();
+    // dos puntos ya usados en cualquiera de los dos lados: encadenarlos deja
+    // una oración con dos explicaciones y ninguna se entiende
+    const hayDos = ts[i - 1].includes(":") || ts[i].includes(":");
+    let modo = r < 0.42 || hayDos ? "conector" : r < 0.7 ? "puntoYcoma" : "dosPuntos";
+    // y la misma costura dos veces en el mismo párrafo canta más que el punto
+    if (usados.has(modo)) modo = modo === "conector" ? "puntoYcoma" : "conector";
+    if (usados.has(modo)) break;
+    usados.add(modo);
+    ts[i - 1] = unir(ts[i - 1], ts[i], modo, propios, paso + 7 * ++vez);
+    ts.splice(i, 1);
+  }
+  return ts.map((x) => String(x).replace(/[;:,]\s*$/, "")).map((x) => (/[.!?»]$/.test(x) ? x : x + ".")).join(" ");
+}
+
+// ——— lo que se dijo: una frase entrecomillada vale por un párrafo ———
+const DICHOS = [
+  "«Lo que hoy se firma, mañana se cobra», dejó dicho {minCargo}.",
+  "«Ya veremos», fue todo lo que dijo {sob}.",
+  "«Nunca se ha hecho así», protestó {facUno}; se hizo igual.",
+  "«Que conste que me opuse», pidió {minCargo}, y se hizo constar.",
+  "«Con esto no se come», se oyó en {prov}.",
+  "«El reino aguanta más de lo que parece», escribió {min} en {registro}.",
+  "«No hay tiempo», repitió {sob} hasta cansar a todos.",
+  "«Que lo pague quien lo mandó», amaneció escrito en una pared de {prov}.",
+  "«A mí no me miren», dijo {minCargo}, y se levantó de la mesa.",
+  "«Otro año así y no lo cuento», dijo {facUno}.",
+  "«Está hablado y cerrado», zanjó {sob} sin dejar responder.",
+  "«Nadie preguntó a los que lo iban a sufrir», anotó {sabio}.",
+  "«De esto no se sale con papeles», avisó {minCargo}. Nadie le hizo caso.",
+  "«Hemos hecho cosas peores», se consoló {facUno}.",
+];
+
 // Arma el turno con varios tiempos. No siempre los mismos, ni en el mismo
 // orden: una narración que empieza igual todas las veces se nota enseguida.
 function nombresPropios(s) {
-  const n = new Set();
+  const n = new Set(["Dios"]);
   const meter = (x) => { if (x) String(x).split(" ").forEach((w) => w.length > 2 && n.add(w)); };
   meter((s.soberano || {}).nombre);
   meter((s.nacion || {}).nombre);
@@ -5553,54 +5835,111 @@ function coser(partes, i, paso, propios) {
   partes.splice(i, 1);
 }
 
+// Arma el turno. Tres decisiones antes de escribir una palabra: cuánto aliento
+// tiene este año, por dónde se entra, y si la crónica se acuerda de algo. Sin
+// eso, un generador escribe siempre el mismo párrafo con distintas palabras:
+// misma longitud, misma entrada, misma ausencia de pasado.
 function narrar(hechos, s, rnd, res) {
   if (!hechos || !hechos.length) return "";
-  const partes = [];
   const principal = hechos[0];
   const mem = { provs: new Set(), sob: false };
   const E = elenco(s, principal, rnd, mem);
-  const paso = s.turno || 0;                        // el reparto avanza con el turno
+  const paso = s.turno || 0;
   const propios = nombresPropios(s);
+  const cro = cronista(s);
+  const eco = ecos(s, principal);
 
-  const conApertura = rnd() < 0.42;
-  let prefijo = false;
-  if (conApertura) {
-    const ap = expandir(deBolsa("apertura", APERTURA, paso), E, rnd);
-    if (ap.includes(String((s.soberano || {}).nombre || "\u0000"))) mem.sob = true;
-    prefijo = !/\.$/.test(ap);
-    partes.push(ap);
+  // El aliento: no todos los años merecen lo mismo. Uno de cada cinco se
+  // despacha en una línea, y eso —más que cualquier sinónimo— es lo que hace
+  // que el siguiente, largo, se lea como una decisión y no como una plantilla.
+  const ale = rnd();
+  const aliento = ale < 0.2 ? 1 : ale < 0.74 ? 2 : 3;
+
+  const trozos = [];
+
+  // ——— por dónde se entra ———
+  // Tres puertas distintas y excluyentes: el tiempo del año, quién mandó, o la
+  // voz del que escribe. Antes había una sola y se notaba a los pocos turnos.
+  const puerta = rnd();
+  let entrada = null, cierra = true;
+  if (puerta < 0.4) {
+    entrada = cuando(s, rnd, paso);
+    cierra = false;
+  } else if (puerta < 0.72) {
+    entrada = expandir(deBolsa("apertura", APERTURA, paso), E, rnd);
+    if (entrada.includes(String((s.soberano || {}).nombre || " "))) mem.sob = true;
+    cierra = /[.!?]$/.test(entrada);
+  } else if (puerta < 0.84) {
+    entrada = expandir(deBolsa("abre:" + cro.id, cro.abre, paso), E, rnd);
+    cierra = /[.!?]$/.test(entrada);
   }
 
+  // ——— el acto ———
+  const actos = [];
   for (const h of hechos) {
     const pool = ACTO[h.t];
     if (!pool) continue;
     const e = elenco(s, h, rnd, mem);
-    let frase = expandir(deBolsa("acto:" + h.t, pool, paso), e, rnd);
-    // si la apertura no cerró la oración, lo que sigue continúa en minúscula
-    // —pero un nombre propio se queda como está
-    if (partes.length === 1 && prefijo && !propios.has(frase.split(/[\s,.:]/)[0]))
-      frase = frase.charAt(0).toLowerCase() + frase.slice(1);
-    partes.push(frase + (/[.!?]$/.test(frase) ? "" : "."));
+    actos.push(expandir(deBolsa("acto:" + h.t, pool, paso), e, rnd));
   }
+  if (!actos.length) return "";
 
-  // el estamento que más se movió toma la palabra
+  if (entrada) {
+    trozos.push(cierra ? entrada : unirEntrada(entrada, actos.shift(), propios));
+  }
+  for (const a of actos) trozos.push(a);
+
+  // ——— la memoria ———
+  // La repetición no se disimula: se nombra. Que el reino haga lo mismo tres
+  // años seguidos es un hecho del reino, y una crónica lo diría antes que
+  // fingir que cada año empieza el mundo de nuevo.
+  if (eco.mismo >= 3) trozos.push(deBolsa("tercera", TERCERA, paso));
+  else if (eco.mismo === 2 && rnd() < 0.8) trozos.push(deBolsa("otraVez", OTRA_VEZ, paso));
+  if (eco.antes && aliento >= 2 && rnd() < 0.5)
+    trozos.push(`Es la misma ${eco.lugar} donde ${eco.antes.nota}`);
+
+  // ——— quién reacciona ———
   const mov = Object.entries((res && res.fac) || {}).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
-  if (mov && Math.abs(mov[1]) >= 5 && rnd() < 0.72) {
+  if (aliento >= 2 && mov && Math.abs(mov[1]) >= 5 && rnd() < 0.78) {
     const f = FACCIONES.find((x) => x.id === mov[0]);
     const e = elenco(s, { ...principal, faccion: f }, rnd, mem);
-    partes.push(expandir(mov[1] > 0 ? deBolsa("reacBien", REACCION_BIEN, paso)
+    trozos.push(expandir(mov[1] > 0 ? deBolsa("reacBien", REACCION_BIEN, paso)
                                     : deBolsa("reacMal", REACCION_MAL, paso), e, rnd));
   }
-  // el detalle a veces abre la escena en vez de cerrarla
-  if (rnd() < 0.38) {
-    const det = expandir(deBolsa("detalle", DETALLE, paso), E, rnd);
-    if (!conApertura && rnd() < 0.4) partes.unshift(det);
-    else partes.push(det);
-  }
-  // y de vez en cuando dos tiempos se cosen en una sola oración
-  if (partes.length >= 2 && rnd() < 0.3) coser(partes, partes.length - 1, paso, propios);
+  // ——— qué se ve ———
+  if (aliento === 3 && rnd() < 0.62) trozos.push(expandir(deBolsa("detalle", DETALLE, paso), E, rnd));
+  // ——— qué se dijo ———
+  // La cita va suelta: cosida con un conector queda «y de rebote «Que lo pague
+  // quien lo mandó», amaneció escrito», que no lo escribiría nadie.
+  const sueltos = [];
+  if (aliento >= 2 && rnd() < 0.16) sueltos.push(expandir(deBolsa("dicho", DICHOS, paso), E, rnd));
+  // ——— y el que escribe, que no es una máquina ———
+  // La firma va suelta y al final. Cosida entre medio quedaba «…y de rebote la
+  // represión enciende lo que quería apagar; otros dirán si fue justo», que no
+  // es una crónica: es un choque de dos voces en la misma oración.
+  let firma = "";
+  if (aliento === 3 && rnd() < 0.44) firma = expandir(deBolsa("remate:" + cro.id, cro.remate, paso), E, rnd);
+  else if (rnd() < 0.08) firma = capitalizar(expandir(deBolsa("yo:" + cro.id, cro.yo, paso), E, rnd)) + ".";
 
-  return pulir(partes.join(" "));
+  const cuerpo = [armar(trozos, rnd, paso, propios), ...sueltos, firma]
+    .filter(Boolean).map((x) => (/[.!?»]$/.test(x) ? x : x + ".")).join(" ");
+  return pulir(cuerpo);
+}
+
+// La entrada no cierra oración: lo que sigue continúa en minúscula, salvo que
+// empiece por un nombre propio de la partida.
+function minusculaSalvo(t, propios) {
+  const primera = String(t).split(/[\s,.:]/)[0];
+  return propios && propios.has(primera) ? t : String(t).charAt(0).toLowerCase() + String(t).slice(1);
+}
+const capitalizar = (t) => String(t).charAt(0).toUpperCase() + String(t).slice(1);
+// «Por San Miguel» pide coma; «Quiso Dios que» pide un espacio y nada más.
+// Pegar siempre con coma producía «Quiso Dios que, alistan dos de caballería».
+function unirEntrada(entrada, sigue, propios) {
+  if (!sigue) return entrada;
+  const izq = String(entrada).replace(/\s+$/, "");
+  const pegado = /[,;:]$/.test(izq) || /\b(que|y|e|ni|pero|donde|cuando|si|como|porque)$/i.test(izq);
+  return izq + (pegado ? " " : ", ") + minusculaSalvo(sigue, propios);
 }
 
 // ═══ EL MUNDO POR SU CUENTA ══════════════════════════════════
@@ -5724,13 +6063,23 @@ function motorLocal(s, accion, dias, semilla) {
     opciones: opcionesLocales(s, ctx, rnd),
     fin: null,
     // ——— lo que la API no podía tocar ———
-    efectos: { oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
+    efectos: { memoria: recuerdoDe(res.hechos, s), oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
                pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra,
                paz: res.paz, frente: res.frente, bajas: res.bajas, aguante: res.aguante,
                tributo: res.tributo, factoria: res.factoria, sede: res.sede,
                sabio: res.sabio, general: res.general, destituir: res.destituir, pi: res.pi },
     interpretacion: orden,
   };
+}
+
+// Lo que este turno deja para el siguiente: qué se hizo, dónde, y una nota de
+// media línea con la que la crónica podrá referirse a ello más adelante.
+function recuerdoDe(hechos, s) {
+  const h = (hechos || [])[0];
+  if (!h || !h.t) return null;
+  return { t: h.t, anio: s.anio,
+           lugar: (h.provincia && h.provincia.nombre) || h.zona || null,
+           nota: ECO_ACTO[h.t] || null };
 }
 
 function aplicarVecinos(vecs, cambios) {
@@ -5940,17 +6289,29 @@ const SIN_ORDEN_COLA = {
     "Los cronistas de estos años tendrán poco que contar.",
     "Un año de esos que solo se recuerdan porque no pasó nada."],
 };
+// Un año sin órdenes también tiene aliento propio. Los mejores renglones de
+// las crónicas viejas son justamente los años flacos: «no hubo este año cosa
+// digna de memoria». Antes acá se listaban dos o tres observaciones con punto
+// y aparte, siempre la misma cantidad y siempre en el mismo orden.
+const ANIO_FLACO = [
+  "No hubo aquel año cosa digna de memoria.",
+  "Pasó el año sin que nadie tuviera que decidir nada.",
+  "Un año de esos que no dejan renglón.",
+  "Nada que anotar, y no es poco.",
+  "El año se fue en lo de siempre.",
+  "Se cumplió el año sin sobresalto que valga la tinta.",
+];
+
 function narrarSinOrden(s, c, rnd) {
   const mem = { provs: new Set(), sob: false };
   const paso = s.turno || 0;
-  const partes = [];
+  const propios = nombresPropios(s);
+  const cro = cronista(s);
 
-  // Se abre con el tono del año y se sigue con lo que de verdad pasó.
   const hostil = c.faccionHostil;
   const cual = s.guerra ? "guerra" : c.pobTecho > 0.95 ? "hambre"
     : (hostil && (s.facciones || {})[hostil.id] < 35) ? "hostil" : "calma";
   const E0 = elenco(s, { faccion: cual === "hostil" ? hostil : null }, rnd, mem);
-  partes.push(expandir(deBolsa("sinOrden", SIN_ORDEN, paso), E0, rnd));
 
   // Los observadores que tienen algo que decir, ordenados por urgencia y con
   // algo de azar para que dos años parecidos no den la misma crónica.
@@ -5958,7 +6319,14 @@ function narrarSinOrden(s, c, rnd) {
     .map((i) => ({ i, p: i.peso(s, c) * (0.6 + rnd() * 0.8) }))
     .filter((x) => x.p > 0)
     .sort((a, b) => b.p - a.p);
-  const cuantos = candidatos.length >= 3 && rnd() < 0.55 ? 3 : 2;
+
+  // El aliento manda cuántos observadores hablan. Un año callado —cuando de
+  // verdad no hay nada urgente— se despacha en una línea, y esa línea vale más
+  // que tres observaciones de relleno.
+  const ale = rnd();
+  const flaco = cual === "calma" && (candidatos[0] || {}).p < 1.6 && ale < 0.3;
+  const cuantos = flaco ? 1 : ale < 0.3 ? 2 : ale < 0.8 ? 3 : 4;
+
   const nombrados = new Set();
   const puestos = [];
   for (const { i } of candidatos) {
@@ -5968,16 +6336,32 @@ function narrarSinOrden(s, c, rnd) {
     if (ex.vec) nombrados.add(ex.vec);
     puestos.push({ i, ex });
   }
+
+  const trozos = [];
+  if (flaco) {
+    trozos.push(deBolsa("flaco", ANIO_FLACO, paso));
+  } else {
+    // La entrada, cuando la hay: el tiempo del año o el tono general. No
+    // siempre, para que la crónica pueda empezar directamente por el hecho.
+    const puerta = rnd();
+    if (puerta < 0.34) trozos.push(capitalizar(cuando(s, rnd, paso)) + ",");
+    else if (puerta < 0.78) trozos.push(expandir(deBolsa("sinOrden", SIN_ORDEN, paso), E0, rnd));
+  }
   for (const { i, ex: extra } of puestos) {
     const faccion = extra.fid ? FACCIONES.find((f) => f.id === extra.fid) : null;
     const e = elenco(s, { ...extra, faccion }, rnd, mem);
-    partes.push(expandir(deBolsa("inf:" + i.id, i.fr, paso), e, rnd) + ".");
+    trozos.push(expandir(deBolsa("inf:" + i.id, i.fr, paso), e, rnd));
   }
-  if (partes.length === 1) partes.push(expandir(deBolsa("cola:" + cual, SIN_ORDEN_COLA[cual], paso), E0, rnd));
+  if (!trozos.length) trozos.push(expandir(deBolsa("cola:" + cual, SIN_ORDEN_COLA[cual], paso), E0, rnd));
 
-  // dos observaciones seguidas suenan a lista; a veces se cosen
-  if (partes.length >= 3 && rnd() < 0.45) coser(partes, 2, paso, nombresPropios(s));
-  return pulir(partes.join(" "));
+  // Si la entrada quedó abierta en coma, el primer hecho la continúa.
+  if (trozos.length >= 2 && /,$/.test(trozos[0]))
+    trozos[0] = unirEntrada(trozos[0], trozos.splice(1, 1)[0], propios);
+
+  const firma = !flaco && rnd() < 0.26 ? expandir(deBolsa("remate:" + cro.id, cro.remate, paso), E0, rnd) : "";
+  const cuerpo = [armar(trozos, rnd, paso, propios), firma]
+    .filter(Boolean).map((x) => (/[.!?»]$/.test(x) ? x : x + ".")).join(" ");
+  return pulir(cuerpo);
 }
 
 
