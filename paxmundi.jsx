@@ -1186,7 +1186,7 @@ const BOSQUE_NATURAL = { selva: 0.92, monzonico: 0.80, templado: 0.78, taiga: 0.
 // Un bosque tarda décadas en volver y una tarde en irse: la vuelta es lenta a
 // propósito. Lo que lo tala es la gente que vive de él, y hoy además la
 // industria; lo que lo protege es que no haya nadie o que ya no haga falta.
-function evolucionarMundo(s, dias, rnd) {
+function evolucionarMundo(s, dias, rnd, empuje) {
   const anios = dias / 365;
   const provs = s.provincias || [];
   if (!provs.length) return null;
@@ -1261,9 +1261,14 @@ function evolucionarMundo(s, dias, rnd) {
   // había. El orden importa y es este.
   const sacudido = tirarDesastres(nuevas, s.anio, dias, rnd);
   for (const h of sacudido.hechos) hechos.push(h);
+  // Se reconoce el terreno y aparece lo que estaba ahí desde siempre. Va
+  // después de los desastres a propósito: un terremoto abre grietas, y encima
+  // deja a la gente removiendo escombro.
+  const buscado = explorar(sacudido.provincias, s, dias, rnd, empuje);
+  for (const h of buscado.hechos) hechos.push(h);
   // La secuela se recalcula una vez por turno y se deja escrita: así la
   // fertilidad la lee sin preguntarse por el calendario.
-  const conSecuela = sacudido.provincias.map((p) => {
+  const conSecuela = buscado.provincias.map((p) => {
     const sec = secuelaDe(p, s.anio);
     const f = sec ? +sec.fert.toFixed(3) : 1;
     return (p.secuela || 1) === f ? p : { ...p, secuela: f };
@@ -1310,6 +1315,8 @@ function evolucionarMundo(s, dias, rnd) {
                     humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha },
            // lo que la suciedad se cobra: gente y paciencia
            muertos: Math.round(muertos),
+           // y lo que se encontró: ciencia y reputación
+           premios: buscado.premios,
            fac: empeora ? { pueblo: -Math.min(4, Math.round(1 + sucio)) } : null,
            hechos };
 }
@@ -1749,6 +1756,138 @@ function moverGente(provs, stats, ciencia, nuevos, dias, rnd) {
     }),
     hechos,
   };
+}
+
+// ═══ EXPLORACIÓN ═════════════════════════════════════════════
+// Hasta acá, lo que había debajo de una provincia se veía en cuanto el siglo
+// sabía qué era: el petróleo aparecía solo en 1859, en todas partes a la vez,
+// como si el calendario cavara los pozos. Eso no es descubrir, es esperar.
+//
+// Descubrir es que alguien vaya a mirar. Una provincia está más o menos
+// reconocida según quién viva ahí, si se puede llegar y cuánto se sabe medir;
+// y lo que hay debajo aparece cuando esas tres cosas se juntan. Una veta rica
+// en una comarca vacía puede seguir intacta trescientos años, y encontrarla es
+// un acontecimiento y no una fecha.
+//
+// Y no todo lo que se encuentra es mineral. Un mapa viejo tiene ruinas, pasos
+// que nadie ha cruzado, cuevas y ciudades de las que solo queda el nombre.
+
+// Qué se puede encontrar en una provincia, además de lo que tiene debajo. Sale
+// del terreno y del bioma: no hay ruinas de ciudad en la tundra ni pasos de
+// montaña en un delta.
+const HALLAZGOS = [
+  { id: "ruinas", n: "unas ruinas", prob: 0.30,
+    donde: (p, a) => a.habitabilidad > 35 && a.bioma !== "glaciar",
+    premio: { pi: 14, d: { prestigio: 3, tecnologia: 1 } } },
+  { id: "paso", n: "un paso de montaña", prob: 0.55,
+    donde: (p, a) => p.terreno === "montana" || a.altura > 1200,
+    premio: { d: { militar: 2, economia: 2 } } },
+  { id: "cueva", n: "una cueva con pinturas", prob: 0.22,
+    donde: (p, a) => p.terreno === "montana" || p.terreno === "colina" || a.altura > 500,
+    premio: { pi: 10, d: { prestigio: 2 } } },
+  { id: "vado", n: "un vado practicable", prob: 0.45,
+    donde: (p) => !!p.rio,
+    premio: { d: { economia: 3 } } },
+  { id: "fondeadero", n: "un fondeadero abrigado", prob: 0.40,
+    donde: (p) => !!p.costera,
+    premio: { d: { economia: 3, militar: 1 } } },
+  { id: "ciudad_perdida", n: "una ciudad perdida", prob: 0.06,
+    donde: (p, a) => (a.bioma === "selva" || a.bioma === "desierto" || a.bioma === "monzonico")
+      && a.habitabilidad > 12,
+    premio: { pi: 40, d: { prestigio: 8, tecnologia: 2 } } },
+  { id: "salina", n: "una salina", prob: 0.35,
+    donde: (p, a) => a.bioma === "desierto" || a.bioma === "estepa" || p.terreno === "marisma",
+    premio: { d: { economia: 4 } } },
+  { id: "manantial", n: "un manantial", prob: 0.35,
+    donde: (p, a) => a.lluvia < 700 && a.altura > 300,
+    premio: { d: { estabilidad: 2, economia: 1 } } },
+];
+const HALLAZGO_IDX = Object.fromEntries(HALLAZGOS.map((h) => [h.id, h]));
+
+// Lo que esa provincia esconde de verdad. Se sortea una vez y para siempre con
+// el índice de la provincia: en la misma partida y en otra, lo que hay debajo
+// de Soria es lo mismo. Descubrirlo es lo que cambia.
+const _oculto = new Map();
+function ocultoDe(p) {
+  const clave = p.idx != null ? "i" + p.idx : p.id + "|" + p.nombre;
+  if (_oculto.has(clave)) return _oculto.get(clave);
+  const a = ambiente(p);
+  const r = dado("oculto|" + clave);
+  const out = [];
+  for (const h of HALLAZGOS) {
+    const puede = a && h.donde(p, a);
+    const t = r();                                  // se tira siempre, para no descuadrar la serie
+    if (puede && t < h.prob) out.push(h.id);
+  }
+  if (_oculto.size > 9000) _oculto.clear();
+  _oculto.set(clave, out);
+  return out;
+}
+
+// Cuánto se ha reconocido esta provincia. La gente que vive ahí conoce su
+// término, el camino trae forasteros que miran, y la técnica del siglo dice
+// hasta dónde se puede mirar: a ojo, con brújula, con sondeo, con geofísica.
+function reconocimientoNatural(p, provs, ciencia, stats) {
+  const techo = Math.max(1, techoProvincia(p, provs, ciencia));
+  const gente = acotar((p.poblacion || 0) / techo, 0, 1);
+  const via = viaDe(p).soc;
+  const tec = acotar((((stats || {}).tecnologia || 20) - 10) / 80, 0, 1);
+  const dificil = ambiente(p) && ambiente(p).bioma === "selva" ? 0.7
+    : ambiente(p) && (ambiente(p).altura > 2000 || ambiente(p).bioma === "desierto") ? 0.8 : 1;
+  return acotar((0.18 + gente * 0.42 + via * 0.22 + tec * 0.30) * dificil, 0, 1);
+}
+
+// El paso del turno: se reconoce un poco más, y lo que quede a la vista se
+// encuentra. La exploración deliberada —armar una expedición— empuja de golpe
+// lo que el tiempo haría en décadas.
+function explorar(provs, s, dias, rnd, empuje) {
+  if (!provs || !provs.length) return { provincias: provs, hechos: [], premios: [] };
+  const anios = dias / 365;
+  const hechos = [], premios = [];
+  const nuevas = provs.map((p) => {
+    const meta = reconocimientoNatural(p, provs, s.ciencia, s.stats);
+    const hoy = p.explorada != null ? p.explorada : meta * 0.55;
+    let expl = hoy + (meta - hoy) * Math.min(0.9, 0.07 * anios);
+    if (empuje && empuje.id === p.id) expl = Math.min(1, expl + 0.28);
+    expl = +acotar(expl, 0, 1).toFixed(3);
+
+    // ¿aparece algo este turno? Lo que hay debajo solo se ve si además el siglo
+    // sabe qué es: se puede tropezar con betún sin saber que es petróleo.
+    const sabidos = new Set(p.hallado || []);
+    const candidatos = [];
+    for (const id of ocultoDe(p)) if (!sabidos.has(id)) candidatos.push({ tipo: "hallazgo", id });
+    const a = ambiente(p);
+    if (a) for (const id of Object.keys(a.yacimientos))
+      if (!sabidos.has(id) && s.anio >= RECURSOS[id].desde) candidatos.push({ tipo: "veta", id });
+    if (!candidatos.length) return expl === hoy ? p : { ...p, explorada: expl };
+
+    // cuanto más reconocida está la provincia, más probable es dar con algo, y
+    // el empujón de una expedición vale por muchos años de mirar de paso
+    // Encontrar es raro. Con una probabilidad alta, un reino poblado agota en
+    // cuarenta años todo lo que su territorio esconde y después no vuelve a
+    // descubrir nada en tres siglos: al revés de lo que debería, que es que la
+    // exploración siga importando toda la partida.
+    const suerte = expl * expl * 0.045 * anios + (empuje && empuje.id === p.id ? 0.5 : 0);
+    if (rnd() > suerte) return expl === hoy ? p : { ...p, explorada: expl };
+    const elegido = candidatos[Math.floor(rnd() * candidatos.length) % candidatos.length];
+    const nombre = elegido.tipo === "veta" ? RECURSOS[elegido.id].n.toLowerCase()
+                                           : HALLAZGO_IDX[elegido.id].n;
+    // Un vado se encuentra y se usa; una ciudad perdida se cuenta. Solo lo que
+    // un cronista habría anotado llega a la crónica: lo demás pasa igual, pero
+    // en silencio.
+    const contable = elegido.tipo === "veta" || elegido.id === "ruinas"
+      || elegido.id === "ciudad_perdida" || elegido.id === "cueva" || elegido.id === "paso";
+    if (contable)
+      hechos.push({ t: "hallazgo", prov: p.nombre, cual: elegido.id, tipo: elegido.tipo, n: nombre });
+    if (elegido.tipo === "hallazgo") premios.push(HALLAZGO_IDX[elegido.id].premio);
+    return { ...p, explorada: expl, hallado: [...(p.hallado || []), elegido.id] };
+  });
+  return { provincias: nuevas, hechos, premios };
+}
+// Lo que el reino sabe que tiene: no lo que hay, sino lo que encontró.
+function yacimientosConocidos(p, anio) {
+  const hallado = new Set(p.hallado || []);
+  return yacimientosVisibles(p, anio).filter((y) => hallado.has(y.id));
 }
 
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
@@ -2749,7 +2888,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             const a = ambiente(sel);
             if (!a) return null;
             const b = BIOMAS[a.bioma];
-            const yac = yacimientosVisibles(sel, anio || 1200);
+            // lo que el reino sabe que tiene, no lo que hay: una veta sin
+            // descubrir no aparece en ninguna ficha
+            const yac = yacimientosConocidos(sel, anio || 1200);
+            const otros = (sel.hallado || []).filter((h) => HALLAZGO_IDX[h]);
             return (
               <>
                 <div style={{ fontSize: 10.5, fontFamily: mono, marginTop: 4, lineHeight: 1.5, color: C.muted }}>
@@ -2768,6 +2910,16 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                 {yac.length > 0 && (
                   <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.brass }}>
                     {yac.map((y) => y.n.toLowerCase()).join(" · ")}
+                  </div>
+                )}
+                {otros.length > 0 && (
+                  <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.green }}>
+                    {otros.map((h) => HALLAZGO_IDX[h].n).join(" · ")}
+                  </div>
+                )}
+                {sel.explorada != null && sel.explorada < 0.55 && (
+                  <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.muted }}>
+                    sin reconocer del todo
                   </div>
                 )}
                 {sel.ciudad && sel.ciudad.pob >= 1 && (
@@ -5247,7 +5399,8 @@ const salio = (rnd, p) => rnd() < acotar(p, 0, 1);
 
 // Un resultado vacío al que cada efecto le va agregando.
 const vacio = () => ({ hechos: [], d: {}, fac: {}, oro: 0, deuda: 0, pob: 0,
-                       vec: [], ejercito: {}, prov: [], grano: 0, fallo: false });
+                       vec: [], ejercito: {}, prov: [], grano: 0, fallo: false,
+                       explora: null });
 const sumar = (r, campo, k, v) => { r[campo][k] = (r[campo][k] || 0) + v; };
 
 const EFECTOS = {
@@ -5782,7 +5935,11 @@ const EFECTOS = {
       sumar(r, "d", "prestigio", Math.round(8 * i));
       sumar(r, "d", "economia", Math.round(4 * i));
       sumar(r, "d", "tecnologia", 3);
-      r.hechos.push({ t: "expedicion_vuelve" });
+      // y, sobre todo, va a mirar a algún sitio: la comarca elegida o la peor
+      // conocida del reino. De ahí puede salir lo que estaba ahí desde siempre.
+      const dest = c.o.objetivos.provincia || c.provVacia || c.provFrontera || c.provCapital;
+      if (dest) r.explora = dest.id;
+      r.hechos.push({ t: "expedicion_vuelve", provincia: dest });
     } else {
       r.fallo = true;
       sumar(r, "d", "prestigio", -3);
@@ -5938,6 +6095,9 @@ function aplicarEfectos(n, ef, rnd) {
       const tot = poblacionTotal(e.provincias) || 1;
       e.provincias = e.provincias.map((p) => ({ ...p,
         poblacion: Math.max(20, p.poblacion - ef.vivo.muertos * (p.poblacion / tot)) }));
+    }
+    for (const pr of (ef.vivo.premios || [])) {
+      if (pr.pi) e.ciencia = { ...e.ciencia, pi: Math.max(0, (e.ciencia.pi || 0) + pr.pi) };
     }
     if (ef.vivo.fac) {
       e.facciones = { ...e.facciones };
@@ -7128,7 +7288,11 @@ function motorLocal(s, accion, dias, semilla) {
 
   const res = orden ? (EFECTOS[orden.maniobra] || EFECTOS.__gesto)(ctx) : vacio();
   // El planeta se mueve pase lo que pase: es lo que lo separa de un tablero.
-  const vivo = evolucionarMundo(s, dias, rnd);
+  // Armar una expedición no es un modificador de la ficha: es mandar gente a
+  // mirar una comarca concreta, y lo que encuentre lo encuentra ahí.
+  const vivo = evolucionarMundo(s, dias, rnd, res.explora ? { id: res.explora } : null);
+  for (const pr of ((vivo && vivo.premios) || []))
+    for (const [k, v] of Object.entries(pr.d || {})) sumar(res, "d", k, v);
   // La mudanza se calcula acá solo para que la crónica sepa qué contar; quien
   // la aplica de verdad es aplicarEfectos, con el saldo del año ya sumado.
   const mudanza = moverGente(provs, s.stats, s.ciencia, 0, dias, rnd);
@@ -7272,6 +7436,30 @@ const INFORMES = [
     } },
   // Que una comarca se vacíe es de las cosas más contables que hay: se ve en
   // las casas cerradas mucho antes que en ningún padrón.
+  // Encontrar algo es de las pocas noticias buenas que puede dar un año sin
+  // órdenes, y merece contarse distinto según qué sea: no se anuncia igual una
+  // veta de hierro que una ciudad de la que solo quedaba el nombre.
+  { id: "hallazgo", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "hallazgo") ? 12 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "hallazgo") || {};
+      return { zona: h.prov || "el confín", tema: h.n || "algo", cual: h.tipo === "veta" ? "veta" : h.cual };
+    },
+    fr: ["Se da con {tema} en {zona}"], porCual: {
+      veta: ["Se da con {tema} en {zona}: (nadie sabía que estaba ahí|se sabía y nadie había ido a mirar|lo encontró quien buscaba otra cosa)",
+        "Hay {tema} bajo {zona}, y (ya hay quien reclama el derecho a sacarlo|el concejo pleitea con la corona por quién manda ahí)",
+        "Un (pastor|cantero|arriero) de {zona} trae una piedra que resulta ser {tema} [y no le pagan lo que vale]"],
+      ruinas: ["Aparecen unas ruinas en {zona}: (columnas de gente que estuvo antes|un enterramiento con cosas que nadie sabe leer|piedra labrada donde no había cantera)",
+        "Se descubre en {zona} lo que queda de algo antiguo, y (los eruditos discuten cien años quién lo hizo|se lo llevan a la capital, que es lo que se hace)"],
+      ciudad_perdida: ["Encuentran en {zona} una ciudad entera de la que solo quedaba el nombre: (calles bajo la maleza|un templo con el techo caído|más de lo que nadie esperaba)",
+        "En {zona} había una ciudad y nadie lo sabía. (Ahora se sabe|Ahora van a verla desde lejos|Todavía se discute de quiénes fue)"],
+      paso: ["Se abre un paso por {zona} que acorta (semanas de camino|el rodeo de siempre): (ya lo usaban los pastores|no lo había cruzado un carro nunca)",
+        "Hay manera de cruzar la sierra por {zona}, y (eso cambia dos rutas de golpe|los de la ruta vieja no lo celebran)"],
+      cueva: ["En una cueva de {zona} hay pinturas (de manos y bestias|que nadie sabe de cuándo son); (se cierra por si acaso|va a verlas medio reino)"],
+      vado: ["Se encuentra un vado en {zona}: por ahí se pasa el río sin barca [y sin pagar al barquero, que protesta]"],
+      fondeadero: ["Hay en {zona} un abrigo donde fondear con cualquier viento, y (no estaba en carta ninguna|los pescadores lo sabían y no lo decían)"],
+      salina: ["Se descubre sal en {zona}, y (con la sal viene el impuesto|ya hay quien discute de quién es)"],
+      manantial: ["Brota agua en {zona} donde no la había, y (se funda una aldea alrededor|los ganados cambian de ruta)"],
+    } },
   { id: "emigra", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "emigra") ? 7 : 0),
     huecos: (s, c) => ({ zona: (((c.vivo || {}).hechos || []).find((h) => h.t === "emigra") || {}).prov || "el interior" }),
     fr: ["Se va la gente de {zona}: (quedan los viejos y las casas cerradas|se van los que pueden y los que no, también|el que se marcha manda a buscar al hermano al año siguiente)",
