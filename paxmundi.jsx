@@ -274,7 +274,7 @@ function geomProvincia(idx) {
     if (p[1] > y1) y1 = p[1];
   }
   const q = PROV_MUNDO[idx];
-  const r2 = { d, x: cx, y: cy, x0, y0, x1, y1,
+  const r2 = { i: idx, d, x: cx, y: cy, x0, y0, x1, y1,
     n: q[0], pais: q[1], terreno: q[3], costera: !!q[4], area: q[5] };
   _cacheGeom.set(idx, r2);
   return r2;
@@ -301,14 +301,16 @@ function rejillaProvincias() {
 // Trazo de las provincias visibles. Se guarda en caché por recuadro redondeado,
 // así arrastrar un poco no obliga a reconstruir nada.
 const _cacheVista = new Map();
-// Con `porBioma`, en vez de agrupar por país agrupa por lo que crece: el mismo
-// mapa deja de contar quién manda y pasa a contar dónde se puede vivir. Es la
-// misma geometría y la misma caché, cambia el criterio de reunión.
-function trazoProvinciasEn(x, y, w, h, porBioma) {
+// Con una vista temática, en vez de agrupar por país agrupa por lo que la
+// vista mide: el mismo mapa deja de contar quién manda y pasa a contar dónde
+// se puede vivir, cuánto llueve o cuánto sube la tierra. Es la misma
+// geometría y la misma caché, cambia el criterio de reunión.
+function trazoProvinciasEn(x, y, w, h, vista) {
   const m = w * 0.12;                                    // margen para que no aparezcan de golpe
   const gx0 = Math.floor((x - m) / CELDA), gx1 = Math.floor((x + w + m) / CELDA);
   const gy0 = Math.floor((y - m) / CELDA), gy1 = Math.floor((y + h + m) / CELDA);
-  const clave = `${gx0},${gx1},${gy0},${gy1}` + (porBioma ? "|b" : "");
+  const V = vista ? VISTA_IDX[vista] : null;
+  const clave = `${gx0},${gx1},${gy0},${gy1}` + (vista ? "|" + vista : "");
   if (_cacheVista.has(clave)) return _cacheVista.get(clave);
   const rej = rejillaProvincias();
   // se devuelve agrupado por país: un trazo por país, con su color
@@ -325,13 +327,13 @@ function trazoProvinciasEn(x, y, w, h, porBioma) {
         // lo que no llega a un par de píxeles no se dibuja: no se vería igual
         if (g.area < (w * h) / 90000) continue;
         if (g.x1 < x - m || g.x0 > x + w + m || g.y1 < y - m || g.y0 > y + h + m) continue;
-        const k = porBioma ? ambienteDe(i, g.x, g.y, g.terreno, g.costera, false).bioma : g.pais;
+        const k = claveDeVista(V, i, g);
         if (!porPais.has(k)) porPais.set(k, []);
         porPais.get(k).push(g.d);
       }
     }
   const salida = [...porPais.entries()].map(([k, ds]) => ({ pais: k, d: ds.join(" "),
-    col: porBioma ? BIOMAS[k].col : colorDePais(k) }));
+    col: colorDeVista(V, k) }));
   if (_cacheVista.size > 60) _cacheVista.clear();        // no dejar crecer la caché sin límite
   _cacheVista.set(clave, salida);
   return salida;
@@ -799,7 +801,8 @@ function accidenteEn(x, y, tol) {
   // dónde estás, después sobre qué.
   const sierra = dentro("sierra");
   const p = provinciaEn(x, y);
-  if (p) return { t: "tierra", n: p.n, de: p.pais, sobre: sierra };
+  if (p) return { t: "tierra", n: p.n, de: p.pais, sobre: sierra, idx: p.i,
+                  x: p.x, y: p.y, terreno: p.terreno, costera: p.costera };
   if (sierra) return { t: "sierra", n: sierra };
   let mar = null, md = Infinity;
   for (const m of a.mares) {
@@ -2007,6 +2010,168 @@ function refrescarAmbiente(provs, s, anios) {
   return { provincias: nuevas, hechos };
 }
 
+// ═══ VISTAS DEL MAPA ═════════════════════════════════════════
+// Un mapa político dice una sola cosa: quién manda dónde. Todo lo demás que la
+// partida calcula por provincia —dónde se vive bien, cuánto llueve, cuánta
+// gente cabe, dónde está el humo, hasta dónde llega el camino— existía en
+// números y no se veía en ninguna parte. Y un número que no se ve no se usa:
+// nadie va a decidir dónde funda una ciudad leyendo veintiocho fichas.
+//
+// Hay dos clases de vista y conviene no mezclarlas.
+//
+// Unas salen de la geografía y valen para las 4.594 provincias del planeta,
+// gobierne quien gobierne: la habitabilidad, la temperatura, la lluvia, la
+// altura, el bioma. Esas pintan el mundo entero.
+//
+// Las otras salen de la partida y solo existen donde hay partida: cuánta gente
+// vive en una provincia, qué ha talado, qué ha ensuciado, qué caminos abrió.
+// De la contaminación de Borneo no sabés nada, así que esas vistas pintan tus
+// tierras y dejan el resto del mundo apagado. Es más honesto y además se lee
+// mejor: la comparación que importa es entre tus provincias.
+
+// Seis pasos, de lo malo a lo bueno o de lo poco a lo mucho. Seis y no más:
+// con doce nadie distingue el tercero del cuarto, y con tres el mapa miente.
+const RAMPAS = {
+  bueno: ["#6B4436", "#8A6340", "#A98F4E", "#93A455", "#5E9450", "#2F7D4C"],
+  calor: ["#4E76A4", "#7FA8C0", "#A9C2A6", "#D8C878", "#CE8E4C", "#AE4E3A"],
+  agua:  ["#B08A48", "#C0AC62", "#98AC6A", "#5E9B7E", "#3C7E93", "#2E5C8A"],
+  alto:  ["#4E7A5E", "#7E9152", "#A89454", "#AE7C50", "#8E6450", "#D4CFC4"],
+  gente: ["#2A3540", "#3A5C6E", "#46818C", "#6BA37F", "#C4B85C", "#E09A38"],
+  sucio: ["#4C7A54", "#84964E", "#A89A4C", "#A87244", "#8E4E3E", "#5C3238"],
+  monte: ["#B7A472", "#A8A25E", "#8CA057", "#6D9450", "#4A8348", "#2A6B3C"],
+};
+// Cada camino, su color: de la vereda de tierra al ferrocarril.
+const VIA_COL = ["#6A6047", "#94834F", "#BFA254", "#F0CB55"];
+// El mundo del que la partida no sabe nada. No es negro —el mar ya es oscuro y
+// no se distinguirían— sino un verde apagado de tierra sin datos.
+const APAGADO = "#2B332A";
+
+// Un valor continuo cae en uno de seis tramos. Además de que seis colores se
+// leen y seiscientos no, esto es lo que mantiene barato el mapa: las
+// provincias se agrupan por tramo y el planeta entero se pinta con seis
+// trazos, igual que antes se pintaba con un trazo por país.
+//
+// Los cortes van a mano y no repartidos por igual. Un reparto lineal parece
+// más limpio y miente: entre cero y cuatro mil metros, tres de cada cinco
+// provincias del planeta caen en el primer tramo, así que el mapa de alturas
+// sale de un solo color con manchitas. Estos cortes salen de mirar cómo se
+// reparten de verdad las 4.594 provincias, y por eso los seis colores se ven
+// todos en cualquier continente.
+function tramoDe(v, cortes) {
+  if (v == null || !Number.isFinite(v) || !cortes) return -1;
+  let t = 0;
+  while (t < cortes.length && v >= cortes[t]) t++;
+  return t;
+}
+
+const VISTAS = [
+  { id: "politica", n: "Política", ambito: "mundo", pie: "quién manda dónde" },
+  { id: "bioma", n: "Biomas", ambito: "mundo", clases: "bioma",
+    pie: "lo que crece en cada tierra" },
+  { id: "habitabilidad", n: "Habitabilidad", ambito: "mundo", rampa: "bueno",
+    cortes: [12, 30, 48, 64, 80], fmt: (v) => String(Math.round(v)),
+    val: (a) => a.habitabilidad, pie: "cuánta gente aguanta esa tierra" },
+  { id: "temperatura", n: "Temperatura", ambito: "mundo", rampa: "calor",
+    cortes: [0, 7, 14, 20, 25], fmt: (v) => v.toFixed(0) + " °C",
+    val: (a) => a.tMedia, pie: "media de todo el año" },
+  { id: "lluvia", n: "Lluvia", ambito: "mundo", rampa: "agua",
+    cortes: [300, 550, 850, 1300, 2000],
+    fmt: (v) => Math.round(v).toLocaleString("es") + " mm",
+    val: (a) => a.lluvia, pie: "lo que cae en un año" },
+  { id: "relieve", n: "Altura", ambito: "mundo", rampa: "alto",
+    cortes: [60, 200, 500, 1000, 1900],
+    fmt: (v) => Math.round(v).toLocaleString("es") + " m",
+    val: (a) => a.altura, pie: "sobre el nivel del mar" },
+  // La única vista sin escala propia. Un reino medieval y el mismo reino en
+  // 1950 tienen cincuenta veces más gente, así que cualquier corte fijo o bien
+  // pinta todo del primer color en la Edad Media o todo del último después. Y
+  // la fracción del techo tampoco sirve: la migración iguala el reino en un
+  // siglo y las veintiocho provincias quedan entre el 83 y el 88 por ciento,
+  // que es un mapa de un solo color. Lo que se quiere saber es dónde está la
+  // gente, y eso solo tiene sentido comparado con el resto de tus tierras.
+  { id: "poblacion", n: "Población", ambito: "reino", rampa: "gente", relativa: true,
+    fmt: (v) => fmtPob(v), mio: (m) => m.poblacion || 0,
+    pie: "dónde está la gente, comparado con el resto" },
+  { id: "humo", n: "Contaminación", ambito: "reino", rampa: "sucio",
+    cortes: [0.05, 0.15, 0.3, 0.5, 0.7],
+    fmt: (v) => Math.round(v * 100) + "% de suciedad",
+    mio: (m) => Math.max((m.humo || {}).aire || 0, (m.humo || {}).agua || 0),
+    pie: "lo peor entre el aire y el agua" },
+  { id: "vias", n: "Caminos", ambito: "reino", clases: "via",
+    pie: "hasta dónde llega la red" },
+  { id: "bosque", n: "Bosque", ambito: "reino", rampa: "monte",
+    cortes: [0.08, 0.2, 0.35, 0.5, 0.68],
+    fmt: (v) => Math.round(v * 100) + "% de monte",
+    mio: (m) => { const a = ambDe(m);
+      const nat = a && BOSQUE_NATURAL[a.bioma] != null ? BOSQUE_NATURAL[a.bioma] : 0.3;
+      return m.bosque != null ? m.bosque : nat; },
+    pie: "lo que queda en pie" },
+  { id: "exploracion", n: "Reconocimiento", ambito: "reino", rampa: "bueno",
+    cortes: [0.2, 0.4, 0.6, 0.8, 0.93],
+    fmt: (v) => Math.round(v * 100) + "% reconocida",
+    mio: (m) => (m.explorada != null ? m.explorada : null),
+    pie: "cuánto se ha ido a mirar" },
+];
+const VISTA_IDX = Object.fromEntries(VISTAS.map((v) => [v.id, v]));
+
+// Con qué criterio se reúnen las provincias del mundo para pintarlas. Sin
+// vista temática, por país, como siempre. Con una vista del reino, todas
+// juntas: el mundo entero es una sola mancha apagada.
+function claveDeVista(V, i, g) {
+  if (!V || V.id === "politica") return g.pais;
+  if (V.ambito === "reino") return "·";
+  const a = ambienteDe(i, g.x, g.y, g.terreno, g.costera, false);
+  if (V.clases === "bioma") return a.bioma;
+  return "t" + tramoDe(V.val(a), V.cortes);
+}
+function colorDeVista(V, k) {
+  if (!V || V.id === "politica") return colorDePais(k);
+  if (k === "·") return APAGADO;
+  if (V.clases === "bioma") return BIOMAS[k].col;
+  const r = RAMPAS[V.rampa];
+  const t = +k.slice(1);
+  return t < 0 ? APAGADO : r[t];
+}
+// Los cortes de una vista relativa: no los trae puestos, los saca de tus
+// tierras cada vez. Van por cuantiles y no a intervalos iguales, porque con
+// una provincia enorme y veintisiete chicas los intervalos iguales pintan
+// veintisiete del mismo color y la grande sola en la punta.
+function cortesRelativos(V, marcas) {
+  const vs = [];
+  for (const m of marcas || []) { const v = valorMio(V, m); if (v != null && Number.isFinite(v)) vs.push(v); }
+  if (!vs.length) return [1, 2, 3, 4, 5];
+  vs.sort((a, b) => a - b);
+  const lo = vs[0], hi = vs[vs.length - 1];
+  const c = [];
+  for (let k = 1; k <= 5; k++)
+    c.push(vs.length >= 6 ? vs[Math.floor((vs.length * k) / 6)] : lo + ((hi - lo) * k) / 6);
+  // con empates, dos cortes iguales dejan un color sin usar: se separan lo justo
+  for (let i = 1; i < 5; i++) if (c[i] <= c[i - 1]) c[i] = c[i - 1] + Math.max(1e-9, Math.abs(c[i - 1]) * 1e-9);
+  return c;
+}
+const cortesDe = (V, marcas) => (V && V.relativa ? cortesRelativos(V, marcas) : V && V.cortes);
+
+// El color de una provincia tuya. En las vistas del mundo se pinta con la
+// misma escala que el resto del planeta —así se compara tu tierra con la de
+// enfrente—, y en las del reino con la suya, porque no hay con qué comparar.
+function colorMio(V, m, cortes) {
+  if (!V || V.id === "politica") return m.col;
+  const a = ambDe(m);
+  if (V.clases === "bioma") return a && BIOMAS[a.bioma] ? BIOMAS[a.bioma].col : APAGADO;
+  if (V.clases === "via") return VIA_COL[acotar(Math.round(m.via || 0), 0, 3)];
+  const t = tramoDe(valorMio(V, m), cortes || V.cortes);
+  return t < 0 ? APAGADO : RAMPAS[V.rampa][t];
+}
+// Lo que la vista mide en esa provincia. Las del mundo se leen del ambiente
+// vivo —el de hoy, con el clima ya derivado— y no del estático: si el mapa de
+// temperaturas no se moviera en trescientos años no serviría de nada.
+function valorMio(V, m) {
+  if (!V || !m) return null;
+  if (V.mio) return V.mio(m);
+  const a = ambDe(m);
+  return a && V.val ? V.val(a) : null;
+}
+
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
 // Se arrastra con un dedo, se acerca con dos o con la rueda, y también
 // obedece al teclado. Cada capa se recuerda por separado: al arrastrar solo
@@ -2135,7 +2300,7 @@ const MINI_MUNDO = (
     <path d={MUNDO_D} fill="#3E5137" stroke="#728F5C" strokeWidth="0.5" />
   </svg>
 );
-const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true, bioma: false };
+const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true };
 // Cada clase de accidente con su color y su palabra: el rótulo dice qué es
 // antes de decir cómo se llama, que es lo que uno quiere saber primero cuando
 // toca una mancha azul en el medio de la nada.
@@ -2163,6 +2328,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const [rotulo, setRotulo] = useState(null);
   const [panel, setPanel] = useState(false);
   const [capas, setCapas] = useState(CAPAS_INI);
+  // Qué está contando el mapa ahora mismo. Es una sola: dos escalas de color a
+  // la vez no se leen, y superponerlas es lo que convierte un mapa temático en
+  // una mancha.
+  const [vista, setVista] = useState("politica");
+  const V = VISTA_IDX[vista] || VISTA_IDX.politica;
+  const temat = V.id !== "politica";
   const punteros = useRef(new Map());
   const arrastre = useRef(null);
   const movido = useRef(false);
@@ -2433,6 +2604,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     else if (e.key === "-" || e.key === "_") { e.preventDefault(); zoom(1.38); }
     else if (e.key === "0" || e.key === "Home") { e.preventDefault(); alReino(); }
     else if (e.key === "1") { e.preventDefault(); alMundo(); }
+    // Pasar de una vista a la siguiente sin abrir el panel: comparar dos mapas
+    // del mismo sitio es la forma de leerlos, y para eso hay que poder ir y
+    // volver rápido.
+    else if (e.key === "v" || e.key === "V") {
+      e.preventDefault();
+      const hay = VISTAS.filter((q) => q.ambito !== "reino" || mias.length);
+      const i = hay.findIndex((q) => q.id === vista);
+      setVista(hay[(i + (e.shiftKey ? hay.length - 1 : 1)) % hay.length].id);
+    }
     else if (e.key === "Escape" && onSeleccion) onSeleccion(null);
   }
 
@@ -2558,16 +2738,17 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // frontera, y el mapa entero parecía una reja. Ahora es un hilo cálido que
   // aparece de a poco y nunca le gana a la costa ni al límite de un país.
   const capaProvincias = useMemo(() => {
-    // El mapa físico es lo único que tiene sentido mirar de un planeta entero,
-    // así que la vista de biomas no se apaga al alejarse: es la única capa de
-    // provincias que sigue viva al ver el mundo completo.
-    if (capas.bioma ? !capas.provincias : !capas.provincias || w >= 300) return null;
-    const op = capas.bioma ? 1 : acotar((300 - w) / 120, 0, 1);
-    const grupos = trazoProvinciasEn(rx, ry, rw, rh, capas.bioma);
+    // Una vista temática es lo único que tiene sentido mirar de un planeta
+    // entero, así que no se apaga al alejarse: la división política sí, porque
+    // a esa distancia el hilo se afina hasta desaparecer, pero un mapa de
+    // biomas o de lluvia del mundo completo es justo para lo que sirve.
+    if (temat ? !capas.provincias : !capas.provincias || w >= 300) return null;
+    const op = temat ? 1 : acotar((300 - w) / 120, 0, 1);
+    const grupos = trazoProvinciasEn(rx, ry, rw, rh, temat ? vista : null);
     return (
       <g style={{ pointerEvents: "none" }}>
         {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col}
-          opacity={op * (capas.bioma ? 0.88 : 0.62)} stroke="none" />)}
+          opacity={op * (temat ? 0.88 : 0.62)} stroke="none" />)}
         {grupos.map((g) => (
           <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={fino * 2.2}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
@@ -2580,7 +2761,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         ))}
       </g>
     );
-  }, [w, px, fino, cerca, claveVista, capas.provincias, capas.bioma]);
+  }, [w, px, fino, cerca, claveVista, capas.provincias, vista]);
 
   // Fronteras y aguas: por encima de las provincias.
   const capaAguas = useMemo(() => (
@@ -2721,12 +2902,26 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const vecUbic = useMemo(() => ubicarVecinos(vecinos, centro, paisPropio),
     [vecinos, centro.x, centro.y, paisPropio]);
   const biomasEnVista = useMemo(() => {
-    if (!capas.bioma) return [];
+    if (vista !== "bioma") return [];
     const v = [];
-    for (const g of trazoProvinciasEn(rx, ry, rw, rh, true))
+    for (const g of trazoProvinciasEn(rx, ry, rw, rh, "bioma"))
       if (!v.includes(g.pais)) v.push(g.pais);
     return v.sort((a, b) => BIOMAS[b].fert - BIOMAS[a].fert);
-  }, [claveVista, capas.bioma]);
+  }, [claveVista, vista]);
+  // Lo que la vista mide en tus tierras: el mínimo, el máximo y el nombre de
+  // la que se lleva la palma. Una escala de cero a cien no dice nada si todas
+  // tus provincias están entre 61 y 68; saber eso es la mitad de la lectura.
+  const rangoMio = useMemo(() => {
+    if (!temat || V.clases) return null;
+    const vs = [];
+    for (const m of mias) { const v = valorMio(V, m); if (v != null && Number.isFinite(v)) vs.push({ v, m }); }
+    if (!vs.length) return null;
+    vs.sort((a, b) => a.v - b.v);
+    return { min: vs[0], max: vs[vs.length - 1] };
+  }, [mias, vista]);
+  // Las vistas relativas sacan la escala del reino, así que cambia con la
+  // partida; las demás la traen puesta y no se mueve nunca.
+  const cortesVista = useMemo(() => cortesDe(V, mias), [mias, vista]);
   const terrenosReino = useMemo(() => {
     const vistos = [];
     for (const m of mias) if (m.terreno && TERRENOS[m.terreno] && !vistos.includes(m.terreno)) vistos.push(m.terreno);
@@ -2751,6 +2946,20 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     }).filter(Boolean).sort((a, b) => a - b);
     return as.length ? as[Math.floor(as.length / 2)] : 0;
   }, [conTrazo]);
+  // Lo que la vista puesta mide justo donde está el dedo. Un mapa de colores
+  // sin número al lado obliga a adivinar entre dos tonos parecidos, y en una
+  // rampa de seis pasos los dos del medio se parecen siempre.
+  const lecturaEn = (r) => {
+    if (!temat || !r || r.t !== "tierra") return null;
+    const mio = mias.find((m) => (r.idx != null && m.idx === r.idx) || m.nombre === r.n);
+    const amb = mio ? ambDe(mio)
+      : V.ambito === "reino" ? null
+      : ambienteDe(r.idx, r.x, r.y, r.terreno, r.costera, false);
+    if (V.clases === "bioma") return amb && BIOMAS[amb.bioma] ? BIOMAS[amb.bioma].n.toLowerCase() : null;
+    if (V.clases === "via") return mio ? (mio.via ? "con " + viaDe(mio).n : "sin camino abierto") : null;
+    const v = mio ? valorMio(V, mio) : amb && V.val ? V.val(amb) : null;
+    return v == null || !Number.isFinite(v) ? null : V.fmt(v);
+  };
   const rVecino = px * 13;
   const rMarca = anchoTipico ? acotar(anchoTipico * 0.24, px * 3.75, px * 13) : px * 13;
   // Cuando la forma de la provincia ya se distingue, el disco encima sobra:
@@ -2841,8 +3050,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <path d={trazoReino} fill="#222B1A" stroke="none" />
           {conTrazo.map((m) => (
             <path key={"rf" + m.id} d={m.poly}
-              fill={m.ocupada ? `url(#${uid}Ocupada)` : (m.col || "#6E7A48")}
-              opacity={m.ocupada ? 1 : 0.88} stroke="none" />
+              fill={m.ocupada ? `url(#${uid}Ocupada)` : (colorMio(V, m, cortesVista) || "#6E7A48")}
+              /* En una vista temática el relleno va opaco. Con el 0,88 de
+                 siempre, el mismo valor salía un punto más oscuro dentro de tu
+                 frontera que fuera, y entonces el color deja de significar lo
+                 que dice la leyenda: comparar tu provincia con la de enfrente
+                 es justo para lo que sirve el mapa. */
+              opacity={m.ocupada || temat ? 1 : 0.88} stroke="none" />
           ))}
           {/* El relleno del reino es opaco —tiene que serlo, si no la tierra
               cambia de color según el país que haya debajo—, y así sepultaba
@@ -2976,6 +3190,14 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               sobre {rotulo.sobre}
             </div>
           )}
+          {(() => {
+            const l = lecturaEn(rotulo);
+            return l ? (
+              <div style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>
+                {V.n.toLowerCase()}: {l}
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
 
@@ -3002,7 +3224,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               se acababa: una llanura costera de Noruega y otra de Senegal eran
               la misma casilla. */}
           {(() => {
-            const a = ambiente(sel);
+            const a = ambDe(sel);
             if (!a) return null;
             const b = BIOMAS[a.bioma];
             // lo que el reino sabe que tiene, no lo que hay: una veta sin
@@ -3151,8 +3373,70 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         <div className="pm-fade pm-scroll" style={{ position: "absolute", right: 46, bottom: 8, width: 178, zIndex: 3,
           padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.95)", border: `1px solid ${C.line}`,
           boxShadow: "0 6px 20px rgba(0,0,0,0.55)", maxHeight: "82%", overflowY: "auto" }}>
-          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, marginBottom: 6 }}>─ CAPAS</div>
-          {[["provincias", "Provincias del mundo"], ["bioma", "Pintar por bioma"], ["ciudades", "Ciudades"],
+          {/* ——— qué cuenta el mapa ——— */}
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, marginBottom: 5 }}>─ QUÉ CUENTA EL MAPA</div>
+          {VISTAS.map((v) => {
+            // Las vistas que salen de la partida no tienen sentido sin partida:
+            // en la pantalla de fundación no hay tierras propias que pintar.
+            if (v.ambito === "reino" && !mias.length) return null;
+            const puesta = v.id === vista;
+            return (
+              <button key={v.id} onClick={() => setVista(v.id)} title={v.pie}
+                aria-label={"vista " + v.n} aria-pressed={puesta}
+                style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "2px 0",
+                  background: "none", border: "none", cursor: "pointer", textAlign: "left",
+                  fontSize: 11, fontFamily: "inherit", color: puesta ? C.gold : C.muted }}>
+                <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 6,
+                  border: `1px solid ${puesta ? C.gold : C.line}`,
+                  background: puesta ? C.gold : "transparent" }} />
+                {v.n}
+                {v.ambito === "reino" && (
+                  <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 8.5, color: C.brass, opacity: 0.7 }}>tuyas</span>
+                )}
+              </button>
+            );
+          })}
+          <div style={{ fontSize: 10, color: C.muted, opacity: 0.75, margin: "3px 0 2px", lineHeight: 1.4 }}>{V.pie}</div>
+          {/* ——— la escala de la vista puesta ——— */}
+          {temat && !V.clases && (
+            <div style={{ margin: "6px 0 2px" }}>
+              <div style={{ display: "flex", height: 9, borderRadius: 3, overflow: "hidden",
+                border: "1px solid rgba(0,0,0,0.5)" }}>
+                {RAMPAS[V.rampa].map((c, i) => <span key={i} style={{ flex: 1, background: c }} />)}
+              </div>
+              {/* Los números del corte y no dos adjetivos: «seco» y «empapado»
+                  quedan bien y no dejan comparar dos mapas. */}
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: mono,
+                fontSize: 9, color: C.muted, marginTop: 2 }}>
+                <span>&lt;{V.fmt(cortesVista[0])}</span>
+                <span>&gt;{V.fmt(cortesVista[cortesVista.length - 1])}</span>
+              </div>
+              {rangoMio && (
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 3, lineHeight: 1.45 }}>
+                  tus tierras van de <span style={{ color: C.ink }}>{V.fmt(rangoMio.min.v)}</span>
+                  {" "}en {rangoMio.min.m.nombre} a <span style={{ color: C.ink }}>{V.fmt(rangoMio.max.v)}</span>
+                  {" "}en {rangoMio.max.m.nombre}
+                  {V.relativa && <span style={{ opacity: 0.7 }}> · la escala es esa, no otra</span>}
+                </div>
+              )}
+            </div>
+          )}
+          {V.clases === "via" && (
+            <div style={{ margin: "5px 0 2px" }}>
+              {VIAS.map((v, i) => (
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: C.muted, padding: "1px 0" }}>
+                  <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                    background: VIA_COL[i], border: "1px solid rgba(0,0,0,0.5)" }} />
+                  {i === 0 ? "sin abrir" : v.n}
+                  <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>
+                    {mias.filter((m) => acotar(Math.round(m.via || 0), 0, 3) === i).length}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ CAPAS</div>
+          {[["provincias", "Provincias del mundo"], ["ciudades", "Ciudades"],
             ["fisico", "Relieve y ríos"], ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
             <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
               fontSize: 11, color: capas[k] ? C.ink : C.muted, padding: "2px 0" }}>
@@ -3167,8 +3451,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             </label>
           ))}
           {/* La leyenda del mapa físico solo aparece cuando el mapa es físico:
-              una lista de trece biomas encima de un mapa político no ayuda. */}
-          {capas.bioma && (
+              una lista de trece biomas encima de un mapa político no ayuda.
+              Y no se listan los trece sino los que se ven ahora mismo. */}
+          {vista === "bioma" && (
             <>
               <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ BIOMAS</div>
               {biomasEnVista.map((b) => (
@@ -3181,7 +3466,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               ))}
             </>
           )}
-          {terrenosReino.length > 0 && !capas.bioma && (
+          {terrenosReino.length > 0 && !temat && (
             <>
               <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ TUS TIERRAS</div>
               {terrenosReino.map((t) => (
@@ -3203,7 +3488,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           ))}
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 5px" }}>─ TECLAS</div>
           <div style={{ fontSize: 10.5, color: C.muted, lineHeight: 1.6 }}>
-            ←↑↓→ moverse · <b>+ −</b> acercar<br /><b>0</b> tu reino · <b>1</b> el mundo · <b>Esc</b> soltar<br />tocá el mapa y te dice qué hay ahí
+            ←↑↓→ moverse · <b>+ −</b> acercar<br /><b>0</b> tu reino · <b>1</b> el mundo · <b>Esc</b> soltar<br /><b>v</b> vista siguiente · <b>V</b> la anterior<br />tocá el mapa y te dice qué hay ahí
           </div>
         </div>
       )}
@@ -3226,12 +3511,16 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
 // necesita la ficha que aparece al tocarlas.
 function marcasDeProvincias(provs, ciencia) {
   const ps = (provs || []).filter((p) => p.lon != null);
+  // La marca lleva la provincia entera y no una selección de campos. Iba con
+  // ocho y cada capa nueva —el humo, el camino, el bosque, lo reconocido— tenía
+  // que acordarse de añadir el suyo o el mapa la ignoraba en silencio. De paso
+  // viaja el ambiente vivo, así que la ficha dice el clima de hoy y no el del
+  // día que empezó la partida.
   return ps.map((p) => ({
+    ...p,
     ...mundoXY(p.lon, p.lat),
-    id: p.id, nombre: p.nombre, capital: p.capital, ocupada: p.ocupada, conquistada: p.conquistada,
-    terreno: p.terreno, rio: p.rio, costera: p.costera,
-    poblacion: p.poblacion, lealtad: p.lealtad, techo: techoProvincia(p, ps, ciencia),
-    col: (TERRENOS[p.terreno] || TERRENOS.llanura).col, poly: p.poly,
+    techo: techoProvincia(p, ps, ciencia),
+    col: (TERRENOS[p.terreno] || TERRENOS.llanura).col,
   }));
 }
 
