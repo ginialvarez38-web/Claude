@@ -2988,6 +2988,153 @@ function humoRioAbajo(provs) {
   return extra;
 }
 
+// ═══ DE QUÉ VIVE UNA CIUDAD ══════════════════════════════════
+// El mapa trae siete mil trescientas ciudades reales y eran puntos: un disco,
+// un nombre y nada más. No se podían tocar y, si se hubieran podido, no
+// habrían tenido nada que decir.
+//
+// Una ciudad no es un número de habitantes: es de qué vive. Y de qué vive no
+// hay que inventarlo, porque ya está todo calculado: lo que tiene debajo son
+// los yacimientos, lo que crece alrededor es el bioma, si tiene salida al mar
+// lo dice la costa y su caladero, si tiene río lo dice el caudal, y qué se
+// sabe hacer con todo eso lo dice el siglo. Bilbao tiene hierro debajo y mar
+// delante, y por eso hizo barcos antes que acero y acero antes que nada más.
+
+// La población del mundo que vive en ciudades, en millones, a lo largo de la
+// historia. Sirve para lo único que se puede hacer con un censo de hoy: leerlo
+// hacia atrás. Una ciudad que hoy tiene cinco millones no tenía cinco millones
+// en 1200, tenía la parte que le tocaba de un mundo urbano cien veces menor.
+const URBANA = [[-3000, 0.2], [-500, 2], [0, 4], [500, 5], [1000, 10], [1200, 15],
+                [1500, 26], [1700, 45], [1800, 74], [1850, 130], [1900, 220],
+                [1950, 750], [2000, 2850], [2030, 4600]];
+// Cuántos habitantes tenía esta ciudad en este año. Es una estimación y no
+// puede ser otra cosa: del pasado de cada ciudad no hay dato, hay del mundo.
+// Se reparte el mundo urbano de la época entre las mismas ciudades, así que
+// acierta el orden de magnitud de las que crecieron con el mundo y se queda
+// corta con las que fueron grandes y menguaron —Venecia, Tombuctú, Córdoba—,
+// que es un error que conviene saber que está.
+function poblacionCiudad(c, anio) {
+  const hoy = interp(URBANA, 2015);                       // el año del censo que trae el mapa
+  const then = interp(URBANA, acotar(anio == null ? 2015 : anio, -3000, 2030));
+  return Math.max(0.2, (c.pob || 0) * (then / hoy));      // en miles, como el censo
+}
+
+// Los oficios. Cada uno sabe cuándo empieza a existir, cuándo deja de ser lo
+// que da de comer, y qué tiene que haber alrededor para que la ciudad viva de
+// él. El peso es cuánto pesa en la ciudad, no si está o no está: en Bilbao el
+// hierro pesa más que la lana y en Segovia al revés.
+const OFICIOS = [
+  { id: "corte", n: "la corte", peso: (x) => (x.cap === 2 ? 3.2 : x.cap === 1 ? 1.5 : 0) },
+  { id: "puerto", n: "puerto", peso: (x) => (x.mar ? 1.6 + (1 - x.mar.hielo) * 0.8 : 0) },
+  { id: "pesca", n: "pesca", peso: (x) => (x.mar ? x.mar.pesca * 3.2 : 0) },
+  { id: "astillero", n: "astilleros", desde: -600,
+    peso: (x) => (x.mar && x.bosque > 0.25 ? 1.1 + x.bosque : 0) },
+  { id: "fluvial", n: "tráfico fluvial", peso: (x) => (!x.rio ? 0 : x.rio.navegable ? 1.5 : 0.5) },
+  { id: "mercado", n: "mercado", peso: (x) => 0.7 + (x.rango <= 4 ? 0.6 : 0) },
+  { id: "grano", n: "grano", hasta: 1950, peso: (x) => (x.fert > 0.9 ? x.fert * 1.4 : x.fert * 0.5) },
+  { id: "huerta", n: "huerta", peso: (x) => (x.rio && x.a.lluvia < 700 ? 1.3 : 0) },
+  { id: "vino", n: "vino", desde: -1500,
+    peso: (x) => (x.a.bioma === "medit" ? 1.5 : x.a.bioma === "templado" && x.a.tVerano > 19 ? 0.7 : 0) },
+  { id: "lana", n: "lana", hasta: 1900,
+    peso: (x) => (x.a.bioma === "estepa" || x.a.bioma === "pradera" ? 1.3
+      : x.a.altura > 700 ? 1.0 : 0) },
+  { id: "madera", n: "madera", peso: (x) => x.bosque * 1.6 },
+  { id: "pieles", n: "pieles", hasta: 1880,
+    peso: (x) => (x.a.bioma === "taiga" || x.a.bioma === "tundra" ? 1.7 : 0) },
+  { id: "caravana", n: "caravanas", hasta: 1900,
+    peso: (x) => (x.a.bioma === "desierto" || x.a.bioma === "estepa" ? 1.4 : 0) },
+  { id: "curtidos", n: "curtidurías", desde: -1000, hasta: 1900, peso: (x) => (x.rango <= 6 ? 0.6 : 0.3) },
+  { id: "panos", n: "paños", desde: -800, hasta: 1830, peso: (x) => (x.rango <= 5 ? 1.0 : 0.4) },
+  { id: "sal", n: "sal", peso: (x) => (x.yac.sal ? 1.8 : 0) },
+  { id: "hierro", n: "hierro", desde: -1200, peso: (x) => (x.yac.hierro ? 1.9 : 0) },
+  { id: "cobre", n: "cobre", desde: -3000, peso: (x) => (x.yac.cobre ? 1.5 : 0) },
+  { id: "plata", n: "plata", peso: (x) => (x.yac.plata ? 2.0 : 0) },
+  { id: "oro", n: "oro", peso: (x) => (x.yac.oro ? 2.2 : 0) },
+  { id: "banca", n: "banca", desde: 1150, peso: (x) => (x.rango <= 3 ? 1.4 : x.rango <= 5 ? 0.6 : 0) },
+  { id: "estudio", n: "universidad", desde: 1150, peso: (x) => (x.rango <= 4 ? 0.9 : 0) },
+  { id: "carbon", n: "carbón", desde: 1700, peso: (x) => (x.yac.carbon ? 2.4 : 0) },
+  { id: "textil", n: "telares", desde: 1780, hasta: 1980,
+    peso: (x) => (x.rango <= 6 ? 1.5 : 0.5) },
+  { id: "acero", n: "acerías", desde: 1856,
+    peso: (x) => (x.yac.hierro && x.yac.carbon ? 3.0 : x.yac.hierro ? 1.6 : 0) },
+  { id: "maquinaria", n: "maquinaria", desde: 1840, peso: (x) => (x.rango <= 5 ? 1.3 : 0.4) },
+  { id: "quimica", n: "química", desde: 1880, peso: (x) => (x.rango <= 5 ? 1.1 : 0.3) },
+  { id: "petroleo", n: "petróleo", desde: 1890, peso: (x) => (x.yac.petroleo ? 3.0 : 0) },
+  { id: "gas", n: "gas", desde: 1950, peso: (x) => (x.yac.gas ? 2.0 : 0) },
+  { id: "automotriz", n: "automóvil", desde: 1910, peso: (x) => (x.rango <= 4 ? 1.4 : 0) },
+  { id: "electronica", n: "electrónica", desde: 1965, peso: (x) => (x.rango <= 3 ? 1.6 : 0.4) },
+  { id: "turismo", n: "turismo", desde: 1955,
+    peso: (x) => (x.mar && x.a.tVerano > 22 ? 1.8 : x.rango <= 2 ? 1.0 : 0) },
+  { id: "servicios", n: "oficinas", desde: 1970, peso: (x) => (x.rango <= 4 ? 1.7 : 0.5) },
+];
+const OFICIO_IDX = Object.fromEntries(OFICIOS.map((o) => [o.id, o]));
+
+// El contexto de una ciudad: todo lo que el mundo ya sabe del sitio donde
+// está. Se calcula una vez por ciudad y se guarda, que hay siete mil.
+const _ctxCiudad = new Map();
+function contextoCiudad(c) {
+  if (_ctxCiudad.has(c.n + c.x)) return _ctxCiudad.get(c.n + c.x);
+  const g = provinciaEn(c.x, c.y);
+  const idx = g ? g.i : null;
+  const a = ambienteDe(idx, c.x, c.y, g ? g.terreno : "llanura", g ? g.costera : false, false);
+  const falsa = { idx, x: c.x, y: c.y, terreno: g ? g.terreno : "llanura",
+                  costera: g ? g.costera : false, nombre: c.n, id: "c" + c.n };
+  const yac = {};
+  if (a && a.yacimientos) for (const k of Object.keys(a.yacimientos)) yac[k] = a.yacimientos[k];
+  // El mar se mide desde la ciudad y no desde su provincia. La provincia de
+  // Mánchester toca el mar y Mánchester no, así que salían astilleros a
+  // cuarenta millas de la costa; y al revés, Venecia y Singapur se quedaban
+  // sin puerto porque la marca de «costera» de su provincia decía que no. Un
+  // puerto es un puerto por dónde está el puerto: se camina desde la ciudad
+  // hasta encontrar agua y se pregunta ahí.
+  const q = aLaMar(c.x, c.y, 1.5);
+  const marAbierto = q.d <= 0.8 && q.x != null ? marEn(q.x, q.y) : null;
+  const o = { a, yac, cap: c.cap, rango: c.rango, pais: c.pais, alAgua: q.d, idxProv: idx,
+    mar: marAbierto ? { n: marAbierto.n, corriente: marAbierto.corriente,
+      pesca: pescaEn(marAbierto, q.d), hielo: hieloMar(marAbierto) } : null,
+    rio: rioDe(falsa),
+    bosque: BOSQUE_NATURAL[a.bioma] != null ? BOSQUE_NATURAL[a.bioma] : 0.3,
+    fert: BIOMAS[a.bioma] ? BIOMAS[a.bioma].fert : 1 };
+  if (_ctxCiudad.size > 4000) _ctxCiudad.clear();
+  _ctxCiudad.set(c.n + c.x, o);
+  return o;
+}
+
+// De qué vive esta ciudad este año. Cuantos más habitantes, más oficios: una
+// aldea vive de una cosa y una metrópolis de cinco, que es la diferencia de
+// verdad entre las dos y no el número.
+function industriasDe(c, anio) {
+  const x = contextoCiudad(c);
+  if (!x.a) return [];
+  const y = anio == null ? 2000 : anio;
+  const r = dado("of|" + c.n + "|" + c.x.toFixed(2));
+  const pesos = [];
+  for (const o of OFICIOS) {
+    if (o.desde != null && y < o.desde) continue;
+    if (o.hasta != null && y > o.hasta) continue;
+    const p = o.peso(x);
+    if (p <= 0) continue;
+    // un pellizco de azar, fijo para cada ciudad: dos puertos de la misma
+    // costa no tienen por qué vivir exactamente de lo mismo
+    pesos.push({ o, p: p * (0.82 + r() * 0.36) });
+  }
+  pesos.sort((a, b) => b.p - a.p);
+  const cuantos = c.rango <= 1 ? 5 : c.rango <= 3 ? 4 : c.rango <= 6 ? 3 : c.rango <= 8 ? 2 : 1;
+  return pesos.slice(0, cuantos).map((q) => ({ id: q.o.id, n: q.o.n, peso: +q.p.toFixed(2) }));
+}
+
+// La ciudad que hay bajo el dedo, entre las que se están dibujando. Se busca
+// solo en las visibles: preguntar por las siete mil en cada movimiento del
+// puntero no tendría sentido.
+function ciudadEnPunto(cs, x, y, tol) {
+  let mejor = null, md = tol * tol;
+  for (const c of cs) {
+    const dx = c.x - x, dy = c.y - y, dd = dx * dx + dy * dy;
+    if (dd < md) { md = dd; mejor = c; }
+  }
+  return mejor;
+}
+
 // ═══ VISTAS DEL MAPA ═════════════════════════════════════════
 // Un mapa político dice una sola cosa: quién manda dónde. Todo lo demás que la
 // partida calcula por provincia —dónde se vive bien, cuánto llueve, cuánta
@@ -3323,6 +3470,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const [med, setMed] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState(null);
   const [rotulo, setRotulo] = useState(null);
+  const [ciudadSel, setCiudadSel] = useState(null);
   const [panel, setPanel] = useState(false);
   const [capas, setCapas] = useState(CAPAS_INI);
   // Qué está contando el mapa ahora mismo. Es una sola: dos escalas de color a
@@ -3610,7 +3758,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       const i = hay.findIndex((q) => q.id === vista);
       setVista(hay[(i + (e.shiftKey ? hay.length - 1 : 1)) % hay.length].id);
     }
-    else if (e.key === "Escape" && onSeleccion) onSeleccion(null);
+    else if (e.key === "Escape") { setCiudadSel(null); if (onSeleccion) onSeleccion(null); }
   }
 
   // Si eligen una provincia desde la lista y no se ve, el mapa va hacia ella.
@@ -3877,9 +4025,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   }, [w, px, claveVista, capas.sierras]);
 
   // Las ciudades del mundo.
+  const ciudadesAqui = useMemo(() => (capas.ciudades ? ciudadesVisibles(w, rx, ry, rw, rh) : []),
+    [w, claveVista, capas.ciudades]);
   const capaCiudades = useMemo(() => {
-    if (!capas.ciudades) return null;
-    const cs = ciudadesVisibles(w, rx, ry, rw, rh);
+    const cs = ciudadesAqui;
     if (!cs.length) return null;
     const r0 = px * 2.9;
     const conNombre = new Set(w >= 55 ? []
@@ -3920,7 +4069,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         })}
       </g>
     );
-  }, [w, px, claveVista, capas.ciudades]);
+  }, [w, px, ciudadesAqui]);
 
   // ——— el reino ———
   const mias = useMemo(() => (marcas || []).filter((m) => m && m.x != null), [marcas]);
@@ -4018,7 +4167,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         onPointerLeave={() => setRotulo(null)}
         onDoubleClick={(e) => zoomSuave(e.shiftKey ? 2 : 0.5, e.clientX, e.clientY)}
-        onClick={() => { if (!movido.current && onSeleccion) onSeleccion(null); }}
+        onClick={() => { if (movido.current) return; setCiudadSel(null); if (onSeleccion) onSeleccion(null); }}
         style={{ width: "100%", height: "100%", display: "block", touchAction: "none", cursor: "grab" }}>
         {defs}
         {capaMundo}
@@ -4199,6 +4348,25 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           </g>
         )}
 
+        {/* Y las ciudades. Van encima de la zona sensible de la provincia
+            porque son más chicas: si ganara la provincia, no se podría tocar
+            una ciudad que está dentro de tus tierras, que son justamente las
+            que uno más quiere mirar. El radio es generoso —un disco de tres
+            píxeles no se toca con el dedo— pero nunca tanto como para tapar a
+            la de al lado. */}
+        {ciudadesAqui.length > 0 && ciudadesAqui.length < 420 && (
+          <g>
+            {ciudadesAqui.map((c, i) => (
+              <circle key={"cz" + i} cx={c.x} cy={c.y} r={Math.min(px * 9, w * 0.012)}
+                fill="transparent" pointerEvents="all" style={{ cursor: "pointer" }}
+                aria-label={"ciudad " + c.n}
+                onClick={(e) => { e.stopPropagation(); if (!movido.current) setCiudadSel(c); }}>
+                <title>{c.n}</title>
+              </circle>
+            ))}
+          </g>
+        )}
+
         <rect x={vb.x} y={vb.y} width={vb.w} height={vb.h} fill={`url(#${uid}Vinieta)`} style={{ pointerEvents: "none" }} />
       </svg>
 
@@ -4234,9 +4402,14 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         </div>
       )}
 
-      {/* ficha de la provincia elegida */}
+      {/* La columna de la izquierda: la provincia elegida arriba y la ciudad
+          que se haya tocado debajo. Van juntas porque una ciudad está en una
+          provincia y lo natural es leer las dos de un vistazo. */}
+      <div style={{ position: "absolute", left: 10, top: 10, zIndex: 3, display: "flex",
+        flexDirection: "column", gap: 7, alignItems: "flex-start",
+        maxHeight: "calc(100% - 20px)", pointerEvents: "none" }}>
       {sel && (
-        <div className="pm-fade" style={{ position: "absolute", left: 10, top: 10, zIndex: 3,
+        <div className="pm-fade" style={{
           width: acotar((med.w || 420) * 0.45, 148, 200),
           padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.94)",
           border: `1px solid ${sel.ocupada ? C.red + "88" : C.gold + "77"}`,
@@ -4373,6 +4546,74 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           )}
         </div>
       )}
+
+      {/* La ficha de la ciudad. Siete mil trescientas ciudades reales eran
+          puntos con un nombre; ahora dicen cuánta gente tenían el año que uno
+          está jugando y de qué vivían, que es lo que de verdad distingue una
+          ciudad de otra. */}
+      {ciudadSel && (() => {
+        const cs = ciudadSel;
+        const x = contextoCiudad(cs);
+        const ofs = industriasDe(cs, anio);
+        // Si la ciudad cae en una provincia tuya manda la partida: ahí la
+        // población no es una estimación, es la que hay.
+        const mia = mias.find((m) => m.idx != null && x.idxProv === m.idx);
+        const pob = mia && mia.ciudad ? mia.ciudad.pob : poblacionCiudad(cs, anio);
+        const r = rangoCiudad(pob);
+        return (
+          <div className="pm-fade" style={{
+            width: acotar((med.w || 420) * 0.45, 152, 206),
+            padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.94)",
+            border: `1px solid ${C.brass}66`, boxShadow: "0 6px 20px rgba(0,0,0,0.55)",
+            pointerEvents: "auto", cursor: "pointer" }}
+            title="tocar para cerrar"
+            onClick={(e) => { e.stopPropagation(); setCiudadSel(null); }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ color: C.gold, fontFamily: mono, fontSize: 12 }}>{r.ico}</span>
+              <span style={{ fontFamily: serif, fontSize: 14, color: C.ink, lineHeight: 1.25 }}>{cs.n}</span>
+            </div>
+            {/* El país y la capitalidad son los de hoy: el mapa trae un censo
+                moderno y no hay otro. Que Madrid sea capital de España es
+                verdad ahora y no lo era en 1200, así que la corona solo se
+                enseña cuando la fecha la sostiene; el país se enseña siempre,
+                porque hace falta para saber de qué Toledo se habla. */}
+            <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, marginTop: 3,
+              color: cs.cap === 2 && (anio || 2015) >= 1800 ? C.gold : C.brass }}>
+              {cs.cap === 2 && (anio || 2015) >= 1800 ? "CAPITAL · " : ""}{r.n.toUpperCase()}
+            </div>
+            <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, opacity: 0.8, marginTop: 2 }}>
+              {cs.pais}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8,
+              fontFamily: mono, fontSize: 11, marginTop: 6 }}>
+              <span style={{ color: C.muted }}>habitantes</span>
+              <span style={{ color: C.ink }}>{fmtPob(pob)}</span>
+            </div>
+            <div style={{ fontSize: 10, color: C.muted, opacity: 0.72, lineHeight: 1.4 }}>
+              {mia && mia.ciudad ? "de tu reino, contados uno a uno"
+                : `estimado para ${fmtAnio(anio || 2015)}`}
+            </div>
+            <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, color: C.brass,
+              margin: "8px 0 4px" }}>─ DE QUÉ VIVE</div>
+            {ofs.length ? ofs.map((o) => (
+              <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 7,
+                fontSize: 11, color: C.ink, padding: "1px 0" }}>
+                <span style={{ width: 22, height: 4, flex: "0 0 22px", borderRadius: 2,
+                  background: C.gold, opacity: acotar(o.peso / (ofs[0].peso || 1), 0.28, 1) }} />
+                {o.n}
+              </div>
+            )) : (
+              <div style={{ fontSize: 11, color: C.muted }}>de lo que puede</div>
+            )}
+            <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+              {x.a ? BIOMAS[x.a.bioma].n.toLowerCase() : ""}
+              {x.mar ? ` · ${x.mar.n.toLowerCase()}` : ""}
+              {x.rio ? ` · ${x.rio.n}` : ""}
+            </div>
+          </div>
+        );
+      })()}
+      </div>
 
       {/* rosa de los vientos y lectura de posición */}
       <div style={{ position: "absolute", right: 10, top: 10, display: "flex", alignItems: "center",
