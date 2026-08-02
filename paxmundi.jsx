@@ -133,7 +133,12 @@ function fertProv(p) {
   // después —o dando de comer, si fue ceniza—. Viene ya calculado en la
   // provincia porque acá no se sabe en qué año estamos, y esta función se
   // llama cientos de veces por turno: no es sitio para averiguarlo.
-  return t.fert * clima * agua * (p.costera ? 1.06 : 1) * (p.secuela || 1) * (p.campo || 1);
+  // Y lo que da el mar de enfrente. Ser costero valía un 6 % en todas partes,
+  // que es como decir que Islandia y Angola tienen el mismo mar. Un banco de
+  // pesca de verdad alimentó naciones enteras; un mar tropical abierto no da
+  // de comer a nadie, y uno helado medio año da la mitad.
+  const orilla = p.costera ? 1.06 + pescaDeProvincia(p) * 0.34 : 1;
+  return t.fert * clima * agua * orilla * (p.secuela || 1) * (p.campo || 1);
 }
 // El techo nacional se reparte por fertilidad: la suma es idéntica a la de antes.
 function techoProvincia(p, provincias, ciencia) {
@@ -538,6 +543,18 @@ function centrosPaises() {
 const MARES = [
   ["Océano Pacífico",-150,5], ["Pacífico Norte",-170,35], ["Pacífico Sur",-120,-30],
   ["Océano Atlántico",-30,10], ["Atlántico Norte",-40,45], ["Atlántico Sur",-15,-30],
+  // Los rótulos de mar abierto. Faltaban justo donde la costa está lejos de
+  // cualquier mar con nombre propio, y como el mapa contesta con el rótulo más
+  // cercano medido a vuelo de pájaro, tocar el agua frente a Lima decía «mar
+  // Caribe» —que está al otro lado de los Andes— y frente a Chile, «Río de la
+  // Plata». Un rótulo no puede cruzar un continente para llegar.
+  ["Pacífico Suroriental",-80,-18], ["Pacífico Austral",-77,-40],
+  ["Pacífico Nororiental",-140,42],
+  ["Pacífico Suroccidental",170,-25], ["Pacífico Noroccidental",160,35],
+  ["Pacífico Ecuatorial",-110,0], ["Atlántico Suroriental",6,-22],
+  ["Atlántico Noroccidental",-58,33], ["Atlántico Suroccidental",-40,-22],
+  ["Atlántico Ecuatorial",-25,0], ["Índico Occidental",55,-12],
+  ["Índico Oriental",95,-22], ["Índico Meridional",75,-45],
   ["Océano Índico",75,-25], ["Océano Glacial Ártico",0,87], ["Océano Antártico",20,-62],
   ["Mar Mediterráneo",17,35], ["Mar Adriático",16.5,43], ["Mar Egeo",25,38],
   ["Mar Jónico",18.5,38], ["Mar Tirreno",12,40], ["Mar de Liguria",8.8,43.5],
@@ -673,35 +690,13 @@ function accidentes() {
   // encadenan antes de buscarles nombre: un solo nombre bien puesto bautiza el
   // cauce entero, de la cabecera a la desembocadura, y no hace falta una tabla
   // con un punto por cada tramo.
-  const tramos = puntosTrazo(FISICO.rios);
-  const padre = tramos.map((_, i) => i);
-  const raiz = (a) => { while (padre[a] !== a) { padre[a] = padre[padre[a]]; a = padre[a]; } return a; };
-  const punta = new Map();
-  tramos.forEach((ps, i) => {
-    for (const p of [ps[0], ps[ps.length - 1]]) {
-      const k = p[0].toFixed(2) + "," + p[1].toFixed(2);
-      if (punta.has(k)) { const a = raiz(i), b = raiz(punta.get(k)); if (a !== b) padre[a] = b; }
-      else punta.set(k, i);
-    }
-  });
-  const cauces = new Map();
-  tramos.forEach((ps, i) => {
-    const r = raiz(i);
-    if (!cauces.has(r)) cauces.set(r, []);
-    cauces.get(r).push(ps);
-  });
-  const tRios = enMapa(RIOS_N);
-  for (const frs of cauces.values()) {
-    let nom = null, md = 9;                                  // 3° de tolerancia
-    for (const e of tRios) for (const ps of frs) for (const p of ps) {
-      const dx = p[0] - e.x, dy = p[1] - e.y, dd = dx * dx + dy * dy;
-      if (dd < md) { md = dd; nom = e.n; }
-    }
-    if (!nom) continue;
+  // El encadenado vive con los ríos, que es donde hace falta para todo lo
+  // demás: así lo que dice el rótulo al tocar el mapa y lo que usa la
+  // simulación son exactamente el mismo cauce.
+  for (const { n, frs } of caucesNombrados())
     for (const ps of frs)
       for (let i = 1; i < ps.length; i++)
-        meterL({ n: nom, ax: ps[i - 1][0], ay: ps[i - 1][1], bx: ps[i][0], by: ps[i][1] });
-  }
+        meterL({ n, ax: ps[i - 1][0], ay: ps[i - 1][1], bx: ps[i][0], by: ps[i][1] });
 
   // Lagos y sierras: manchas cerradas. Se contestan por dentro y no por
   // cercanía, que es lo que hace que tocar el medio de un lago diga su nombre.
@@ -922,7 +917,25 @@ function interp(tabla, a) {
 // El monzón asiático es la desviación más grande del planeta respecto de su
 // propia media zonal: Bengala está en la latitud del Sahara y recibe veinte
 // veces más agua. No hay modelo por bandas que lo saque, así que va escrito.
-const MONZON = [[62, 145, 5, 36, 1.6], [95, 145, 20, 42, 1.3]];
+// Dónde no manda el anticiclón subtropical. Son dos casos y el mecanismo es
+// el mismo: el monzón asiático, que directamente lo desplaza, y las fachadas
+// orientales de cada continente.
+//
+// Lo segundo faltaba y se notaba mucho. El anticiclón se sienta sobre el
+// océano oriental de cada cuenca, así que su aire seco baja sobre las costas
+// occidentales —California, el Sahara, Namibia, Atacama— mientras su flanco de
+// poniente bombea aire húmedo del trópico hacia el polo por las costas
+// orientales. A la misma latitud, Los Ángeles recibe 350 mm y Nueva Orleans
+// 1.600. Sin esta lista, el modelo ponía São Paulo e Iguazú en 200 mm y los
+// pintaba de desierto, que es de las cosas más falsas que puede decir un mapa.
+const MONZON = [
+  [62, 145, 5, 36, 1.6],      // monzón del Índico y del sur de Asia
+  [95, 145, 20, 42, 1.3],     // monzón de Asia oriental
+  [-92, -74, 24, 38, 1.5],    // sudeste de Estados Unidos
+  [-62, -38, -35, -14, 1.7],  // sudeste de Brasil, Paraná, Uruguay
+  [24, 36, -34, -20, 1.3],    // Natal y el sur de Mozambique
+  [144, 155, -40, -20, 1.3],  // costa oriental de Australia
+];
 // A sotavento de una cordillera, en el cinturón de los oestes, el aire baja
 // ya seco. Es lo que hace que la Patagonia sea estepa teniendo el Pacífico a
 // doscientos kilómetros, y lo mismo vale para la Gran Cuenca americana o para
@@ -1099,10 +1112,15 @@ function ambienteDe(idx, x, y, terreno, costera, rio) {
   const dCosta = aLaCosta(x, y);
   const contin = acotar(dCosta / 16, 0, 1);
   const altura = alturaEn(x, y, terreno);
-  const cl = climaEn(lat, altura, contin, x - 180,
+  let cl = climaEn(lat, altura, contin, x - 180,
     terreno === "montana" || terreno === "colina" || terreno === "bosque");
   const sombra = sombraDeLluvia(x, y, lat);
   if (sombra < 1) cl.lluvia = Math.round(cl.lluvia * sombra);
+  // Y lo que trae el agua de enfrente. Faltaba justo lo que explica los dos
+  // sitios más raros del mapa: por qué Bergen es habitable estando más al
+  // norte que el Labrador, y por qué el Atacama y el Namib son desiertos
+  // teniendo el océano a la vista. Las dos cosas son la misma: la corriente.
+  cl = correccionCorriente(cl, x - 180, lat, dCosta);
   const bioma = biomaDe(cl.tMedia, cl.lluvia, altura, terreno, cl.amplitud, lat);
   // agua disponible: la que cae, la que pasa y la que se puede sacar del mar
   const agua = acotar(cl.lluvia / 1400 + (rio ? 0.35 : 0) + (costera ? 0.05 : 0), 0, 1.35);
@@ -1297,14 +1315,54 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     if (p.humo && p.humo.aire === c.aire && p.humo.agua === c.agua && p.campo === campo) return p;
     return { ...p, humo: c, campo };
   });
+  // El humo del agua baja por el cauce: lo que echa una provincia lo bebe la de
+  // abajo. Va después de calcular la suciedad de cada una y antes de cobrarla.
+  const arrastre = humoRioAbajo(conCiudad);
+  const conAgua = arrastre.size === 0 ? conCiudad : conCiudad.map((p) => {
+    const de = arrastre.get(p.id);
+    if (!de) return p;
+    const agua = +acotar(((p.humo || {}).agua || 0) + de, 0, 1).toFixed(3);
+    return agua === (p.humo || {}).agua ? p : { ...p, humo: { ...(p.humo || { aire: 0 }), agua }, aguaArriba: de };
+  });
+
+  // Las aguas del año: cuánto baja el río, si se puede navegar y hasta dónde
+  // sube la crecida. Se deja escrito en la provincia porque calcularlo cuesta
+  // y se consulta muchas veces —el socorro, la migración, la riada—.
+  const mundoHoy = { anomalia, taladoCuenca: 1 - (conAgua.reduce((a, q) => a + (q.bosque != null ? q.bosque : 0.3), 0)
+    / Math.max(1, conAgua.length)) / 0.45 };
+  const conAguas = conAgua.map((p) => {
+    const ag = aguasDelAnio(p, s.stats, mundoHoy);
+    if (!ag) return p.rioNav == null ? p : { ...p, rioNav: 0, crecida: 0 };
+    if (p.rioNav === ag.nav && p.crecida === ag.crecida) return p;
+    return { ...p, rioNav: ag.nav, crecida: ag.crecida, estiaje: ag.estiaje, salto: ag.salto };
+  });
+
   // Al final de todo: el ambiente de hoy, con el clima ya derivado, el bosque
   // ya talado y el humo ya contado. Va último porque depende de los tres.
-  const refresco = refrescarAmbiente(conCiudad, { ...s, mundo: { anomalia } }, anios);
+  const refresco = refrescarAmbiente(conAguas, { ...s, mundo: { anomalia } }, anios);
   const conAmbiente = refresco.provincias;
   for (const h of refresco.hechos) hechos.push(h);
 
+  // Y lo que el año del río da para contar: una crecida de las gordas, un
+  // estiaje que deja el cauce en nada, o el día que se pudo navegar hasta
+  // arriba por primera vez.
+  const conRio = conAguas.filter((q) => q.crecida);
+  if (conRio.length) {
+    const peor = conRio.reduce((a, b) => (b.crecida > a.crecida ? b : a));
+    const seco = conRio.reduce((a, b) => ((b.estiaje || 9) < (a.estiaje || 9) ? b : a));
+    const dichoRio = (s.mundo && s.mundo.rioDicho) || 0;
+    if (peor.crecida > 1.5 && peor.crecida - dichoRio > 0.25) {
+      hechos.push({ t: "rio", prov: peor.nombre, cual: "crecida",
+        n: (rioDe(peor) || {}).n || "el río", q: +peor.crecida.toFixed(2) });
+    } else if ((seco.estiaje || 9) < 0.35 && dichoRio > 0) {
+      hechos.push({ t: "rio", prov: seco.nombre, cual: "estiaje",
+        n: (rioDe(seco) || {}).n || "el río", q: +(seco.estiaje || 0).toFixed(2) });
+    }
+    var nuevoRioDicho = peor.crecida > 1.5 ? peor.crecida : Math.max(0, dichoRio - 0.1);
+  }
+
   const sucio = conCiudad.length ? enojo / conCiudad.length : 0;
-  const peorAgua = conCiudad.reduce((m, q) => Math.max(m, (q.humo || {}).agua || 0), 0);
+  const peorAgua = conAgua.reduce((m, q) => Math.max(m, (q.humo || {}).agua || 0), 0);
   // Igual que con el bosque: la suciedad no es noticia todos los años, es
   // noticia cuando empeora. Si no, la crónica de un reino industrial no habla
   // de otra cosa durante un siglo. Y el enojo del pueblo va con la noticia y
@@ -1328,7 +1386,8 @@ function evolucionarMundo(s, dias, rnd, empuje) {
 
   return { provincias: conAmbiente, reservas: { ...(s.reservas || {}), ...gasto },
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
-                    humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha },
+                    humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha,
+                    rioDicho: typeof nuevoRioDicho === "number" ? nuevoRioDicho : (s.mundo && s.mundo.rioDicho) || 0 },
            // lo que la suciedad se cobra: gente y paciencia
            muertos: Math.round(muertos),
            // y lo que se encontró: ciencia y reputación
@@ -1438,13 +1497,13 @@ const viaDe = (p) => VIAS[acotar(Math.round(p && p.via != null ? p.via : 0), 0, 
 // existía, pero repartido: antes el reino entero tenía un solo número y una
 // provincia aislada se salvaba igual que la capital.
 function socorroEn(p, ciencia) {
-  return alcanceSocorro(ciencia) * (0.28 + 0.72 * viaDe(p).soc);
+  return alcanceSocorro(ciencia) * (0.28 + 0.72 * alcanceDe(p));
 }
 // Lo que la red le agrega al reino: comercio interior. Una provincia bien
 // enlazada vende lo suyo; una aislada se lo come.
 function bonoRed(provs) {
   if (!provs || !provs.length) return 1;
-  const m = provs.reduce((a, p) => a + viaDe(p).soc, 0) / provs.length;
+  const m = provs.reduce((a, p) => a + alcanceDe(p), 0) / provs.length;
   return 1 + m * 0.22;
 }
 // Y lo que le agrega la ciudad: la gente que no cultiva paga impuestos de otra
@@ -1537,7 +1596,15 @@ const DESASTRES = [
       ? 0.03 * (1 - Math.abs(a.lluvia - 430) / 570) : 0),
     golpe: (p, a, sev) => ({ pob: -0.035 * sev, anios: 9 }) },
   { id: "inundacion", n: "riada",
-    riesgo: (p, a) => ((p.rio || p.terreno === "delta") && a.lluvia > 700 ? 0.014 * (a.lluvia / 2000) : 0),
+    // La riada no la trae la lluvia del año: la trae la crecida del río, que
+    // puede venir de mil kilómetros más arriba. El Nilo se desbordaba en
+    // Egipto por lo que había llovido en Etiopía, y un río monzónico se lleva
+    // la comarca por delante todos los julios llueva o no llueva allí.
+    riesgo: (p, a) => {
+      const c = p.crecida || 0;
+      if (c > 1.05) return 0.010 * (c - 1) * 2.2 * (p.terreno === "delta" ? 1.6 : 1);
+      return (p.rio || p.terreno === "delta") && a.lluvia > 700 ? 0.010 * (a.lluvia / 2000) : 0;
+    },
     golpe: (p, a, sev) => ({ pob: -0.025 * sev, via: true, limo: true, anios: 4 }) },
   { id: "incendio", n: "incendio",
     // hace falta monte que arda y un verano que lo seque
@@ -1692,7 +1759,7 @@ function dañoContaminacion(c) {
 // una marea. No es una metáfora: la emigración masiva del XIX es literalmente
 // hija del vapor.
 function movilidad(stats, provs) {
-  const via = (provs || []).reduce((a, p) => a + viaDe(p).soc, 0) / Math.max(1, (provs || []).length);
+  const via = (provs || []).reduce((a, p) => a + alcanceDe(p), 0) / Math.max(1, (provs || []).length);
   const tec = acotar((((stats || {}).tecnologia || 20) - 20) / 70, 0, 1);
   return acotar(0.012 + via * 0.10 + tec * 0.05, 0.012, 0.16);
 }
@@ -1707,7 +1774,7 @@ function atractivoDe(p) {
   // la ciudad tira aunque sea insalubre: es donde está el trabajo
   const urb = p.ciudad && p.poblacion ? acotar(p.ciudad.pob / p.poblacion, 0, 1) : 0;
   q *= 1 + urb * 0.55;
-  q *= 0.72 + 0.28 * viaDe(p).soc;                 // adonde no se llega, no se va
+  q *= 0.72 + 0.28 * alcanceDe(p);                 // adonde no se llega, no se va
   q *= 1 - ((p.humo || {}).aire || 0) * 0.22;      // del humo se huye, pero menos de lo que se cree
   q *= p.secuela != null ? acotar(p.secuela, 0.55, 1.15) : 1;
   return Math.max(0.05, q);
@@ -1846,7 +1913,7 @@ function ocultoDe(p) {
 function reconocimientoNatural(p, provs, ciencia, stats) {
   const techo = Math.max(1, techoProvincia(p, provs, ciencia));
   const gente = acotar((p.poblacion || 0) / techo, 0, 1);
-  const via = viaDe(p).soc;
+  const via = alcanceDe(p);
   const tec = acotar((((stats || {}).tecnologia || 20) - 10) / 80, 0, 1);
   const dificil = ambiente(p) && ambiente(p).bioma === "selva" ? 0.7
     : ambiente(p) && (ambiente(p).altura > 2000 || ambiente(p).bioma === "desierto") ? 0.8 : 1;
@@ -1947,7 +2014,7 @@ function habitabilidadViva(base, p, cl, bioma) {
   const humo = p.humo || {};
   h -= (humo.agua || 0) * 16;                         // el agua sucia mata sin que se note
   h -= (humo.aire || 0) * 9;
-  h += viaDe(p).soc * 8;                              // estar comunicado es vivir mejor
+  h += alcanceDe(p) * 8;                              // estar comunicado es vivir mejor
   if (p.secuela != null && p.secuela < 1) h -= (1 - p.secuela) * 40;
   if (p.ocupada) h -= 12;                             // vivir en tierra tomada no es vivir
   return Math.round(acotar(h, 0, 100));
@@ -2008,6 +2075,690 @@ function refrescarAmbiente(provs, s, anios) {
                       habitabilidad: habitabilidadViva(ambiente(p), p, v, real) } };
   });
   return { provincias: nuevas, hechos };
+}
+
+// ═══ EL MAR COMO OBJETO ══════════════════════════════════════
+// El mar era un booleano: una provincia es costera o no lo es, y ser costera
+// valía un 6 % de cosecha y un puerto. Con eso, la costa de Noruega y la costa
+// de Namibia son la misma costa, y no hay dos sitios más distintos.
+//
+// Lo que hace distinto a un mar es lo que corre por él. La misma latitud da
+// Bergen o da el Labrador según de dónde venga el agua; el Atacama y el Namib
+// son desiertos porque tienen agua fría delante, no porque estén lejos de la
+// lluvia; el Gran Banco y el Perú dieron de comer a naciones enteras porque el
+// afloramiento sube el fondo a la superficie. Todo eso sale de las corrientes,
+// y las corrientes son pocas y están donde están.
+
+// Las grandes corrientes de superficie. `calor` es cuánto se aparta el agua de
+// lo que le tocaría por latitud, en grados; `aflora` es cuánta agua profunda
+// sube —agua fría, cargada de alimento, y encima aire estable que no llueve—.
+const CORRIENTES = [
+  // nombre, lon0, lon1, lat0, lat1, calor, aflora
+  ["Corriente del Golfo",             -82,  -10,  25,  45,  4.0, 0],
+  ["Deriva Noratlántica",             -30,   28,  45,  72,  5.0, 0],
+  ["Corriente del Labrador",          -70,  -44,  46,  70, -4.0, 0.20],
+  ["Deriva de Groenlandia Oriental",  -28,   -2,  64,  82, -3.5, 0],
+  ["Corriente de Canarias",           -26,   -8,  12,  34, -2.5, 0.55],
+  ["Corriente de Benguela",             4,   19, -34, -12, -4.5, 0.90],
+  ["Corriente de Humboldt",           -84,  -68, -44,  -4, -5.0, 0.95],
+  ["Corriente de California",        -132, -113,  24,  46, -3.0, 0.70],
+  ["Corriente de Kuroshio",           120,  152,  20,  40,  3.5, 0],
+  ["Corriente de Oyashio",            143,  168,  40,  60, -3.5, 0.30],
+  ["Corriente de las Agujas",          24,   42, -38, -20,  3.0, 0],
+  ["Corriente de Somalia",             41,   58,  -6,  12, -1.5, 0.60],
+  ["Corriente de Australia Oriental", 149,  159, -38, -18,  2.5, 0],
+  ["Corriente del Brasil",            -52,  -36, -35, -10,  2.0, 0],
+  ["Corriente de las Malvinas",       -68,  -52, -56, -34, -3.0, 0.40],
+  ["Corriente Circumpolar Antártica",-180,  180, -66, -46, -2.0, 0.30],
+];
+const _cor = new Map();
+// Qué corriente pasa por delante. Si se solapan dos —el Golfo y el Labrador se
+// cruzan frente a Terranova— manda la que más aparta el agua de su latitud,
+// que es la que se nota.
+function corrienteEn(lon, lat) {
+  const clave = Math.round(lon) + "," + Math.round(lat);
+  if (_cor.has(clave)) return _cor.get(clave);
+  let mejor = null;
+  for (const [n, x0, x1, y0, y1, calor, aflora] of CORRIENTES)
+    if (lon >= x0 && lon <= x1 && lat >= y0 && lat <= y1
+        && (!mejor || Math.abs(calor) > Math.abs(mejor.calor)))
+      mejor = { n, calor, aflora };
+  if (_cor.size > 4000) _cor.clear();
+  _cor.set(clave, mejor);
+  return mejor;
+}
+
+// Lo que la corriente le hace a la tierra de enfrente. Solo a la de enfrente:
+// a cuatro grados de la costa ya no se entera nadie. El agua fría enfría el
+// verano y seca —el aire sobre agua fría no sube, y si no sube no llueve—; el
+// agua caliente templa el invierno, que es lo que hace habitable el norte de
+// Europa.
+function correccionCorriente(cl, lon, lat, dCosta) {
+  const cor = corrienteEn(lon, lat);
+  if (!cor) return cl;
+  const roce = acotar(1 - dCosta / 4, 0, 1);
+  if (roce <= 0) return cl;
+  const dt = cor.calor * roce * 0.55;
+  const ver = dt * (cor.calor < 0 ? 1.3 : 0.6);
+  const inv = dt * (cor.calor < 0 ? 0.6 : 1.4);
+  const tVerano = +(cl.tVerano + ver).toFixed(1);
+  const tInvierno = +(cl.tInvierno + inv).toFixed(1);
+  return { ...cl,
+    tMedia: +(cl.tMedia + dt).toFixed(1), tVerano, tInvierno,
+    amplitud: +(tVerano - tInvierno).toFixed(1),
+    lluvia: Math.round(cl.lluvia * (1 - cor.aflora * roce * 0.86)) };
+}
+
+// ——— los mares, uno por uno ———
+// La tabla de nombres ya existía para poder tocar el mapa y que dijera dónde
+// estás. Acá cada nombre pasa a tener agua: una temperatura que cambia con el
+// mes, un hielo que cierra el puerto, un banco de pesca y unos temporales.
+// La temperatura del agua no es la del aire. En el mar no hay inviernos de
+// cuarenta bajo cero ni veranos de cincuenta: el agua se mueve, tiene una
+// inercia enorme y no baja del punto de congelación del agua salada. Usar la
+// tabla del aire con un factor de corrección daba mares fantasía —el Báltico
+// templado y el de Noruega helado, justo al revés de como son—.
+const T_MAR = [[0, 27.5], [10, 27], [20, 25], [30, 21], [40, 15],
+               [50, 10], [60, 5], [70, 1], [80, -1], [90, -1.8]];
+
+// Los mares que están fuera de la circulación oceánica. No es cuestión de
+// tamaño ni del nombre: es si el agua del océano entra o no entra. El mar del
+// Norte es una plataforma abierta y le llega la deriva atlántica entera; el
+// Báltico está detrás de los estrechos daneses, es medio dulce y se hiela
+// todos los inviernos aunque esté a la misma latitud. Esa diferencia es toda
+// la historia naval del norte de Europa.
+const MAR_CERRADO = new Set([
+  "Mar Mediterráneo", "Mar Adriático", "Mar Egeo", "Mar Jónico", "Mar Tirreno",
+  "Mar de Liguria", "Mar Balear", "Mar de Alborán", "Mar Negro", "Mar de Azov",
+  "Mar de Mármara", "Mar Caspio", "Mar de Aral", "Mar Báltico", "Golfo de Botnia",
+  "Golfo de Finlandia", "Golfo de Riga", "Mar Blanco", "Mar Rojo", "Golfo Pérsico",
+  "Golfo de Omán", "Bahía de Hudson", "Golfo de México", "Mar de Java", "Mar Amarillo",
+  "Golfo de Tailandia", "Golfo de Tonkín", "Golfo de Carpentaria", "Mar de Azov",
+  "Mar de Mármara", "Golfo de Adén", "Canal de Mozambique", "Mar de Ojotsk",
+]);
+// Y dónde el fondo está cerca. Un caladero es agua poco honda: la luz llega,
+// crece el plancton y hay de qué comer. El mar del Norte da más pescado que
+// todo el Mediterráneo junto y no es porque sea más frío —que lo es poco—
+// sino porque es una bañera de cincuenta metros sobre plataforma continental.
+const MAR_PLATAFORMA = new Set([
+  "Mar del Norte", "Mar Báltico", "Golfo de Botnia", "Golfo de Finlandia", "Golfo de Riga",
+  "Mar Céltico", "Mar de Irlanda", "Canal de la Mancha", "Golfo de Vizcaya",
+  "Mar de Noruega", "Mar de Barents", "Mar de Kara",
+  "Mar de Láptev", "Mar de Siberia Oriental", "Mar de Chukotka", "Mar Blanco",
+  "Mar de Bering", "Mar de Ojotsk", "Mar Amarillo", "Mar de China Oriental",
+  "Mar del Japón", "Estrecho de Dinamarca", "Mar Argentino", "Estrecho de Magallanes",
+  "Mar de China Meridional", "Mar de Java", "Mar de Arafura", "Golfo de Carpentaria",
+  "Golfo de Tailandia", "Golfo de Tonkín", "Golfo Pérsico", "Golfo de México",
+  "Bahía de Hudson", "Mar del Labrador", "Mar Argentino", "Gran Bahía Australiana",
+  "Mar de Azov", "Mar de Andamán", "Mar de Timor",
+]);
+const _mar = new Map();
+function marDe(nombre) {
+  if (_mar.has(nombre)) return _mar.get(nombre);
+  const e = MARES.find((m) => m[0] === nombre);
+  if (!e) return null;
+  const [n, lon, lat] = e;
+  const cerrado = MAR_CERRADO.has(n);
+  // Un mar cerrado se calienta y se enfría con la tierra que lo rodea y no le
+  // llega ninguna corriente; un océano abierto oscila la mitad y tarda medio
+  // año en enterarse de que cambió la estación.
+  const o = { n, lon, lat, x: lon + 180, y: 90 - lat,
+    corriente: cerrado ? null : corrienteEn(lon, lat),
+    cerrado, plataforma: MAR_PLATAFORMA.has(n) ? 0.95 : cerrado ? 0.6 : 0.3,
+    retraso: cerrado ? 25 : 55 };
+  if (_mar.size > 300) _mar.clear();
+  _mar.set(nombre, o);
+  return o;
+}
+// El mar que baña un punto: el más cercano de la tabla. Es el mismo criterio
+// con el que el mapa lo nombra al tocarlo, así que lo que dice el rótulo y lo
+// que usa la simulación son el mismo mar.
+function marEn(x, y) {
+  let mejor = null, md = Infinity;
+  for (const [n, lon, lat] of MARES) {
+    const dx = lon + 180 - x, dy = 90 - lat - y, dd = dx * dx + dy * dy;
+    if (dd < md) { md = dd; mejor = n; }
+  }
+  return marDe(mejor);
+}
+
+// La temperatura del agua en la superficie. Sale de la latitud, la corrige la
+// corriente y la retrasa la inercia del mar.
+function tempMar(mar, dia) {
+  if (!mar) return 12;
+  const cor = mar.corriente ? mar.corriente.calor : 0;
+  // el agua nunca baja del punto de congelación del agua salada
+  const media = Math.max(-1.8, interp(T_MAR, Math.abs(mar.lat)) + cor);
+  // y oscila mucho menos que el aire: un mar cerrado y poco hondo sigue a la
+  // tierra, un océano abierto apenas se mueve
+  const amp = (mar.cerrado ? 0.14 : 0.07) * Math.abs(mar.lat) + 1.5;
+  const fase = ((dia - mar.retraso) / 365) * 2 * Math.PI;
+  const norte = mar.lat >= 0 ? 1 : -1;
+  return +(media - Math.cos(fase) * amp * norte).toFixed(1);
+}
+// Cuánto del año está el mar cerrado por hielo. Un puerto que se hiela cuatro
+// meses no es un puerto: es medio puerto, y eso decidió más historia que
+// muchas batallas.
+function hieloMar(mar) {
+  if (!mar) return 0;
+  let dias = 0;
+  for (let d = 15; d < 365; d += 30) if (tempMar(mar, d) < -0.6) dias += 30;
+  return acotar(dias / 365, 0, 1);
+}
+// El banco de pesca. Los grandes caladeros no están donde el mar es bonito:
+// están donde el agua es fría y donde aflora. El trópico abierto es un
+// desierto de agua, y por eso ninguna nación vivió nunca de pescar en él.
+function pescaEn(mar, dCosta) {
+  if (!mar) return 0;
+  const t = (tempMar(mar, 213) + tempMar(mar, 46)) / 2;     // la media del año, no el verano
+  const frio = acotar((24 - t) / 22, 0, 1);                 // el agua fría lleva más oxígeno y más comida
+  const aflora = mar.corriente ? mar.corriente.aflora : 0;
+  const litoral = acotar(1 - (dCosta || 0) / 2.5, 0, 1);    // hay que estar en la orilla
+  return +acotar((frio * 0.40 + aflora * 0.80 + mar.plataforma * 0.45) * litoral - 0.28, 0, 1).toFixed(3);
+}
+// Y lo que el mar le pone difícil a quien navega: hielo la mitad del año en el
+// norte, temporales donde soplan los cuarenta rugientes.
+function durezaMar(mar) {
+  if (!mar) return 0;
+  const hielo = hieloMar(mar);
+  const temporal = acotar((Math.abs(mar.lat) - 35) / 25, 0, 1) * (mar.cerrado ? 0.5 : 1);
+  return +acotar(hielo * 0.7 + temporal * 0.4, 0, 1).toFixed(3);
+}
+
+// A cuántos grados está el mar de verdad.
+//
+// Ya existía `aLaCosta`, pero mide otra cosa: la distancia al centro de la
+// provincia costera más cercana, y como la marca de «costera» que trae el mapa
+// es generosa —Zaragoza y Teruel figuran como costeras—, a media España le
+// salía cero. Para el clima da igual, que es un índice de continentalidad y
+// está calibrado así; para saber si en una provincia se pesca, no da igual
+// nada: salían bancos de pesca en el valle del Ebro.
+//
+// Esto lo mide por donde hay que medirlo: se camina hacia afuera hasta salir
+// de toda provincia, que es donde empieza el agua. Con un cuidado: dos
+// polígonos vecinos no encajan perfectos y dejan grietas de una décima, así
+// que hace falta acertar dos veces seguidas en la misma dirección —una grieta
+// es fina y el mar no—. Sin eso, Moscú tenía el mar a grado y medio.
+const _almar = new Map();
+function aLaMar(x, y, tope) {
+  const lim = tope || 3.5;
+  const clave = x.toFixed(1) + "," + y.toFixed(1) + "|" + lim;
+  if (_almar.has(clave)) return _almar.get(clave);
+  let o = { d: lim, x: null, y: null };
+  buscar:
+  for (let r = 0.5; r <= lim; r += 0.5)
+    for (let a = 0; a < 12; a++) {
+      const t = (a / 12) * 2 * Math.PI, cx = Math.cos(t), cy = Math.sin(t);
+      if (!provinciaEn(x + cx * r, y + cy * r) && !provinciaEn(x + cx * (r + 0.7), y + cy * (r + 0.7))) {
+        o = { d: r, x: x + cx * r, y: y + cy * r };
+        break buscar;
+      }
+    }
+  if (_almar.size > 9000) _almar.clear();
+  _almar.set(clave, o);
+  return o;
+}
+
+// Y para una provincia, medido desde su orilla y no desde su centro. Una
+// provincia grande puede tener el centro a dos grados del agua y doscientos
+// kilómetros de costa: León no es costera y Nordland sí, y por el centroide
+// las dos parecen lo mismo. Se prueban los vértices de su contorno y manda el
+// que esté más cerca del mar.
+const _marProv = new Map();
+function aLaMarDe(p) {
+  const clave = p.idx != null ? "i" + p.idx : (p.id || "") + "|" + (p.nombre || "");
+  if (_marProv.has(clave)) return _marProv.get(clave);
+  const g = p.idx != null ? geomProvincia(p.idx) : null;
+  const ps = g && g.d ? puntosTrazo(g.d)[0] : null;
+  let o;
+  if (!ps || ps.length < 4) {
+    o = aLaMar(p.x != null ? p.x : 190, p.y != null ? p.y : 45, 2);
+  } else {
+    o = { d: 2, x: null, y: null };
+    const paso = Math.max(1, Math.floor(ps.length / 14));
+    for (let i = 0; i < ps.length && o.d > 0.5; i += paso) {
+      const q = aLaMar(ps[i][0], ps[i][1], 2);
+      if (q.d < o.d) o = q;
+    }
+  }
+  if (_marProv.size > 9000) _marProv.clear();
+  _marProv.set(clave, o);
+  return o;
+}
+
+// Lo que el mar le da y le quita a una provincia costera. Va aparte del
+// ambiente porque el ambiente es de la tierra: esto es de la orilla.
+const _mprov = new Map();
+function marDeProvincia(p) {
+  if (!p || !p.costera) return null;
+  const clave = p.idx != null ? "i" + p.idx : (p.id || "") + "|" + (p.nombre || "");
+  if (_mprov.has(clave)) return _mprov.get(clave);
+  const x = p.x != null ? p.x : (p.lon != null ? p.lon + 180 : 190);
+  const y = p.y != null ? p.y : (p.lat != null ? 90 - p.lat : 45);
+  const q = aLaMarDe(p);
+  // Marcada como costera pero sin agua a la vista por ningún lado de su
+  // contorno: no es costa, por mucho que lo diga la ficha. Y el mar se
+  // pregunta desde el agua que se encontró, no desde el centro de la
+  // provincia: el rótulo más cercano a Finnmark, medido a vuelo de pájaro y
+  // cruzando media Escandinavia, es el golfo de Finlandia.
+  const mar = q.d > 0.75 ? null : marEn(q.x != null ? q.x : x, q.y != null ? q.y : y);
+  const o = mar ? { mar: mar.n, corriente: mar.corriente ? mar.corriente.n : null,
+    tAgosto: tempMar(mar, 213), tFebrero: tempMar(mar, 46),
+    hielo: +hieloMar(mar).toFixed(2), pesca: pescaEn(mar, q.d),
+    dureza: durezaMar(mar), aMar: q.d } : null;
+  if (_mprov.size > 9000) _mprov.clear();
+  _mprov.set(clave, o);
+  return o;
+}
+
+// ═══ EL RÍO COMO OBJETO ══════════════════════════════════════
+// El río también era un booleano. Una provincia tiene río o no lo tiene, y
+// tenerlo valía un 22 % de cosecha, un poco de comercio y un riesgo de riada.
+// Con eso, el Amazonas y el Manzanares son el mismo río.
+//
+// Un río de verdad tiene un caudal, y el caudal es lo que decide todo lo
+// demás. Con caudal se navega, y antes del ferrocarril navegar un río era la
+// única forma barata de mover una tonelada: por eso las ciudades están donde
+// están. Con caudal y desnivel se mueve una turbina. Sin caudal, lo que se
+// tira al agua se queda ahí, y lo que se tira arriba aparece abajo.
+//
+// Y el caudal no es un número fijo: un río de deshielo baja tres veces más en
+// mayo que en febrero, uno mediterráneo se queda en nada en agosto, y uno
+// monzónico se lleva por delante la comarca en julio.
+
+// ——— encadenar los tramos dibujados en ríos con nombre ———
+// El mapa trae 895 fragmentos sueltos. Los que comparten una punta son el
+// mismo cauce; encadenados quedan poco más de doscientos, y de esos los que
+// pasan cerca de un nombre de la tabla son los ríos que uno conoce.
+let _cauces = null;
+function caucesNombrados() {
+  if (_cauces) return _cauces;
+  const tramos = puntosTrazo(FISICO.rios);
+  const padre = tramos.map((_, i) => i);
+  const raiz = (a) => { while (padre[a] !== a) { padre[a] = padre[padre[a]]; a = padre[a]; } return a; };
+  // Se juntan por las puntas, pero no por la punta exacta: el trazo del mundo
+  // viene de simplificar contornos y deja huecos de una décima de grado entre
+  // dos tramos del mismo río. Con la coincidencia exacta, el Amazonas quedaba
+  // partido en pedazos y ninguno llegaba al mar. Se redondea a un quinto de
+  // grado y se miran las nueve celdas de alrededor, que es como juntar dos
+  // cabos que casi se tocan.
+  const REJA = 0.2;
+  const punta = new Map();
+  const meter = (p, i) => {
+    const cx = Math.round(p[0] / REJA), cy = Math.round(p[1] / REJA);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const otros = punta.get(cx + dx + "," + (cy + dy));
+      if (otros) for (const j of otros) { const a = raiz(i), b = raiz(j); if (a !== b) padre[a] = b; }
+    }
+    const k = cx + "," + cy;
+    if (!punta.has(k)) punta.set(k, []);
+    punta.get(k).push(i);
+  };
+  tramos.forEach((ps, i) => { meter(ps[0], i); meter(ps[ps.length - 1], i); });
+  const grupos = new Map();
+  tramos.forEach((ps, i) => {
+    const r = raiz(i);
+    if (!grupos.has(r)) grupos.set(r, []);
+    grupos.get(r).push(ps);
+  });
+  // Y el nombre se pone por tramo, no por red. Una red de drenaje conectada
+  // contiene muchos ríos con nombre propio: el Rin y el Mosela se tocan y no
+  // son el mismo río, ni lo son el Volga y el Kama. Bautizando la red entera
+  // de una vez, el hermano mayor se tragaba al menor y el Volga desaparecía
+  // del mapa. Cada tramo va con el nombre que tiene más cerca; el tramo que no
+  // tiene ninguno cerca —el curso bajo del Amazonas, que son mil kilómetros
+  // sin más referencia que el propio río— hereda el de su red.
+  const tabla = RIOS_N.map((e) => ({ n: e[0], x: e[1] + 180, y: 90 - e[2] }));
+  const cercaDe = (ps) => {
+    let nom = null, md = 9;                                  // 3° de tolerancia
+    for (const e of tabla) for (const p of ps) {
+      const dx = p[0] - e.x, dy = p[1] - e.y, dd = dx * dx + dy * dy;
+      if (dd < md) { md = dd; nom = e.n; }
+    }
+    return nom;
+  };
+  const deRed = new Map();
+  for (const [r, frs] of grupos) {
+    const votos = new Map();
+    for (const ps of frs) { const n = cercaDe(ps); if (n) votos.set(n, (votos.get(n) || 0) + ps.length); }
+    let mejor = null, mv = 0;
+    for (const [n, v] of votos) if (v > mv) { mv = v; mejor = n; }
+    deRed.set(r, mejor);
+  }
+  const porNombre = new Map();
+  for (const [r, frs] of grupos)
+    for (const ps of frs) {
+      const n = cercaDe(ps) || deRed.get(r);
+      if (!n) continue;
+      if (!porNombre.has(n)) porNombre.set(n, []);
+      porNombre.get(n).push(ps);
+    }
+  _cauces = [...porNombre.entries()].map(([n, frs]) => ({ n, frs }));
+  return _cauces;
+}
+
+// ——— el río, con todo lo que se sabe de él sin jugar todavía ———
+// Se calcula una vez para toda la partida: la geografía de un río no cambia
+// (salvo cuando cambia, que también está contemplado más abajo).
+let _rios = null, _rioPorProv = null;
+function rios() {
+  if (_rios) return _rios;
+  const lista = [];
+  for (const { n, frs } of caucesNombrados()) {
+    // se recorre el cauce entero muestreando cada tanto: no hace falta el
+    // vértice a vértice para saber por dónde pasa y cuánto llueve encima
+    const pts = [];
+    let largo = 0;
+    for (const ps of frs)
+      for (let i = 0; i < ps.length; i++) {
+        if (i) {
+          const dx = (ps[i][0] - ps[i - 1][0]) * Math.cos(enRad(90 - ps[i][1]));
+          const dy = ps[i][1] - ps[i - 1][1];
+          largo += Math.sqrt(dx * dx + dy * dy) * GRADO_KM;
+        }
+        pts.push(ps[i]);
+      }
+    if (pts.length < 2) continue;
+    // La cabecera y la boca. No sirve mirar las dos puntas del trazo: al
+    // encadenar fragmentos, las puntas quedan donde quedan, y así el Nilo
+    // desembocaba en el lago Victoria. La boca es el punto del cauce que está
+    // pegado al mar y abajo; la cabecera, el más lejano de esa boca. Con eso el
+    // río queda orientado, y orientado se puede hablar de aguas arriba y aguas
+    // abajo, que es de lo que va todo esto.
+    const alto = (p) => alturaEn(p[0], p[1], "llanura");
+    let boca = pts[0], mb = Infinity;
+    const salto = Math.max(1, Math.floor(pts.length / 120));
+    for (let i = 0; i < pts.length; i += salto) {
+      const c = aLaCosta(pts[i][0], pts[i][1]) * 400 + alto(pts[i]);
+      if (c < mb) { mb = c; boca = pts[i]; }
+    }
+    let nace = pts[0], mn = -1;
+    for (let i = 0; i < pts.length; i += salto) {
+      const dx = pts[i][0] - boca[0], dy = pts[i][1] - boca[1];
+      const d = dx * dx + dy * dy + alto(pts[i]) / 400;
+      if (d > mn) { mn = d; nace = pts[i]; }
+    }
+    lista.push({ id: "r" + lista.length, n, pts, largo: Math.round(largo),
+      boca: { x: boca[0], y: boca[1] }, nace: { x: nace[0], y: nace[1] },
+      cima: Math.round(alto(nace)), desnivel: Math.round(Math.max(0, alto(nace) - alto(boca))) });
+  }
+  // Un mismo nombre puede haber bautizado dos cauces sueltos que el dibujo no
+  // llegó a unir. Se quedan como el mismo río: se junta lo que miden y se
+  // conserva la boca más baja.
+  const porNombre = new Map();
+  for (const r of lista) {
+    const y = porNombre.get(r.n);
+    if (!y) { porNombre.set(r.n, r); continue; }
+    y.pts = y.pts.concat(r.pts);
+    y.largo += r.largo;
+    if (alturaEn(r.boca.x, r.boca.y, "llanura") < alturaEn(y.boca.x, y.boca.y, "llanura")) y.boca = r.boca;
+    if (r.cima > y.cima) { y.nace = r.nace; y.cima = r.cima; }
+    y.desnivel = Math.max(y.desnivel, r.desnivel);
+  }
+  _rios = [...porNombre.values()];
+  for (const r of _rios) hidrologiaDe(r);
+  return _rios;
+}
+
+// El régimen: cuándo baja lleno y cuándo baja seco. No es un adorno, es lo que
+// decide si se puede navegar en agosto y si la riada viene en mayo o en julio.
+const REGIMENES = {
+  nival:    { n: "de deshielo",  pico: 140, hondo: 20,  amplitud: 1.05 },
+  monzonico:{ n: "monzónico",    pico: 220, hondo: 60,  amplitud: 1.35 },
+  tropical: { n: "tropical",     pico: 100, hondo: 240, amplitud: 0.45 },
+  medit:    { n: "mediterráneo", pico: 30,  hondo: 220, amplitud: 0.95 },
+  oceanico: { n: "oceánico",     pico: 20,  hondo: 200, amplitud: 0.55 },
+};
+// El caudal medio y de dónde sale. No se inventa: se recorre el cauce y se
+// suma lo que llueve encima. Por eso el Nilo, que es larguísimo, lleva menos
+// agua que el Rin, que es corto pero cruza tierra que llueve —y por eso la
+// crecida del Nilo venía de Etiopía y no de Egipto, que es donde se notaba.
+// Lo que de la lluvia llega de verdad al río. No es la lluvia: es la lluvia
+// menos lo que se evapora, y lo que se evapora depende del calor. Sin esto, el
+// Nilo salía como el tercer río del mundo por ser el más largo, cuando lo que
+// hace el Nilo en sus últimos tres mil kilómetros es perder agua: cruza el
+// Sahara y llega a la desembocadura con menos de la que traía de Etiopía.
+function escorrentia(lluvia, tMedia) {
+  const evapo = 300 + 45 * Math.max(0, tMedia);              // lo que el sol se lleva al año
+  return (lluvia * lluvia) / (lluvia + evapo);
+}
+function hidrologiaDe(r) {
+  // Los tramos, ordenados de la cabecera a la boca. `pts` viene de juntar
+  // fragmentos dibujados y no trae orden, pero la distancia a la
+  // desembocadura sí: el punto más lejano es la cabecera.
+  const paso = Math.max(1, Math.floor(r.pts.length / 45));
+  const muestras = [];
+  for (let i = 0; i < r.pts.length; i += paso) {
+    const [x, y] = r.pts[i];
+    const a = ambienteDe(null, x, y, "llanura", false, true);
+    const dx = x - r.boca.x, dy = y - r.boca.y;
+    muestras.push({ a, d: Math.sqrt(dx * dx + dy * dy) });
+  }
+  if (!muestras.length) muestras.push({ a: ambienteDe(null, r.boca.x, r.boca.y, "llanura", false, true), d: 0 });
+  muestras.sort((p, q) => q.d - p.d);
+  const dL = r.largo / muestras.length;                      // km que representa cada muestra
+
+  // El caudal se acumula bajando. Cada tramo aporta lo que escurre en la
+  // franja que drena, y cada tramo árido se lleva parte de lo que ya venía:
+  // un río que cruza un desierto pierde agua, no la gana. Es lo que separa al
+  // Nilo del Congo, que en el mapa se parecen y en el agua no se parecen nada,
+  // y lo que hace que el Tarim no llegue a ninguna parte.
+  let q = 0, lluvia = 0, tInv = 0, tVer = 0, cima = 0, tCima = 99, esc = 0;
+  for (const m of muestras) {
+    const a = m.a;
+    const R = escorrentia(a.lluvia, a.tMedia);
+    esc += R;
+    q += (R / 1000) * dL * 0.06;                             // lo que aporta el tramo
+    const evapo = 300 + 45 * Math.max(0, a.tMedia);
+    if (a.lluvia < evapo * 0.55) q *= Math.pow(0.5, dL / 1400);   // lo que el desierto se bebe
+    lluvia += a.lluvia; tInv += a.tInvierno; tVer += a.tVerano;
+    if (a.altura > cima) { cima = a.altura; tCima = a.tInvierno; }
+  }
+  const n = muestras.length;
+  r.lluvia = Math.round(lluvia / n);
+  r.escorrentia = Math.round(esc / n);
+  r.tInvierno = +(tInv / n).toFixed(1);
+  r.tVerano = +(tVer / n).toFixed(1);
+  r.cima = Math.round(cima);
+  r.tCima = +tCima.toFixed(1);
+  r.desnivel = Math.round(Math.max(0, r.cima - alturaEn(r.boca.x, r.boca.y, "llanura")));
+  r.lat = +(90 - r.boca.y).toFixed(1);
+  r.caudal = +q.toFixed(1);
+  // El régimen: cuándo baja lleno. La cabecera manda sobre la desembocadura,
+  // que es lo que hace que el Nilo crezca en agosto por lo que llovió en
+  // Etiopía y no por lo que llovió —que no llovió— en Egipto. Y el monzón
+  // manda sobre el deshielo: el Ganges nace en un glaciar y aun así su año lo
+  // decide julio, porque la lluvia del monzón es mucha más agua que la nieve.
+  const trop = Math.abs(r.lat);
+  r.regimen = trop < 10 && r.lluvia > 1100 ? "tropical"
+    : trop < 32 && r.lluvia > 700 ? "monzonico"
+    : r.tCima < -3 || r.tInvierno < -5 || (r.cima > 2500 && trop > 25) ? "nival"
+    : r.lluvia < 800 && r.tVerano > 22 ? "medit" : "oceanico";
+  // cuánto del año se hiela: un río helado no se navega, pero se cruza
+  r.helado = r.tInvierno < -2 ? acotar((-r.tInvierno - 2) / 16, 0, 0.55) : 0;
+  // navegar: hace falta agua y que no baje despeñándose. Un río de montaña con
+  // mucho caudal es un río bravo, no una carretera.
+  r.pendiente = r.largo > 0 ? r.desnivel / r.largo : 0;      // metros por km
+  // Un río que no llega al mar no es una vía: no lleva a ninguna parte. El
+  // Tarim, el Amu Daria o el Okavango mueren en un desierto o en un pantano, y
+  // por muy anchos que vayan un tramo nadie los usó nunca para comerciar.
+  r.endorreico = aLaCosta(r.boca.x, r.boca.y) > 1.2;
+  if (r.endorreico) r.caudal = +(r.caudal * 0.55).toFixed(1);
+  r.navegable = !r.endorreico && r.caudal > 22 && r.pendiente < 1.6;
+  // y para mover una turbina hace falta lo contrario: caudal y caída
+  r.salto = Math.round(r.caudal * Math.min(1, r.desnivel / 1200));
+  return r;
+}
+const rioPorNombre = (n) => rios().find((r) => r.n === n) || null;
+
+// ——— qué río pasa por qué provincia ———
+// Se resuelve una vez para el mundo entero: para cada punto muestreado del
+// cauce se busca la provincia que lo contiene. Y de paso queda registrado a
+// qué altura del río está esa provincia, que es lo que permite decir quién
+// está aguas arriba de quién.
+function rioDeProvincias() {
+  if (_rioPorProv) return _rioPorProv;
+  _rioPorProv = new Map();
+  for (const r of rios()) {
+    const paso = Math.max(1, Math.floor(r.pts.length / 60));
+    const vistos = new Map();
+    for (let i = 0; i < r.pts.length; i += paso) {
+      const g = provinciaEn(r.pts[i][0], r.pts[i][1]);
+      if (!g || g.i == null) continue;
+      // la distancia a la boca ordena el río de abajo arriba
+      const dx = r.pts[i][0] - r.boca.x, dy = r.pts[i][1] - r.boca.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (!vistos.has(g.i) || d < vistos.get(g.i)) vistos.set(g.i, d);
+    }
+    for (const [idx, d] of vistos) {
+      const l = _rioPorProv.get(idx) || [];
+      l.push({ rio: r, aBoca: +d.toFixed(2) });
+      _rioPorProv.set(idx, l);
+    }
+  }
+  // en cada provincia manda el río más caudaloso: si por Coblenza pasan el Rin
+  // y el Mosela, la provincia es del Rin
+  for (const [idx, l] of _rioPorProv) {
+    l.sort((a, b) => b.rio.caudal - a.rio.caudal);
+    _rioPorProv.set(idx, l);
+  }
+  return _rioPorProv;
+}
+// El río de una provincia: el objeto, no el booleano.
+function rioDe(p) {
+  if (!p || p.idx == null) return null;
+  const l = rioDeProvincias().get(p.idx);
+  return l && l.length ? l[0].rio : null;
+}
+// Y a qué altura del río está: lo que ordena una provincia respecto de otra
+// cuando lo que viaja es agua, y por lo tanto cuando lo que viaja es lo que se
+// echó al agua.
+function alturaEnRio(p) {
+  if (!p || p.idx == null) return null;
+  const l = rioDeProvincias().get(p.idx);
+  return l && l.length ? l[0].aBoca : null;
+}
+// Las provincias que este río riega, de la boca a la cabecera.
+function provinciasDelRio(r) {
+  const out = [];
+  for (const [idx, l] of rioDeProvincias())
+    for (const e of l) if (e.rio === r) out.push({ idx, aBoca: e.aBoca });
+  return out.sort((a, b) => a.aBoca - b.aBoca);
+}
+
+// ——— el caudal de hoy ———
+// Lo que baja por el cauce este mes, en veces el caudal medio. Un río de
+// deshielo en mayo lleva el doble; el mismo río en febrero, un tercio.
+function caudalEn(r, dia, mundo) {
+  if (!r) return 0;
+  const g = REGIMENES[r.regimen] || REGIMENES.oceanico;
+  const fase = ((dia - g.pico) / 365) * 2 * Math.PI;
+  let f = 1 + Math.cos(fase) * g.amplitud * 0.55;
+  // El monte de la cuenca amansa el río: retiene el agua y la suelta despacio.
+  // Talarlo no cambia cuánta agua baja al año, cambia cómo baja —de golpe en
+  // primavera y nada en verano—, que es la forma de tener riada y sequía en la
+  // misma comarca y el mismo año.
+  const pelado = mundo && mundo.taladoCuenca != null ? acotar(mundo.taladoCuenca, 0, 1) : 0;
+  f = 1 + (f - 1) * (1 + pelado * 0.7);
+  // y el clima que deriva: más calor, más evaporación y más deshielo de golpe
+  const anom = (mundo && mundo.anomalia) || 0;
+  if (r.regimen === "nival") f *= 1 + anom * 0.06;           // el deshielo se adelanta y se agota
+  return +Math.max(0.12, f * (1 - anom * 0.02)).toFixed(3);
+}
+// ¿Se puede navegar hoy? Hace falta que el río sea navegable de suyo, que
+// lleve agua y que no esté helado. La técnica ensancha lo que se puede: una
+// esclusa y una draga convierten en vía un río que no lo era.
+function navegableHoy(r, dia, stats, mundo) {
+  if (!r) return 0;
+  const tec = ((stats || {}).tecnologia || 20);
+  const obra = acotar((tec - 30) / 70, 0, 1);                // esclusas, dragado, canalización
+  const puede = r.navegable || (!r.endorreico && obra > 0.45 && r.caudal > 12 && r.pendiente < 2.6);
+  if (!puede) return 0;
+  const q = caudalEn(r, dia, mundo);
+  if (q < 0.45) return 0;                                    // en estiaje no pasa una barcaza
+  const heladoAhora = r.helado > 0 && Math.cos(((dia - 15) / 365) * 2 * Math.PI) > 1 - r.helado * 3.6;
+  if (heladoAhora) return 0;
+  return +acotar((0.45 + 0.35 * obra) * Math.min(1.35, q), 0, 1).toFixed(3);
+}
+// Cuánto vale ese río como camino a lo largo del año. Es lo que se compara con
+// una calzada: antes del ferrocarril, un río navegable era mejor que cualquier
+// carretera, y por eso los reinos se pelearon por las bocas y no por los
+// puertos de montaña.
+function viaFluvial(p, stats, mundo) {
+  const r = rioDe(p);
+  if (!r) return 0;
+  let suma = 0;
+  for (let d = 15; d < 365; d += 30) suma += navegableHoy(r, d, stats, mundo);
+  return +(suma / 12).toFixed(3);
+}
+
+// ——— lo que el río y el mar le hacen a la provincia ———
+// Todo lo de arriba es geografía. Esto es lo que la partida lee cada turno, y
+// se deja escrito en la provincia igual que la secuela y la suciedad: calcular
+// el caudal de un río cuesta, y hay que consultarlo cientos de veces.
+
+// Hasta dónde se llega desde esta provincia. Antes lo decía solo el camino
+// construido; ahora compite con el río, y hasta el ferrocarril el río gana casi
+// siempre. Mover una tonelada de trigo cien kilómetros por tierra costaba más
+// que el trigo; por agua, una fracción. Por eso las ciudades están en los ríos
+// y no en los cruces de caminos.
+const alcanceDe = (p) => Math.max(viaDe(p).soc, (p && p.rioNav) || 0);
+
+// El agua que baja este año, en veces lo normal, y lo más alto que llega.
+function aguasDelAnio(p, stats, mundo) {
+  const r = rioDe(p);
+  if (!r) return null;
+  let crecida = 0, estiaje = 9;
+  for (let d = 15; d < 365; d += 30) {
+    const q = caudalEn(r, d, mundo);
+    if (q > crecida) crecida = q;
+    if (q < estiaje) estiaje = q;
+  }
+  return { rio: r.n, caudal: r.caudal, regimen: r.regimen,
+    crecida: +crecida.toFixed(2), estiaje: +estiaje.toFixed(2),
+    nav: viaFluvial(p, stats, mundo),
+    // el salto de la provincia es el del río repartido entre las provincias
+    // que lo tienen: la presa se pone en un sitio, no en todos
+    salto: r.salto };
+}
+
+// Lo que el mar le da de comer a una costa. Un banco de pesca alimentaba una
+// nación entera —Islandia, Noruega, Terranova, el Perú— y en el trópico
+// abierto no había nada que pescar. El hielo lo quita medio año.
+function pescaDeProvincia(p) {
+  const m = marDeProvincia(p);
+  if (!m) return 0;
+  return +(m.pesca * (1 - m.hielo * 0.6)).toFixed(3);
+}
+
+// ——— el humo baja por el río ———
+// Lo que se tira arriba aparece abajo. Es la mitad de la historia de la
+// contaminación del agua y no estaba: cada provincia se ensuciaba sola y su
+// vecina de aguas abajo, que bebía lo mismo, no se enteraba. El Támesis mató
+// gente en Londres con lo que echaron cuarenta millas río arriba.
+function humoRioAbajo(provs) {
+  const porRio = new Map();
+  for (const p of provs) {
+    if (p.idx == null) continue;
+    const l = rioDeProvincias().get(p.idx);
+    if (!l || !l.length) continue;
+    const k = l[0].rio.n;
+    if (!porRio.has(k)) porRio.set(k, []);
+    porRio.get(k).push({ p, aBoca: l[0].aBoca });
+  }
+  const extra = new Map();
+  for (const lista of porRio.values()) {
+    if (lista.length < 2) continue;
+    lista.sort((a, b) => b.aBoca - a.aBoca);           // de la cabecera a la boca
+    let arrastre = 0;
+    for (const { p } of lista) {
+      if (arrastre > 0.01) extra.set(p.id, +arrastre.toFixed(3));
+      // lo que esta provincia echa se suma a lo que ya bajaba, y el río va
+      // limpiando por el camino
+      arrastre = (arrastre + ((p.humo || {}).agua || 0) * 0.55) * 0.62;
+    }
+  }
+  return extra;
 }
 
 // ═══ VISTAS DEL MAPA ═════════════════════════════════════════
@@ -2082,6 +2833,23 @@ const VISTAS = [
     cortes: [60, 200, 500, 1000, 1900],
     fmt: (v) => Math.round(v).toLocaleString("es") + " m",
     val: (a) => a.altura, pie: "sobre el nivel del mar" },
+  // Dos vistas que no salen del ambiente de la provincia sino de lo que tiene
+  // al lado: el río que la cruza y el mar que la baña. La tierra sin río y la
+  // tierra sin costa quedan apagadas, y lo que se ve es la red de venas del
+  // planeta y el borde donde hay de comer.
+  { id: "rios", n: "Ríos", ambito: "mundo", rampa: "agua",
+    cortes: [8, 18, 35, 70, 140], fmt: (v) => v.toFixed(0),
+    prov: (idx) => { const r = rioDe({ idx }); return r ? r.caudal : null; },
+    pie: "cuánta agua baja por cada cauce" },
+  { id: "pesca", n: "Pesca", ambito: "mundo", rampa: "gente",
+    cortes: [0.06, 0.15, 0.28, 0.42, 0.58], fmt: (v) => String(Math.round(v * 100)),
+    prov: (idx, g) => {
+      if (!g || !g.costera) return null;
+      const q = aLaMarDe({ idx, x: g.x, y: g.y });
+      if (q.d > 0.75) return null;
+      return pescaEn(marEn(q.x != null ? q.x : g.x, q.y != null ? q.y : g.y), q.d) || null;
+    },
+    pie: "dónde el mar da de comer" },
   // La única vista sin escala propia. Un reino medieval y el mismo reino en
   // 1950 tienen cincuenta veces más gente, así que cualquier corte fijo o bien
   // pinta todo del primer color en la Edad Media o todo del último después. Y
@@ -2120,6 +2888,7 @@ const VISTA_IDX = Object.fromEntries(VISTAS.map((v) => [v.id, v]));
 function claveDeVista(V, i, g) {
   if (!V || V.id === "politica") return g.pais;
   if (V.ambito === "reino") return "·";
+  if (V.prov) return "t" + tramoDe(V.prov(i, g), V.cortes);
   const a = ambienteDe(i, g.x, g.y, g.terreno, g.costera, false);
   if (V.clases === "bioma") return a.bioma;
   return "t" + tramoDe(V.val(a), V.cortes);
@@ -2168,6 +2937,7 @@ function colorMio(V, m, cortes) {
 function valorMio(V, m) {
   if (!V || !m) return null;
   if (V.mio) return V.mio(m);
+  if (V.prov) return m.idx != null ? V.prov(m.idx, m) : null;
   const a = ambDe(m);
   return a && V.val ? V.val(a) : null;
 }
@@ -3272,6 +4042,33 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     con {viaDe(sel).n}
                   </div>
                 )}
+                {/* El río y el mar, por su nombre y con lo que traen. Decir
+                    «con río» y «costera» era decir que el Támesis y el
+                    Amazonas son lo mismo. */}
+                {(() => {
+                  const r = rioDe(sel);
+                  if (!r) return null;
+                  const nav = sel.rioNav != null ? sel.rioNav : (r.navegable ? 0.6 : 0);
+                  return (
+                    <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: "#7FC0DE" }}>
+                      {r.n} · {(REGIMENES[r.regimen] || {}).n}
+                      {nav > 0.15 ? " · navegable" : ""}
+                      {sel.crecida > 1.4 ? " · viene crecido" : sel.estiaje != null && sel.estiaje < 0.4 ? " · bajo de agua" : ""}
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const m = marDeProvincia(sel);
+                  if (!m) return null;
+                  const pesca = pescaDeProvincia(sel);
+                  return (
+                    <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: "#7FC0DE" }}>
+                      {m.mar}{m.corriente ? " · " + m.corriente.replace("Corriente ", "").replace("Deriva ", "") : ""}
+                      {pesca > 0.35 ? " · buen caladero" : pesca > 0.15 ? " · se pesca" : ""}
+                      {m.hielo > 0.15 ? ` · helado ${Math.round(m.hielo * 12)} meses` : ""}
+                    </div>
+                  );
+                })()}
               </>
             );
           })()}
@@ -7884,6 +8681,23 @@ const INFORMES = [
         "Ya no se siembra en {zona} lo que se sembraba: la tierra es otra"],
       verdea: ["Verdea {zona}: (donde había {obra} crece {tema}|llueve donde no llovía|se roturan tierras que no daban nada)",
         "{zona} da lo que no daba, y (nadie termina de fiarse|ya hay quien se muda para allá)"],
+    } },
+  // Un río que se sale o que se queda en nada es de las pocas cosas que la
+  // gente de antes contaba por su nombre: no «llovió mucho» sino «el año que
+  // creció el Ebro». Se cuenta distinto la crecida que el estiaje, porque son
+  // dos desgracias opuestas y la segunda no se ve venir.
+  { id: "rio", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "rio") ? 13 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "rio") || {};
+      return { zona: h.prov || "la vega", tema: h.n || "el río", cual: h.cual };
+    },
+    fr: ["Se sale {tema} en {zona}"], porCual: {
+      crecida: ["{tema} se sale por {zona}: (se pierde lo sembrado en la vega|el agua entra en las casas bajas|no queda puente en pie de aquí a la boca)",
+        "Baja {tema} como no se le recordaba. (Los molinos quedan bajo el agua|Se salva el ganado y poco más|Los viejos discuten si fue peor la del otro siglo)",
+        "El agua de {tema} llega a donde nunca había llegado, y en {zona} (se levanta acta de hasta dónde|marcan la altura en la pared de la iglesia)"],
+      estiaje: ["{tema} se queda en nada este verano: (se cruza a pie por donde pasaban barcas|los molinos paran|se seca el pozo que nunca falló)",
+        "En {zona} no baja agua por {tema}. (Se reparte por turnos|Se pleitea por el riego|Aparecen cosas en el cauce que nadie quería ver)",
+        "No hay calado en {tema} para mover una barcaza, y (todo lo que iba por agua tiene que ir por tierra|el grano se queda donde está)"],
     } },
   { id: "hallazgo", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "hallazgo") ? 12 : 0),
     huecos: (s, c) => {
