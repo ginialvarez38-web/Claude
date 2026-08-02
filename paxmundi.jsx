@@ -1126,6 +1126,141 @@ function yacimientosVisibles(p, anio) {
     .map(([id, r]) => ({ id, n: RECURSOS[id].n, reservas: r }));
 }
 
+// ═══ EL AÑO TIENE ESTACIONES ═════════════════════════════════
+// La partida ya llevaba el día del año; solo que no servía para nada. Un turno
+// de invierno y uno de verano daban exactamente lo mismo, y la temperatura de
+// enero de cada provincia estaba calculada y sin usar. Acá la estación pasa a
+// tener consecuencias: cuándo se cosecha, cuándo se puede navegar un río y
+// cuándo conviene no sacar un ejército a la calle.
+const NOMBRE_EST = ["invierno", "primavera", "verano", "otoño"];
+// Al sur del ecuador las estaciones van cambiadas: en julio, Buenos Aires
+// tirita mientras Madrid se abrasa.
+function estacionDe(dia, lat) {
+  const e = MES_ESTACION[mesDe(dia)];
+  return (lat || 0) < 0 ? (e + 2) % 4 : e;
+}
+// Cuántos días del turno caen en cada estación. Un turno de un año las cubre
+// todas; uno de una semana, una sola. De acá sale que un turno corto de enero
+// pese distinto que uno corto de julio.
+function repartoEstaciones(dia, dias, lat) {
+  const r = [0, 0, 0, 0];
+  const paso = Math.max(1, Math.round(dias / 24));
+  for (let d = 0; d < dias; d += paso) r[estacionDe((dia + d) % 365, lat)] += Math.min(paso, dias - d);
+  const t = r.reduce((a, b) => a + b, 0) || 1;
+  return r.map((v) => v / t);
+}
+// Los días que el hielo cierra los ríos y los puertos. Con inviernos de más de
+// veinte bajo cero, medio año: es lo que obligó a San Petersburgo a tener
+// flota en el Báltico y en el mar Negro.
+function diasHelados(amb) {
+  if (!amb || amb.tInvierno > -1) return 0;
+  return Math.round(Math.min(210, (-amb.tInvierno) * 8.5));
+}
+// La estación de campaña. Los ejércitos de casi toda la historia se movían
+// entre la siembra y la cosecha, y no por costumbre: en invierno no hay forraje
+// y en el deshielo no hay camino.
+function factorCampania(reparto, amb) {
+  const frio = amb && amb.tInvierno < -3 ? 0.55 : 0.78;
+  const barro = amb && amb.lluvia > 900 ? 0.80 : 0.92;
+  return reparto[0] * frio + reparto[1] * barro + reparto[2] * 1.10 + reparto[3] * 0.95;
+}
+
+// ═══ EL MUNDO CAMBIA AUNQUE NADIE LO TOQUE ═══════════════════
+// Hasta acá el planeta era el decorado: se calculaba una vez y ahí se quedaba.
+// El bosque de una provincia no se movía en mil años de partida, y las reservas
+// de hierro eran las mismas después de tres siglos de fundiciones.
+//
+// Lo que sigue es lo mínimo para que el mundo tenga vida propia: el bosque
+// crece y se tala, los yacimientos se agotan, y el clima del planeta deriva.
+// Nada de eso necesita al jugador; lo que hace el jugador es empujarlo.
+
+// Cobertura de bosque a la que tiende cada bioma si se la deja en paz.
+const BOSQUE_NATURAL = { selva: 0.92, monzonico: 0.80, templado: 0.78, taiga: 0.75,
+  medit: 0.42, pantano: 0.45, sabana: 0.22, pradera: 0.12, estepa: 0.06,
+  tundra: 0.04, alpino: 0.05, desierto: 0.01, glaciar: 0 };
+
+// Un bosque tarda décadas en volver y una tarde en irse: la vuelta es lenta a
+// propósito. Lo que lo tala es la gente que vive de él, y hoy además la
+// industria; lo que lo protege es que no haya nadie o que ya no haga falta.
+function evolucionarMundo(s, dias, rnd) {
+  const anios = dias / 365;
+  const provs = s.provincias || [];
+  if (!provs.length) return null;
+  const tec = (s.stats || {}).tecnologia || 20;
+  const dem = demografiaDe(s.ciencia);
+  const hechos = [];
+  let agotados = [];
+
+  const nuevas = provs.map((p) => {
+    const a = ambiente(p);
+    if (!a) return p;
+    const natural = BOSQUE_NATURAL[a.bioma] != null ? BOSQUE_NATURAL[a.bioma] : 0.3;
+    // presión: cuánta gente vive de esa tierra, más lo que se lleva la
+    // industria cuando llega. Con el techo demográfico de cada época, la misma
+    // población pesa distinto en 1200 y en 1900.
+    const techo = Math.max(1, techoProvincia(p, provs, s.ciencia));
+    const carga = acotar((p.poblacion || 0) / techo, 0, 1.4);
+    const industria = tec > 55 ? acotar((tec - 55) / 45, 0, 1) : 0;
+    const equilibrio = acotar(natural * (1 - carga * 0.55 - industria * 0.30), 0, natural);
+    // La partida no empieza con el mundo virgen: empieza con el mundo que esa
+    // gente lleva siglos usando. Arrancar en la cobertura natural hacía que el
+    // primer turno talara medio reino de golpe, y la crónica no hablaba de
+    // otra cosa. El estado inicial es el equilibrio, no el paraíso.
+    const actual = p.bosque != null ? p.bosque : equilibrio;
+    // baja rápido y sube despacio
+    const tasa = (equilibrio < actual ? 0.16 : 0.045) * Math.min(3, anios);
+    const bosque = +acotar(actual + (equilibrio - actual) * tasa, 0, 1).toFixed(3);
+    return bosque === actual ? p : { ...p, bosque };
+  });
+
+  // El subsuelo se gasta. Solo se gasta lo que se explota, y solo se explota
+  // lo que el siglo sabe encontrar: por eso el carbón de una provincia puede
+  // estar intacto durante mil años y desaparecer en ochenta.
+  const gasto = {};
+  for (const p of provs) {
+    for (const y of yacimientosVisibles(p, s.anio)) {
+      const uso = (0.6 + (tec / 100) * 2.4) * anios * (1 + ((p.poblacion || 0) / 400));
+      const queda = Math.max(0, (s.reservas && s.reservas[p.id + "|" + y.id] != null
+        ? s.reservas[p.id + "|" + y.id] : y.reservas) - uso);
+      gasto[p.id + "|" + y.id] = +queda.toFixed(1);
+      if (queda <= 0 && (s.reservas || {})[p.id + "|" + y.id] > 0) agotados.push({ prov: p.nombre, rec: y.n });
+    }
+  }
+
+  // La anomalía climática del planeta. Antes de la industria se mueve sola y
+  // poco —volcanes, sol—; después, se mueve porque la movemos.
+  const previa = (s.mundo && s.mundo.anomalia) || 0;
+  const forzado = tec > 60 && s.anio > 1830 ? ((tec - 60) / 40) * 0.022 * anios : 0;
+  const natural = (rnd() - 0.5) * 0.03 * anios;
+  const anomalia = +acotar(previa + forzado + natural - previa * 0.008 * anios, -1.6, 5).toFixed(3);
+
+  // Qué merece contarse. Un bosque no cambia de un año para otro lo bastante
+  // como para que nadie lo note, así que no se compara contra el turno pasado
+  // sino contra la última vez que se dijo algo. Así la noticia sale cuando de
+  // verdad hay noticia —cada varias décadas— en vez de todos los años o nunca.
+  const bosqueAhora = nuevas.reduce((x, q) => x + (q.bosque || 0), 0) / nuevas.length;
+  const bosqueDicho = (s.mundo && s.mundo.bosqueDicho != null) ? s.mundo.bosqueDicho : bosqueAhora;
+  const climaDicho = (s.mundo && s.mundo.climaDicho != null) ? s.mundo.climaDicho : anomalia;
+  let nuevoBosqueDicho = bosqueDicho, nuevoClimaDicho = climaDicho;
+  if (bosqueDicho - bosqueAhora > 0.03) { hechos.push({ t: "tala" }); nuevoBosqueDicho = bosqueAhora; }
+  else if (bosqueAhora - bosqueDicho > 0.03) { hechos.push({ t: "monte" }); nuevoBosqueDicho = bosqueAhora; }
+  if (agotados.length) hechos.push({ t: "agotado", ...agotados[0] });
+  if (Math.abs(anomalia - climaDicho) > 0.35) {
+    hechos.push({ t: "clima", d: anomalia - climaDicho });
+    nuevoClimaDicho = anomalia;
+  }
+
+  return { provincias: nuevas, reservas: { ...(s.reservas || {}), ...gasto },
+           mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho }, hechos };
+}
+// Lo que queda de un yacimiento en esta partida, que no es lo que había.
+function reservaActual(s, p, id) {
+  const k = p.id + "|" + id;
+  if (s.reservas && s.reservas[k] != null) return s.reservas[k];
+  const a = ambiente(p);
+  return (a && a.yacimientos[id]) || 0;
+}
+
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
 // Se arrastra con un dedo, se acerca con dos o con la rueda, y también
 // obedece al teclado. Cada capa se recuerda por separado: al arrastrar solo
@@ -2402,7 +2537,13 @@ function amortiguacionCosecha(ciencia) {
 // llueve en el delta y se seca la meseta. De ahí sale el hambre local.
 function cosechaProvincia(p, cosNacional, ciencia) {
   const am = amortiguacionCosecha(ciencia);
-  const local = 0.62 + Math.random() * 0.76;                 // 0.62 a 1.38
+  const a = ambiente(p);
+  // Dónde se juega el año no es lo mismo en todas partes. Donde llueve poco,
+  // la cosecha es una lotería: la diferencia entre 300 y 400 milímetros es la
+  // diferencia entre comer y no comer, y esa diferencia la decide el cielo.
+  // Donde llueve de sobra, un mal año es un año mediocre y nada más.
+  const riesgo = a ? acotar(1.5 - a.lluvia / 600, 0.35, 1.6) : 1;
+  const local = 1 + (Math.random() - 0.5) * 0.76 * riesgo;
   const bruto = 1 + (cosNacional - 1) * 0.55 + (local - 1) * 0.62;
   // el regadío y el río protegen contra el mal año; la estepa y la meseta lo sufren
   const t = TERRENOS[p.terreno] || TERRENOS.llanura;
@@ -5275,6 +5416,14 @@ function aplicarEfectos(n, ef, rnd) {
   // años, no de todo. Seis entradas bastan para decir «otra vez» o «la misma
   // Zamora de la otra vez», que es de lo único que sirve acordarse.
   if (ef.memoria) e.memoria = [...(n.memoria || []), ef.memoria].slice(-6);
+  // Lo que el mundo hizo por su cuenta. Va antes que todo lo demás porque el
+  // resto del turno se aplica sobre las provincias, y si se pisaran, ganaría
+  // el jugador: acá el que tiene la última palabra sobre el bosque es el bosque.
+  if (ef.vivo) {
+    e.provincias = ef.vivo.provincias;
+    e.reservas = ef.vivo.reservas;
+    e.mundo = ef.vivo.mundo;
+  }
   if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
   if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
   if (ef.pi) e.ciencia = { ...e.ciencia, pi: Math.max(0, (e.ciencia.pi || 0) + ef.pi) };
@@ -6407,11 +6556,24 @@ function motorLocal(s, accion, dias, semilla) {
     .map((p) => ({ p, o: p.poblacion / Math.max(1, techoTotal * (fertProv(p) / sumaFert)) }))
     .sort((a, b) => b.o - a.o);
 
+  // Qué parte del año cubre este turno, en el hemisferio del reino. De acá
+  // salen la campaña y el hielo: un turno de enero en Moscovia no es un turno
+  // de enero en Granada.
+  const latReino = (provs[0] && provs[0].lat) || 40;
+  const reparto = repartoEstaciones(s.dia || 0, dias, latReino);
+  const ambCap = ambiente(provs.find((q) => q.capital) || provs[0]);
+  const campania = factorCampania(reparto, ambCap);
+  const helada = diasHelados(ambCap);
+
   const ctx = {
     s, o: orden || { objetivos: {}, intensidad: 1 }, rnd, esc,
+    reparto, campania, helada, ambCap,
+    estacion: NOMBRE_EST[reparto.indexOf(Math.max(...reparto))],
     inten: (orden ? orden.intensidad : 1) * Math.max(0.4, Math.min(1, esc * 2)),
     ingreso, oroDisp: Math.max(0, s.edu?.oro || 0), pob, pobTecho: pob / techo,
-    ventaja: s.guerra ? acotar(((s.guerra.frente || 0) + 30) / 90, 0, 1) : 0.4,
+    // Sacar un ejército en invierno o con los caminos deshechos cuesta lo que
+    // costó siempre. La estación no decide la guerra, pero la inclina.
+    ventaja: s.guerra ? acotar((((s.guerra.frente || 0) + 30) / 90) * campania, 0, 1) : 0.4,
     provCapital: provs.find((p) => p.capital) || provs[0],
     // el techo se calcula una vez por provincia y no dentro del comparador:
     // techoProvincia recorre todas las demás, y ordenar así costaba más que
@@ -6428,6 +6590,9 @@ function motorLocal(s, accion, dias, semilla) {
   };
 
   const res = orden ? (EFECTOS[orden.maniobra] || EFECTOS.__gesto)(ctx) : vacio();
+  // El planeta se mueve pase lo que pase: es lo que lo separa de un tablero.
+  const vivo = evolucionarMundo(s, dias, rnd);
+  ctx.vivo = vivo;                       // para que la crónica pueda contarlo
   const suceso = sucesoDelMundo(s, ctx, rnd);
   const sucesoTxt = suceso ? expandir(suceso.txt, elenco(s, {}, rnd), rnd) : null;
   if (suceso) {
@@ -6460,7 +6625,7 @@ function motorLocal(s, accion, dias, semilla) {
     opciones: opcionesLocales(s, ctx, rnd),
     fin: null,
     // ——— lo que la API no podía tocar ———
-    efectos: { memoria: recuerdoDe(res.hechos, s), oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
+    efectos: { memoria: recuerdoDe(res.hechos, s), vivo, oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
                pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra,
                paz: res.paz, frente: res.frente, bajas: res.bajas, aguante: res.aguante,
                tributo: res.tributo, factoria: res.factoria, sede: res.sede,
@@ -6503,6 +6668,42 @@ function aplicarVecinos(vecs, cambios) {
 // arma con los dos o tres que más pesan, así que el texto sigue a la partida
 // en vez de rellenar.
 const INFORMES = [
+  // ——— el planeta, que se mueve solo ———
+  // Estos observadores no miran al reino sino al mundo. Son los que hacen que
+  // un turno pasivo pueda contar algo que no decidió nadie: que el monte
+  // retrocede, que una veta se acabó, que el invierno cerró los ríos.
+  { id: "tala", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "tala") ? 5 : 0),
+    huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "el interior" }),
+    fr: ["El monte retrocede (un poco más cada año|sin que nadie lo decida|a fuerza de hachas y hornos): en {zona} ya se trae la leña de lejos",
+      "Se tala más de lo que crece; (los carboneros suben más alto cada temporada|la madera de armar hay que buscarla a dos jornadas)",
+      "Donde había robledal en {zona} hay ahora rastrojo, y (nadie recuerda cuándo cambió|los viejos sí lo recuerdan)",
+      "(Los carpinteros|Los constructores de barcos|Los herreros) se quejan del precio de la madera [y no es la primera vez]"] },
+  { id: "monte", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "monte") ? 4 : 0),
+    huecos: (s, c) => ({ zona: (c.provVacia || {}).nombre || "las tierras altas" }),
+    fr: ["El monte vuelve por donde se fue la gente: {zona} está más cerrada que hace veinte años",
+      "Vuelve el bosque a {zona}, (y con él los lobos|y nadie lo celebra|que es lo que pasa cuando sobra tierra)",
+      "Se cierran de matorral caminos que se abrieron a hacha"] },
+  { id: "agotado", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "agotado") ? 8 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "agotado") || {};
+      return { zona: h.prov || "la sierra", obra: (h.rec || "la veta").toLowerCase() };
+    },
+    fr: ["Se acabó {obra} en {zona}: (la veta se perdió a media galería|el pozo da agua y no mineral|se saca más piedra que metal)",
+      "El {obra} de {zona} se dio por agotado, y (el pueblo se va vaciando|los que quedan no saben hacer otra cosa)",
+      "Cierran las labores de {zona}. De {obra} ya no queda nada que valga sacar"] },
+  { id: "deriva", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "clima") ? 6 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "clima") || {};
+      return { zona: (c.provPeor || {}).nombre || "el campo", tema: h.d > 0 ? "calor" : "frío" };
+    },
+    fr: ["Los años vienen distintos: (la vendimia se adelanta y nadie sabe por qué|hiela cuando no tocaba|el {tema} llega antes y se queda más)",
+      "Los viejos de {zona} dicen que el tiempo ya no es el de antes, y (por una vez tienen razón|esta vez los registros les dan la razón)",
+      "Cambia el año agrícola sin que cambie el calendario: (se siembra dos semanas corridas|la siega se adelanta)"] },
+  { id: "helada", peso: (s, c) => (c.helada > 60 && c.reparto && c.reparto[0] > 0.2 ? 6 : 0),
+    huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "la capital" }),
+    fr: ["El hielo cierra los ríos y con ellos el comercio: nada entra ni sale de {zona} hasta el deshielo",
+      "(Los puertos|Los ríos|Los pasos) quedan cerrados por hielo media estación, y (todo el mundo lo tenía previsto|hay quien no lo tenía previsto)",
+      "Con los ríos helados se viaja mejor que con barro, [dicen los que tienen trineo]"] },
   // ——— la tierra y la gente ———
   { id: "hambre", peso: (s, c) => (c.pobTecho > 1 ? 9 : c.pobTecho > 0.93 ? 6 : 0),
     huecos: (s, c) => ({ zona: (c.provPeor || {}).nombre || "el campo" }),
