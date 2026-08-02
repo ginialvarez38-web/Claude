@@ -127,7 +127,11 @@ function fertProv(p) {
   // un río exótico es lo que hace que un desierto dé dos cosechas.
   const seco = a ? acotar(1 - a.lluvia / 550, 0, 1) : 0;
   const agua = p.rio ? 1.22 + 0.75 * seco : 1;
-  return t.fert * clima * agua * (p.costera ? 1.06 : 1);
+  // Y lo que dejó el último desastre, que puede seguir pesando veinte años
+  // después —o dando de comer, si fue ceniza—. Viene ya calculado en la
+  // provincia porque acá no se sabe en qué año estamos, y esta función se
+  // llama cientos de veces por turno: no es sitio para averiguarlo.
+  return t.fert * clima * agua * (p.costera ? 1.06 : 1) * (p.secuela || 1);
 }
 // El techo nacional se reparte por fertilidad: la suma es idéntica a la de antes.
 function techoProvincia(p, provincias, ciencia) {
@@ -1252,7 +1256,19 @@ function evolucionarMundo(s, dias, rnd) {
 
   // Las ciudades crecen en el mismo paso: son parte de cómo cambia el mundo,
   // no una consecuencia de lo que el jugador ordenó este turno.
-  const conCiudad = evolucionarCiudades(nuevas, s.stats, dias);
+  // Los desastres van antes que las ciudades: si un terremoto se lleva media
+  // ciudad, la ciudad tiene que crecer desde lo que quedó, no desde lo que
+  // había. El orden importa y es este.
+  const sacudido = tirarDesastres(nuevas, s.anio, dias, rnd);
+  for (const h of sacudido.hechos) hechos.push(h);
+  // La secuela se recalcula una vez por turno y se deja escrita: así la
+  // fertilidad la lee sin preguntarse por el calendario.
+  const conSecuela = sacudido.provincias.map((p) => {
+    const sec = secuelaDe(p, s.anio);
+    const f = sec ? +sec.fert.toFixed(3) : 1;
+    return (p.secuela || 1) === f ? p : { ...p, secuela: f };
+  });
+  const conCiudad = evolucionarCiudades(conSecuela, s.stats, dias);
   const rangoAntes = rangoCiudad(mayorCiudad(nuevas)).id;
   const rangoAhora = rangoCiudad(mayorCiudad(conCiudad)).id;
   if (rangoAntes !== rangoAhora) {
@@ -1381,6 +1397,146 @@ function bonoUrbano(provs) {
   if (!pob) return 1;
   const urb = (provs || []).reduce((a, p) => a + ((p.ciudad && p.ciudad.pob) || 0), 0);
   return 1 + acotar(urb / pob, 0, 0.7) * 0.55;
+}
+
+// ═══ DESASTRES ═══════════════════════════════════════════════
+// Un desastre que sale de un dado es un impuesto disfrazado: da igual dónde
+// esté tu reino, te toca lo mismo. Acá cada provincia tiene su propio riesgo,
+// y ese riesgo sale de lo que la provincia es. Lisboa tiembla y Varsovia no.
+// El Caribe recibe huracanes y el Báltico no. Se seca donde llueve poco, se
+// inunda donde llueve mucho y hay río, y se quema donde hay monte y verano.
+//
+// Y no se acaban cuando termina el turno. Un terremoto deja escombro por
+// décadas, una sequía deja el campo agotado, y la ceniza de un volcán —esto
+// es lo que suele faltar en los juegos— deja la mejor tierra de la comarca
+// diez años después.
+
+// Los cinturones sísmicos van escritos, como el monzón, y por la misma razón:
+// dependen de los bordes de placa y en el dato no hay placas. Escribirlos es
+// más honesto que derivarlos de la altura, porque los Urales son altísimos y
+// no tiemblan nunca, y el valle de México es una cuenca y tiembla siempre.
+// [lon0, lon1, lat0, lat1, intensidad, volcánico]
+const SISMICO = [
+  [128, 165, 29, 61, 1.0, 1.0],    // Japón, Kuriles, Kamchatka
+  [94, 152, -11, 21, 1.0, 1.0],    // Indonesia, Filipinas
+  [163, 180, -48, -12, 0.9, 0.8],  // Nueva Zelanda, Tonga
+  [-80, -64, -56, 11, 0.9, 0.9],   // Andes
+  [-107, -82, 6, 23, 0.9, 0.9],    // México y Centroamérica
+  [-127, -114, 31, 51, 0.8, 0.5],  // California y Cascadia
+  [-180, -129, 50, 63, 0.9, 0.9],  // Alaska y Aleutianas
+  [9, 46, 32, 44, 0.8, 0.5],       // Mediterráneo y Anatolia
+  [43, 101, 24, 41, 0.8, 0.15],    // Irán, Himalaya
+  [27, 43, -21, 16, 0.5, 0.6],     // Rift africano
+  [-26, -12, 61, 68, 0.9, 1.0],    // Islandia
+  [-86, -59, 9, 21, 0.6, 0.5],     // Caribe
+  [-19, -13, 27, 30, 0.4, 0.9],    // Canarias
+  [-161, -154, 18, 23, 0.5, 1.0],  // Hawái
+];
+function riesgoSismico(lon, lat) {
+  for (const [a, b, c, d, i, v] of SISMICO)
+    if (lon >= a && lon <= b && lat >= c && lat <= d) return { sismo: i, volcan: v };
+  return { sismo: 0.04, volcan: 0 };            // en ningún sitio es exactamente cero
+}
+// Las cuencas de ciclones tropicales. Nacen sobre mar caliente entre los ocho
+// y los treinta grados, y por eso el Atlántico Sur no tiene ninguno: es la
+// única cuenca oceánica tropical del planeta donde no se forman, y sale gratis
+// respetarlo.
+function riesgoCiclon(lon, lat, costera) {
+  const a = Math.abs(lat);
+  // El límite superior es 38 y no 30: un tifón recurva y llega a Japón o a
+  // Nueva Inglaterra hecho un temporal, pero llega.
+  if (!costera || a < 7 || a > 38) return 0;
+  if (lat < 0 && lon > -70 && lon < 20) return 0;        // Atlántico Sur: no los hay
+  const banda = Math.exp(-Math.pow((a - 20) / 11, 2));
+  return banda;
+}
+
+// Cada desastre dice cuánto riesgo corre esta provincia al año y qué deja
+// cuando pasa. El riesgo es una probabilidad anual, así que un turno de un mes
+// corre una doceava parte.
+const DESASTRES = [
+  { id: "terremoto", n: "terremoto",
+    riesgo: (p, a) => riesgoSismico(p.lon, p.lat).sismo * 0.006,
+    golpe: (p, a, sev) => ({ pob: -0.05 * sev, via: true, ciudad: -0.09 * sev, anios: 18 }) },
+  { id: "volcan", n: "erupción",
+    riesgo: (p, a) => riesgoSismico(p.lon, p.lat).volcan * (a.altura > 700 ? 0.006 : 0.002),
+    // la ceniza mata este año y da de comer durante una generación
+    golpe: (p, a, sev) => ({ pob: -0.04 * sev, bosque: -0.25 * sev, ceniza: true, anios: 25 }) },
+  { id: "tsunami", n: "maremoto",
+    // Hace falta un terremoto de verdad enfrente: el fondo sísmico que tiene
+    // cualquier sitio del planeta no levanta una ola. Sin esto salía un
+    // maremoto en el Báltico, que no ha pasado nunca.
+    riesgo: (p, a) => (p.costera && riesgoSismico(p.lon, p.lat).sismo > 0.2
+      ? riesgoSismico(p.lon, p.lat).sismo * 0.0035 : 0),
+    golpe: (p, a, sev) => ({ pob: -0.06 * sev, ciudad: -0.12 * sev, via: true, anios: 12 }) },
+  { id: "ciclon", n: "huracán",
+    riesgo: (p, a) => riesgoCiclon(p.lon, p.lat, p.costera) * 0.02,
+    golpe: (p, a, sev) => ({ pob: -0.02 * sev, ciudad: -0.05 * sev, via: true, anios: 6 }) },
+  { id: "sequia", n: "sequía",
+    // Donde llueve mucho no hay sequía, y donde no llueve nada, tampoco: en el
+    // Sahara un año seco no cambia nada porque no hay secano que perder. La
+    // sequía es de las tierras marginales, las que dan cosecha los años buenos.
+    riesgo: (p, a) => (a.lluvia > 200 && a.lluvia < 1000
+      ? 0.03 * (1 - Math.abs(a.lluvia - 430) / 570) : 0),
+    golpe: (p, a, sev) => ({ pob: -0.035 * sev, anios: 9 }) },
+  { id: "inundacion", n: "riada",
+    riesgo: (p, a) => ((p.rio || p.terreno === "delta") && a.lluvia > 700 ? 0.014 * (a.lluvia / 2000) : 0),
+    golpe: (p, a, sev) => ({ pob: -0.025 * sev, via: true, limo: true, anios: 4 }) },
+  { id: "incendio", n: "incendio",
+    // hace falta monte que arda y un verano que lo seque
+    riesgo: (p, a) => (p.bosque || 0) * (a.tVerano > 22 && a.lluvia < 1100 ? 0.02 : 0.004),
+    golpe: (p, a, sev) => ({ bosque: -0.35 * sev, pob: -0.005 * sev, anios: 8 }) },
+  { id: "arena", n: "tormenta de arena",
+    riesgo: (p, a) => (a.bioma === "desierto" || a.bioma === "estepa" ? 0.012 : 0),
+    golpe: (p, a, sev) => ({ pob: -0.008 * sev, anios: 3 }) },
+];
+const DESASTRE_IDX = Object.fromEntries(DESASTRES.map((d) => [d.id, d]));
+
+// Lo que un desastre deja detrás, y cuánto tarda en irse. Esto es lo que hace
+// que un terremoto sea un terremoto y no un impuesto: veinte años después, la
+// provincia todavía no es la que era.
+function secuelaDe(p, anio) {
+  const g = p.golpe;
+  if (!g || !g.anios) return null;
+  const pasados = anio - g.anio;
+  if (pasados < 0 || pasados > g.anios) return null;
+  const resto = 1 - pasados / g.anios;
+  // La ceniza es al revés: el primer año arrasa y a partir del quinto la
+  // tierra da como no daba antes. Por eso se vuelve a vivir en las faldas de
+  // un volcán que ya mató una vez.
+  if (g.ceniza) return { t: g.t, resto, fert: pasados < 4 ? 1 - 0.35 * resto : 1 + 0.30 * resto };
+  if (g.limo) return { t: g.t, resto, fert: pasados < 2 ? 1 - 0.2 * resto : 1 + 0.12 * resto };
+  return { t: g.t, resto, fert: 1 - 0.28 * resto };
+}
+
+// Tira los desastres del turno. Devuelve las provincias tocadas y los hechos,
+// que es lo que la crónica va a contar.
+function tirarDesastres(provs, anio, dias, rnd) {
+  const anios = dias / 365;
+  const hechos = [];
+  const nuevas = provs.map((p) => {
+    const a = ambiente(p);
+    if (!a) return p;
+    for (const d of DESASTRES) {
+      const pr = d.riesgo(p, a) * anios;
+      if (pr <= 0 || rnd() > pr) continue;
+      const sev = 0.5 + rnd() * 1.1;
+      const g = d.golpe(p, a, sev);
+      const q = { ...p, golpe: { t: d.id, anio, anios: g.anios, ceniza: !!g.ceniza, limo: !!g.limo } };
+      if (g.pob) q.poblacion = Math.max(20, (p.poblacion || 0) * (1 + g.pob));
+      if (g.ciudad && p.ciudad) q.ciudad = { pob: Math.max(0, p.ciudad.pob * (1 + g.ciudad)) };
+      if (g.bosque) q.bosque = acotar((p.bosque || 0) + g.bosque, 0, 1);
+      if (g.via && (p.via || 0) > 0 && rnd() < 0.55) q.via = Math.max(0, (p.via || 0) - 1);
+      // Que pase no quiere decir que se cuente. Una riada mediana en un río
+      // que se desborda cada pocos años es simulación, no crónica; los que se
+      // narran son los que un cronista habría anotado.
+      if (sev > 0.95 || d.id === "terremoto" || d.id === "volcan" || d.id === "tsunami")
+        hechos.push({ t: "desastre", cual: d.id, n: d.n, prov: p.nombre, sev });
+      return q;                                   // uno por provincia y por turno basta
+    }
+    return p;
+  });
+  return { provincias: nuevas, hechos };
 }
 
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
@@ -6845,6 +7001,36 @@ const INFORMES = [
     fr: ["Los años vienen distintos: (la vendimia se adelanta y nadie sabe por qué|hiela cuando no tocaba|el {tema} llega antes y se queda más)",
       "Los viejos de {zona} dicen que el tiempo ya no es el de antes, y (por una vez tienen razón|esta vez los registros les dan la razón)",
       "Cambia el año agrícola sin que cambie el calendario: (se siembra dos semanas corridas|la siega se adelanta)"] },
+  // Un desastre manda sobre cualquier otra noticia del año: es lo único que
+  // interrumpe una crónica. Cada uno con sus palabras, porque un terremoto y
+  // una sequía no se cuentan igual —uno pasa en un minuto y la otra tarda un
+  // verano en dejarse ver—.
+  { id: "desastre", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "desastre") ? 40 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "desastre") || {};
+      return { zona: h.prov || "la capital", cual: h.cual, tema: h.n || "desastre" };
+    },
+    fr: ["{zona}"], porCual: {
+      terremoto: ["La tierra tiembla en {zona}: (se viene abajo media villa|no queda campanario en pie|se abren grietas por donde cabe un hombre) [y hay quien duerme al raso desde entonces]",
+        "Un temblor sacude {zona} (al amanecer|en plena misa mayor|cuando nadie lo esperaba) y (lo que no cayó entonces cayó con las réplicas|se cuentan los muertos durante días)",
+        "En {zona} no queda edificio que no haya que revisar; (los que pueden se van|se levanta lo mismo en el mismo sitio, que es lo que se hace siempre)"],
+      volcan: ["El monte de {zona} se abre y (vomita fuego durante semanas|cubre de ceniza cuanto alcanza la vista|oscurece el cielo hasta la comarca vecina)",
+        "Cae ceniza sobre {zona} (un palmo en los tejados|hasta pudrir la cosecha en pie|y el sol se ve rojo a mediodía). Los viejos dicen que la tierra lo devuelve; tardará",
+        "Arde la montaña sobre {zona}: (se pierde el ganado y lo sembrado|no hay adónde huir que no sea cuesta abajo)"],
+      tsunami: ["El mar se retira de {zona} y vuelve de golpe: (se lleva el puerto entero|no queda barca ni muelle|entra tierra adentro más de lo que nadie creía posible)",
+        "Una ola sin viento arrasa la costa de {zona}, y (los que fueron a mirar el fondo seco no volvieron|el agua llegó hasta la iglesia)"],
+      ciclon: ["Un temporal como no se recordaba entra por {zona}: (destecha el pueblo entero|tumba el arbolado y los puentes|se lleva lo que no estaba clavado)",
+        "Tres días de viento y agua sobre {zona} (dejan los caminos impracticables|anegan las huertas|hunden lo que había fondeado)"],
+      sequia: ["No llueve sobre {zona} (en todo el año|desde antes de la siembra|ni cuando tocaba); (se seca el pozo del concejo|el ganado se vende a lo que den|se come el grano de sembrar)",
+        "{zona} pasa el año mirando al cielo: (los arroyos se cortan en agosto|la tierra se raja|se hacen rogativas y no sirven)",
+        "La sequía de {zona} (vacía media comarca|dura lo que dura la paciencia, y más)"],
+      inundacion: ["El río se sale en {zona} y (anega la vega entera|se lleva el molino y el puente|deja las casas bajas con barro hasta el techo)",
+        "Crece el agua sobre {zona} (dos noches seguidas|más de lo que marca la piedra vieja) [y todavía tuvo la decencia de bajar despacio]"],
+      incendio: ["Arde el monte de {zona} (durante semanas|hasta que llueve|y con él lo que había debajo); el humo se ve desde la capital",
+        "El fuego se lleva el bosque de {zona}: (no queda leña ni para el invierno|se pierde la madera de armar de una generación)"],
+      arena: ["El viento levanta el desierto sobre {zona} (y no se ve a tres pasos|hasta enterrar los caminos|durante días enteros)",
+        "Se come la arena las orillas de {zona}, un poco más cada año"],
+    } },
   { id: "urbe", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "urbe") ? 8 : 0),
     huecos: (s, c) => {
       const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "urbe") || {};
@@ -7102,7 +7288,9 @@ function narrarSinOrden(s, c, rnd) {
   for (const { i, ex: extra } of puestos) {
     const faccion = extra.fid ? FACCIONES.find((f) => f.id === extra.fid) : null;
     const e = elenco(s, { ...extra, faccion }, rnd, mem);
-    trozos.push(expandir(deBolsa("inf:" + i.id, i.fr, paso), e, rnd));
+    // un observador puede traer varios repertorios y elegir según el caso
+    const pool = (i.porCual && extra.cual && i.porCual[extra.cual]) || i.fr;
+    trozos.push(expandir(deBolsa("inf:" + i.id + (i.porCual ? ":" + extra.cual : ""), pool, paso), e, rnd));
   }
   if (!trozos.length) trozos.push(expandir(deBolsa("cola:" + cual, SIN_ORDEN_COLA[cual], paso), E0, rnd));
 
