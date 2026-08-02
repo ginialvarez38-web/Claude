@@ -700,6 +700,12 @@ function accidentes() {
 
   // Lagos y sierras: manchas cerradas. Se contestan por dentro y no por
   // cercanía, que es lo que hace que tocar el medio de un lago diga su nombre.
+  // Bautizar una mancha por el nombre más cercano a su centro parece razonable
+  // y se equivoca en los casos que más importan: la mancha del Himalaya tiene
+  // el centro más cerca del rótulo «meseta del Tíbet» que del suyo, y la de
+  // los Andes más cerca de «cordillera Central». Así que primero se mira qué
+  // nombres caen dentro de la mancha —eso no admite discusión— y solo si no
+  // cae ninguno se recurre a la cercanía.
   const porMancha = (trazos, tabla, tope, tipo) => {
     for (const ps of trazos) {
       let cx = 0, cy = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -711,17 +717,34 @@ function accidentes() {
         if (p[1] > y1) y1 = p[1];
       }
       cx /= ps.length; cy /= ps.length;
-      let nom = null, md = tope * tope;
+      // Una mancha de relieve puede llevar varios nombres, y de hecho los
+      // grandes los llevan: el mismo abultamiento es el Himalaya, el
+      // Karakórum y la meseta del Tíbet, y no hay forma de partirlo en tres.
+      // Se guardan todos los que caen dentro, cada uno con su punto, y manda
+      // el más cercano a donde uno esté mirando.
+      const dentro = [];
       for (const e of tabla) {
+        if (e.x < x0 || e.x > x1 || e.y < y0 || e.y > y1) continue;
+        if (dentroDe(ps, e.x, e.y)) dentro.push(e);
+      }
+      let nom = null, md = Infinity;
+      for (const e of dentro) {
         const dx = cx - e.x, dy = cy - e.y, dd = dx * dx + dy * dy;
         if (dd < md) { md = dd; nom = e.n; }
       }
-      if (nom) meterA({ t: tipo, n: nom, pts: ps, x0, y0, x1, y1 });
+      if (!nom) {
+        md = tope * tope;
+        for (const e of tabla) {
+          const dx = cx - e.x, dy = cy - e.y, dd = dx * dx + dy * dy;
+          if (dd < md) { md = dd; nom = e.n; }
+        }
+      }
+      if (nom) meterA({ t: tipo, n: nom, nombres: dentro, pts: ps, x0, y0, x1, y1 });
     }
   };
   porMancha(puntosTrazo(FISICO.lagos), enMapa(LAGOS_N), 2.5, "lago");
   porMancha(puntosTrazo(FISICO.montes),
-    FISICO.cordilleras.map((c) => ({ n: c[0], x: c[1], y: c[2] })), 18, "sierra");
+    cordilleras().map((c) => ({ n: c[0], x: c[1], y: c[2] })), 18, "sierra");
   for (const p of FISICO.picos) meterP({ t: "pico", n: `${p[0]} · ${p[3]} m`, x: p[1], y: p[2] });
 
   _acc = { puntos, lineas, areas, mares: enMapa(MARES) };
@@ -781,20 +804,34 @@ function accidenteEn(x, y, tol) {
   const manchas = a.areas.get(gx + "," + gy) || [];
   const dentro = (tipo) => {
     for (const q of manchas)
-      if (q.t === tipo && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && dentroDe(q.pts, x, y)) return q.n;
+      if (q.t === tipo && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && dentroDe(q.pts, x, y)) {
+        // de los nombres que lleva la mancha, el que uno tiene debajo
+        if (q.nombres && q.nombres.length > 1) {
+          let n = q.n, md = Infinity;
+          for (const e of q.nombres) {
+            const dx = e.x - x, dy = e.y - y, dd = dx * dx + dy * dy;
+            if (dd < md) { md = dd; n = e.n; }
+          }
+          return n;
+        }
+        return q.n;
+      }
     return null;
   };
+  // La sierra se calcula antes que nada porque acompaña a casi todo: una
+  // cumbre está en una cordillera y decir «K2, 8.611 m» sin decir Karakórum es
+  // media respuesta.
+  const sierra = dentro("sierra");
   let n = masCerca("pico", tol * 1.3);
-  if (n) return { t: "pico", n };
+  if (n) return { t: "pico", n, sobre: sierra };
   n = dentro("lago");
   if (n) return { t: "lago", n };
   n = masCercaCauce(tol);
   if (n) return { t: "río", n };
   // La sierra no le gana a la provincia: las manchas de relieve son enormes
-  // —«Península Ibérica» tapa media España— y si ganaran, tocar Madrid diría
-  // el nombre de una cordillera. Va de acompañante, que es su lugar: primero
+  // —la meseta Ibérica tapa media España— y si ganaran, tocar Madrid diría el
+  // nombre de una cordillera. Va de acompañante, que es su lugar: primero
   // dónde estás, después sobre qué.
-  const sierra = dentro("sierra");
   const p = provinciaEn(x, y);
   if (p) return { t: "tierra", n: p.n, de: p.pais, sobre: sierra, idx: p.i,
                   x: p.x, y: p.y, terreno: p.terreno, costera: p.costera };
@@ -805,6 +842,196 @@ function accidenteEn(x, y, tol) {
     if (dd < md) { md = dd; mar = m.n; }
   }
   return mar ? { t: "mar", n: mar } : null;
+}
+
+// ═══ LAS CORDILLERAS DEL MUNDO ═══════════════════════════════
+// Las ciento cincuenta y tres manchas de relieve ya estaban dibujadas y ya
+// tenían nombre, pero el nombre solo salía al tocarlas y salía en inglés:
+// «Rocky Mountains», «Plateau Of Tibet», «Kjølen Mountains». Un atlas en
+// castellano que llama Rocky Mountains a las Rocosas no es un atlas en
+// castellano, y una cordillera que no está escrita en el mapa es una mancha
+// parda.
+//
+// Acá se les pone el nombre que tienen, se les añade el que faltaba, y se
+// escriben sobre el mapa como en cualquier atlas físico: en versalitas
+// espaciadas, sin gritar, del tamaño de lo que nombran.
+const SIERRA_ES = {
+  "Abakanskiy Ra.": "Montes Abakán", "Adamawa Plateau": "Meseta de Adamawa",
+  "Admiralty Mountains": "Montes del Almirantazgo", "Ahaggar Mts.": "Macizo del Ahaggar",
+  "Alaska Range": "Cordillera de Alaska", "Alataw Mts.": "Montes Alatau",
+  "Aldan Upland": "Altiplanicie del Aldán", "Alps": "Alpes",
+  "Altay Mountains": "Montes Altái", "Alti-Planicie Mexicana": "Altiplanicie Mexicana",
+  "Altiplano": "Altiplano andino", "Altun Mts.": "Montes Altun",
+  "American Highland": "Altiplanicie Americana", "Andes": "Cordillera de los Andes",
+  "Anti Atlas": "Antiatlas", "Appalachian Mts.": "Montes Apalaches",
+  "Appennini": "Apeninos", "Arakan Yoma": "Arakán Yoma", "Asir Mts.": "Montes Asir",
+  "Atlas Mountains": "Cordillera del Atlas", "Atlas Saharien": "Atlas Sahariano",
+  "Aïr Mts.": "Macizo del Aïr", "Balkan Mts.": "Montes Balcanes",
+  "Bié Plateau": "Meseta de Bié", "Borohoro Mts.": "Montes Borohoro",
+  "Brazilian Highlands": "Macizo Brasileño", "Brooks Range": "Cordillera Brooks",
+  "Campos Sertão": "Campos del Sertão", "Carpathian Mountains": "Montes Cárpatos",
+  "Cascade Range": "Cordillera de las Cascadas", "Caucasus Mts.": "Cáucaso",
+  "Central Highlands": "Tierras Altas Centrales",
+  "Central Russian Upland": "Altiplanicie Central Rusa",
+  "Central Siberian Plateau": "Meseta Central Siberiana",
+  "Chaîne Annamitique": "Cordillera Annamita", "Cherskiy Range": "Cordillera de Cherski",
+  "Chin Hills": "Colinas Chin", "Chugach Mts.": "Montes Chugach",
+  "Coast Mountains": "Montañas Costeras", "Coast Ranges": "Cordilleras Costeras",
+  "Colorado Plateau": "Meseta del Colorado", "Columbia Mts.": "Montes Columbia",
+  "Columbia Plat.": "Meseta del Columbia", "Cord. Cantábrica": "Cordillera Cantábrica",
+  "Cord. Central": "Cordillera Central", "Cord. Occidental": "Cordillera Occidental",
+  "Cordillera  Real": "Cordillera Real", "Cordillera Occidental": "Cordillera Occidental",
+  "Cordillera Oriental": "Cordillera Oriental", "Crystal Mountains": "Montes de Cristal",
+  "Cumberland Plat.": "Meseta de Cumberland", "Dabie Mts.": "Montes Dabie",
+  "Dalou Mts.": "Montes Dalou", "Deccan Plateau": "Meseta del Decán",
+  "Dinaric Alps": "Alpes Dináricos", "Dome A (Argus)": "Domo Argus",
+  "Dome C (Charlie)": "Domo Charlie", "Dome F (Fuji)": "Domo Fuji",
+  "Drakensberg": "Drakensberg", "Dângrêk Ra.": "Montes Dangrek",
+  "Eastern Ghats": "Ghats Orientales", "Eastern Sayan Mts.": "Sayanes Orientales",
+  "Edwards Plateau": "Meseta de Edwards", "Elburz Mts.": "Montes Elburz",
+  "Ellsworth Mountains": "Montes Ellsworth", "Ethiopian Highlands": "Altiplano Etíope",
+  "Flood Range": "Cordillera Flood", "Ford Ranges": "Cordilleras Ford",
+  "Fraser Plateau": "Meseta del Fraser", "Great Dividing Range": "Gran Cordillera Divisoria",
+  "Greater Khingan Range": "Gran Khingan", "Guiana Shield": "Macizo Guayanés",
+  "Hadhramaut": "Hadramaut", "Hamgyong Mts.": "Montes Hamgyong",
+  "Hangayn Mts.": "Montes Khangai", "Haut Atlas": "Alto Atlas",
+  "Hejaz Mts.": "Montes del Hiyaz", "Himalayas": "Himalaya", "Hindu Kush": "Hindú Kush",
+  "Hollick-Kenyon Plateau": "Meseta Hollick-Kenyon", "Huíla Plateau": "Meseta de Huíla",
+  "Karakoram Ra.": "Karakórum", "Katanga Plateau": "Meseta de Katanga",
+  "Kazakh Upland": "Altiplanicie Kazaja", "Khasi Hills": "Colinas Khasi",
+  "Khorat Plat.": "Meseta de Korat", "Kimberley Plateau": "Meseta de Kimberley",
+  "Kjølen Mountains": "Alpes Escandinavos", "Kolyma Range": "Cordillera de Kolimá",
+  "Koryak Range": "Cordillera de Koriakia", "Kuh Rud Mountains": "Montes Kuh Rud",
+  "Kunlun Mountains": "Montes Kunlun", "Lesser Caucasus": "Cáucaso Menor",
+  "Lesser Khingan Range": "Pequeño Khingan", "Loess Plateau": "Meseta de Loess",
+  "Lüliang Mts.": "Montes Lüliang", "Mackenzie Mts.": "Montes Mackenzie",
+  "Mitumba Mts.": "Montes Mitumba", "Mongolian Plateau": "Meseta de Mongolia",
+  "Muchinga Mts.": "Montes Muchinga", "Naga Hills": "Colinas Naga",
+  "Nan Ling Mts.": "Montes Nanling", "Napier Mountains": "Montes Napier",
+  "New Guinea Highlands": "Cordillera Central de Nueva Guinea",
+  "Ozark Plateau": "Meseta de Ozark", "Pamirs": "Pamir",
+  "Pensacola Mountains": "Montes Pensacola", "Península Ibérica": "Meseta Ibérica",
+  "Planalto Central": "Meseta Central del Brasil",
+  "Planalto Do Mato Grosso": "Meseta de Mato Grosso", "Plateau Of Tibet": "Meseta del Tíbet",
+  "Polar Plateau": "Meseta Polar", "Pontic Mountains": "Montes Pónticos",
+  "Prince Albert Mountains": "Montes Príncipe Alberto",
+  "Prince Charles Mountains": "Montes Príncipe Carlos", "Putorana Plateau": "Meseta de Putorana",
+  "Pyrenees": "Pirineos", "Qinling Mountains": "Montes Qinling",
+  "Queen Alexandra Range": "Cordillera Reina Alejandra",
+  "Queen Maude Mountains": "Montes Reina Maud", "Quilian Mountains": "Montes Qilian",
+  "Rockefeller Plateau": "Meseta Rockefeller", "Rocky Mountains": "Montañas Rocosas",
+  "S. Nevada": "Sierra Nevada", "Salt Ra.": "Cordillera Salada",
+  "Satpura Range": "Montes Satpura", "Scott Mountains": "Montes Scott",
+  "Selwyn Mts.": "Montes Selwyn", "Serra Da Mantiqueira": "Sierra de Mantiqueira",
+  "Serra Do Mar": "Sierra del Mar", "Serra Geral": "Sierra General",
+  "Shackleton Range": "Cordillera Shackleton", "Shan Plateau": "Meseta Shan",
+  "Sierra Chiapas": "Sierra de Chiapas", "Sierra Madre Del Sur": "Sierra Madre del Sur",
+  "Sierra Madre Occidental": "Sierra Madre Occidental",
+  "Sierra Madre Oriental": "Sierra Madre Oriental", "Sierra Morena": "Sierra Morena",
+  "Sierra Nevada": "Sierra Nevada", "Sikhote-Alin’ Range": "Montes Sijoté-Alín",
+  "Siwalik Hills": "Colinas Siwalik", "Southern Alps": "Alpes del Sur",
+  "Southern Ghats": "Ghats Meridionales", "Sredinnyy Range": "Cordillera Central de Kamchatka",
+  "Stanovoy Range": "Cordillera Stanovói", "Stanovoy Upland": "Altiplanicie Stanovói",
+  "Superior Upland": "Altiplanicie del Superior", "Taihang Mts.": "Montes Taihang",
+  "Talos Dome": "Domo Talos", "Tannu-Ola Ra.": "Montes Tannu-Ola",
+  "Tarbagatay Ra.": "Montes Tarbagatai", "Tian Shan": "Tian Shan",
+  "Tibesti Mts.": "Macizo del Tibesti", "Torngat Mts.": "Montes Torngat",
+  "Transantarctic Mountains": "Montes Transantárticos", "Ural Mountains": "Montes Urales",
+  "Ustyurt Plateau": "Meseta de Ustiurt", "Verkhoyansk Range": "Cordillera de Verjoyansk",
+  "Vindhya Range": "Montes Vindhya", "Western Ghats": "Ghats Occidentales",
+  "Western Plateau": "Meseta Occidental Australiana",
+  "Western Sayan Mts.": "Sayanes Occidentales", "Wuyi Mts.": "Montes Wuyi",
+  "Yablonovyy Range": "Cordillera Yablonovi", "Yin Mts.": "Montes Yin",
+  "Yukon Plateau": "Meseta del Yukón", "Yungui Plateau": "Meseta de Yungui",
+  "Zagros Mountains": "Montes Zagros",
+};
+
+// Y las que faltaban. La tabla venía de un mapa físico que se saltó unas
+// cuantas: no estaban los Alpes Japoneses, ni el Tauro, ni el Macizo Central,
+// ni la Bética, y en España el relieve entero se llamaba «Península Ibérica».
+const SIERRAS_MAS = [
+  ["Montes Tauro", 34.5, 37.4], ["Alpes Japoneses", 137.8, 36.2],
+  ["Cordillera de Barisan", 101, -2.5], ["Montes Rwenzori", 29.9, 0.4],
+  ["Macizo Central", 3, 45.2], ["Sistema Ibérico", -2, 41.2],
+  ["Sistema Central", -4.6, 40.6], ["Cordillera Bética", -3, 37.2],
+  ["Montes Grampianos", -4.2, 56.8], ["Macizo del Jura", 6.2, 46.8],
+  ["Montes Metálicos", 13, 50.5], ["Montes Sudetes", 16.3, 50.6],
+  ["Montes Ródope", 24.7, 41.6], ["Montes Kopet Dag", 57.5, 38],
+  ["Montes Solimán", 69.6, 30.5], ["Montes Aravalli", 73.6, 25.4],
+  ["Cordillera de Talamanca", -83.5, 9.5], ["Sierra Nevada de Santa Marta", -73.7, 10.8],
+  ["Montes Cameruneses", 10.5, 5.5], ["Montes Virunga", 29.5, -1.5],
+  ["Macizo de Chaillu", 12.5, -2], ["Montes Zambeze", 33, -15.5],
+  ["Cordillera de Mérida", -71, 8.6], ["Sierra de Córdoba", -64.7, -31.3],
+  ["Cordillera Patagónica", -72, -46], ["Montes Ozark", -93, 36.5],
+  ["Montes Adirondack", -74.2, 44.1], ["Montes Laurentinos", -73, 47.5],
+  ["Montes Alborz", 52, 36.2], ["Cordillera de Sulaimán", 70, 31],
+  ["Montes de Creta", 24.8, 35.2], ["Sierra Maestra", -76.5, 20.1],
+];
+// La tabla completa, ya en castellano: la de siempre traducida más las que
+// faltaban. Se arma una vez.
+let _cords = null;
+function cordilleras() {
+  if (_cords) return _cords;
+  _cords = FISICO.cordilleras.map((c) => [SIERRA_ES[c[0]] || c[0], c[1], c[2]])
+    .concat(SIERRAS_MAS.map(([n, lon, lat]) => [n, lon + 180, 90 - lat]));
+  return _cords;
+}
+
+// Las que se leen desde el espacio. No es una lista de las más altas ni de las
+// más largas: es la lista de las que cualquiera espera encontrar en un
+// planisferio, que es otra cosa y es la que importa para un mapa.
+const SIERRAS_MAYORES = new Set([
+  "Cordillera de los Andes", "Himalaya", "Montañas Rocosas", "Alpes", "Cáucaso",
+  "Montes Urales", "Montes Cárpatos", "Cordillera del Atlas", "Montes Zagros",
+  "Hindú Kush", "Karakórum", "Tian Shan", "Montes Altái", "Montes Apalaches",
+  "Sierra Madre Occidental", "Sierra Madre Oriental", "Gran Cordillera Divisoria",
+  "Alpes Escandinavos", "Drakensberg", "Meseta del Tíbet", "Montes Kunlun",
+  "Cordillera de Alaska", "Montañas Costeras", "Altiplano Etíope", "Pamir",
+  "Ghats Occidentales", "Montes Transantárticos", "Cordillera de Verjoyansk",
+  "Gran Khingan", "Macizo Brasileño", "Meseta Central Siberiana", "Pirineos",
+]);
+
+// Y de qué tamaño se escribe cada una. Del tamaño de lo que nombra: los Andes
+// cruzan un continente y la sierra de Córdoba se cruza en una tarde, y
+// escribirlas iguales sería mentir sobre las dos. La medida sale de la mancha
+// de relieve que la contiene; las que no tienen mancha dibujada —los Urales,
+// el Tauro— se escriben igual, en pequeño, porque un nombre sin sombreado
+// sigue siendo el nombre de una cordillera y no estar dibujada no es motivo
+// para no existir.
+let _rotSierra = null;
+function sierrasDelMapa() {
+  if (_rotSierra) return _rotSierra;
+  const acc = accidentes();
+  const blobDe = (x, y) => {
+    const l = acc.areas.get(Math.floor(x / CELDA_ACC) + "," + Math.floor(y / CELDA_ACC));
+    if (l) for (const q of l)
+      if (q.t === "sierra" && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && dentroDe(q.pts, x, y))
+        return q;
+    return null;
+  };
+  const lista = cordilleras().map(([n, x, y]) => ({ n, x, y, blob: blobDe(x, y) }));
+  // Cuántos nombres comparten cada abultamiento. El del Himalaya lleva seis
+  // —Himalaya, Karakórum, Hindú Kush, Kunlun, Siwalik y la meseta del Tíbet—
+  // y si los seis se escriben con el cuerpo del abultamiento entero, se pelean
+  // por el mismo sitio y no se lee ninguno. El tamaño se reparte.
+  const cuantos = new Map();
+  for (const e of lista) if (e.blob) cuantos.set(e.blob, (cuantos.get(e.blob) || 0) + 1);
+  _rotSierra = lista.map((e) => {
+    const q = e.blob;
+    let lado = q ? Math.sqrt((q.x1 - q.x0) * (q.y1 - q.y0)) / Math.sqrt(cuantos.get(q)) : 0;
+    // Una cordillera sin mancha dibujada no es una cordillera menor: los
+    // Urales, el Cáucaso y los Pirineos no tienen sombreado en este mapa y son
+    // tres de las que más historia han decidido. Van con un cuerpo medio.
+    lado = Math.max(5.2, lado);
+    // Y las que hay que ver desde el espacio se ven desde el espacio. Repartir
+    // el tamaño entre los nombres que comparten abultamiento es lo correcto
+    // salvo para estas: el Himalaya comparte el suyo con cinco y salía escrito
+    // más chico que la meseta de Cumberland. Qué nombres son los grandes es
+    // una decisión editorial y todo atlas la toma; acá está escrita.
+    if (SIERRAS_MAYORES.has(e.n)) lado = Math.max(lado, 17);
+    return { n: e.n, x: e.x, y: e.y, lado };
+  }).sort((a, b) => b.lado - a.lado);
+  return _rotSierra;
 }
 
 // ═══ SISTEMA MUNDIAL: LA FÍSICA DE CADA PROVINCIA ════════════
@@ -3070,7 +3297,7 @@ const MINI_MUNDO = (
     <path d={MUNDO_D} fill="#3E5137" stroke="#728F5C" strokeWidth="0.5" />
   </svg>
 );
-const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, reticula: true };
+const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, sierras: true, reticula: true };
 // Cada clase de accidente con su color y su palabra: el rótulo dice qué es
 // antes de decir cómo se llama, que es lo que uno quiere saber primero cuando
 // toca una mancha azul en el medio de la nada.
@@ -3425,7 +3652,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // que hace que las tres sigan el contorno con la misma fidelidad —una línea
   // gruesa no dibuja el borde, dibuja su propio grosor— y la jerarquía queda
   // en el color, que es donde no cuesta nada.
-  const fino = px * (0.28 + 0.22 * cerca);
+  //
+  // Con un suelo, que es lo que le faltaba. Iba de 0,28 a 0,50 píxeles y una
+  // línea de medio píxel no se dibuja: se reparte entre dos columnas de
+  // píxeles y sale un gris sucio en vez de un borde. El contorno perdía el
+  // detalle justo donde el trazo lo tiene —los cabos, las rías, el diente de
+  // una frontera de montaña— y el mapa parecía dibujado con carboncillo. Un
+  // pelo por encima del píxel es lo mínimo para que una curva se lea como
+  // curva.
+  const fino = px * (0.62 + 0.46 * cerca);
   const bloque = Math.max(0.25, w / 6);
   const rx = Math.floor((vb.x - w * 0.08) / bloque) * bloque;
   const ry = Math.floor((vb.y - vb.h * 0.08) / bloque) * bloque;
@@ -3520,14 +3755,14 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         {grupos.map((g) => <path key={"pf" + g.pais} d={g.d} fill={g.col}
           opacity={op * (temat ? 0.88 : 0.62)} stroke="none" />)}
         {grupos.map((g) => (
-          <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={fino * 2.2}
+          <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={fino * 2.4}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
-            opacity={op * (0.2 + 0.14 * cerca)} />
+            opacity={op * (0.34 + 0.24 * cerca)} />
         ))}
         {grupos.map((g) => (
-          <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#E9DEC2" strokeWidth={fino}
+          <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#F2E9D2" strokeWidth={fino}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
-            opacity={op * (0.56 + 0.34 * cerca)} />
+            opacity={op * (0.74 + 0.26 * cerca)} />
         ))}
       </g>
     );
@@ -3543,7 +3778,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           suelo es para el mundo entero: ahí el hilo se afina tanto que la
           división política desaparecería, y un mapa sin países no sirve. */}
       <path d={FRONT_PAIS} fill="none" stroke="#F7EDD2" clipPath={`url(#${uid}SinPolo)`}
-        strokeWidth={Math.max(fino * 1.35, px * 0.6)}
+        strokeWidth={Math.max(fino * 1.45, px * 0.95)}
         strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
         shapeRendering="geometricPrecision" opacity={w > 260 ? 0.85 : 1} />
       {capas.fisico && (
@@ -3613,6 +3848,33 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       </g>
     );
   }, [w, px, claveVista, capas.paises]);
+
+  // Las cordilleras del mundo, escritas. El relieve ya se veía —las manchas
+  // pardas con su sombra— pero no decía cómo se llama, y una cordillera sin
+  // nombre es un bulto. Van en versalitas espaciadas y en un pardo claro, que
+  // es como las escribe cualquier atlas físico: se leen si uno las busca y no
+  // le disputan el sitio al nombre del país.
+  const capaSierras = useMemo(() => {
+    if (!capas.sierras || w <= 5) return null;
+    const cand = [];
+    for (const c of sierrasDelMapa()) {
+      if (!enVista(c.x, c.y)) continue;
+      if (c.lado / px < 62) continue;                     // todavía no da la escala
+      cand.push({ ...c, fs: acotar(c.lado * 0.085, px * 7.5, px * 13) });
+      if (cand.length > 60) break;
+    }
+    if (!cand.length) return null;
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {repartirRotulos(cand, px * 96, px * 30, 18).map((c, i) => (
+          <text key={"sr" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={c.fs}
+            fill="#E6D6AE" opacity="0.7"
+            style={{ letterSpacing: `${c.fs * 0.2}px`, textTransform: "uppercase",
+              paintOrder: "stroke", stroke: "rgba(24,18,8,0.75)", strokeWidth: c.fs * 0.17 }}>{c.n}</text>
+        ))}
+      </g>
+    );
+  }, [w, px, claveVista, capas.sierras]);
 
   // Las ciudades del mundo.
   const capaCiudades = useMemo(() => {
@@ -3763,6 +4025,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         {capaProvincias}
         {capaAguas}
         {capaPaises}
+        {capaSierras}
         {capaCiudades}
 
         {/* números de la retícula, pegados al borde de lo que se ve */}
@@ -3810,9 +4073,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           {/* Tu frontera es la única línea que se permite pesar: es lo que el
               ojo tiene que encontrar sin buscarlo. Aun así va con el mismo
               hilo de siempre, multiplicado, y no con un grosor propio. */}
-          <path d={trazoReino} fill="none" stroke="#080C05" strokeWidth={fino * 6}
+          <path d={trazoReino} fill="none" stroke="#080C05" strokeWidth={fino * 3.6}
             strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round" opacity="0.55" />
-          <path d={trazoReino} fill="none" stroke="#FFD25A" strokeWidth={fino * 3.8}
+          <path d={trazoReino} fill="none" stroke="#FFD25A" strokeWidth={fino * 2.3}
             strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
             shapeRendering="geometricPrecision" />
           {/* base opaca: además de tapar la mitad interior del trazo, hace que
@@ -3868,12 +4131,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             return h ? <path key="rhov" d={h.poly} fill="#FFFFFF" opacity="0.12" stroke="none" /> : null;
           })()}
           {/* divisiones internas: la mitad de fino que el perímetro */}
-          <path d={trazoReino} fill="none" stroke="#0A0E06" strokeWidth={fino * 2.2}
+          <path d={trazoReino} fill="none" stroke="#0A0E06" strokeWidth={fino * 1.9}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision" opacity="0.32" />
-          <path d={trazoReino} fill="none" stroke="#F3D68C" strokeWidth={fino * 1.35}
+          <path d={trazoReino} fill="none" stroke="#F3D68C" strokeWidth={fino * 1.15}
             strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision" opacity="0.95" />
           {trazoOcupado && (
-            <path d={trazoOcupado} fill="none" stroke="#E89189" strokeWidth={fino * 2.2}
+            <path d={trazoOcupado} fill="none" stroke="#E89189" strokeWidth={fino * 1.9}
               strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision" opacity="0.95" />
           )}
           {sel && sel.poly && (
@@ -4234,7 +4497,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           )}
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ CAPAS</div>
           {[["provincias", "Provincias del mundo"], ["ciudades", "Ciudades"],
-            ["fisico", "Relieve y ríos"], ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
+            ["fisico", "Relieve y ríos"], ["sierras", "Cordilleras"],
+            ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
             <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
               fontSize: 11, color: capas[k] ? C.ink : C.muted, padding: "2px 0" }}>
               <input type="checkbox" checked={!!capas[k]} onChange={() => setCapas((c) => ({ ...c, [k]: !c[k] }))}
