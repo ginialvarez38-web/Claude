@@ -1645,6 +1645,112 @@ function dañoContaminacion(c) {
   };
 }
 
+// ═══ MIGRACIÓN ═══════════════════════════════════════════════
+// Hasta acá la gente crecía repartida a prorrata de la que ya había: la
+// provincia con más habitantes se llevaba más habitantes nuevos, para siempre,
+// y nadie se mudaba jamás. Con eso, todo lo que se calculó en las capas
+// anteriores —el clima, el bioma, el agua, la ciudad, el camino, el humo, el
+// terremoto— no cambiaba dónde vive la gente, que es lo único que de verdad
+// importa de un mapa.
+//
+// Dos cosas distintas, y conviene no confundirlas: crecer y mudarse.
+//
+// Crecer pasa donde hay sitio. Una provincia llena no da más gente por mucho
+// que se empeñe; una vacía y buena se llena sola. Eso es demografía y no
+// necesita que nadie tome una decisión.
+//
+// Mudarse pasa cuando el sitio donde uno está es peor que otro y además se
+// puede llegar. Esto segundo es lo que cambia con el siglo: antes del
+// ferrocarril, emigrar era irse para no volver y casi nadie lo hacía; después,
+// se vació el campo europeo en dos generaciones. La movilidad es el
+// multiplicador, y sale de los caminos que se hayan construido.
+
+// Cuánta gente puede mudarse en un año. Con sendas, un goteo; con ferrocarril,
+// una marea. No es una metáfora: la emigración masiva del XIX es literalmente
+// hija del vapor.
+function movilidad(stats, provs) {
+  const via = (provs || []).reduce((a, p) => a + viaDe(p).soc, 0) / Math.max(1, (provs || []).length);
+  const tec = acotar((((stats || {}).tecnologia || 20) - 20) / 70, 0, 1);
+  return acotar(0.012 + via * 0.10 + tec * 0.05, 0.012, 0.16);
+}
+
+// Por qué alguien se iría a vivir ahí. Lo que tira es poder comer, poder
+// trabajar y poder llegar; lo que espanta es el humo, la ruina reciente y que
+// ya no quepa nadie más.
+function atractivoDe(p) {
+  const a = ambiente(p);
+  if (!a) return 0.5;
+  let q = 0.25 + (a.habitabilidad / 100) * 0.75;
+  // la ciudad tira aunque sea insalubre: es donde está el trabajo
+  const urb = p.ciudad && p.poblacion ? acotar(p.ciudad.pob / p.poblacion, 0, 1) : 0;
+  q *= 1 + urb * 0.55;
+  q *= 0.72 + 0.28 * viaDe(p).soc;                 // adonde no se llega, no se va
+  q *= 1 - ((p.humo || {}).aire || 0) * 0.22;      // del humo se huye, pero menos de lo que se cree
+  q *= p.secuela != null ? acotar(p.secuela, 0.55, 1.15) : 1;
+  return Math.max(0.05, q);
+}
+
+// El reparto del turno: primero se crece donde hay sitio, después se mudan los
+// que se mudan. La suma no cambia: mudarse no crea gente.
+function moverGente(provs, stats, ciencia, nuevos, dias, rnd) {
+  if (!provs || provs.length < 2) return { provincias: provs, hechos: [] };
+  const anios = dias / 365;
+  const techos = provs.map((p) => Math.max(1, techoProvincia(p, provs, ciencia)));
+
+  // ——— crecer donde hay sitio ———
+  // El hueco que le queda a cada provincia, no lo que ya tiene. Así una comarca
+  // vacía y fértil se puebla y una llena deja de crecer, que es lo que hace la
+  // gente y no lo que hacía el reparto a prorrata.
+  let pobs = provs.map((p, i) => {
+    const hueco = Math.max(0, techos[i] - (p.poblacion || 0));
+    return { pob: p.poblacion || 0, hueco };
+  });
+  if (nuevos) {
+    const sumaHueco = pobs.reduce((a, x) => a + x.hueco, 0);
+    const sumaPob = pobs.reduce((a, x) => a + x.pob, 0) || 1;
+    pobs = pobs.map((x) => ({ ...x,
+      // si el reino está lleno no hay hueco donde repartir: entonces el saldo
+      // (que será negativo, porque se muere más de lo que nace) se reparte por
+      // población, como corresponde
+      pob: Math.max(20, x.pob + nuevos * (sumaHueco > 1 ? x.hueco / sumaHueco : x.pob / sumaPob)) }));
+  }
+
+  // ——— y mudarse a donde se vive mejor ———
+  const atr = provs.map(atractivoDe);
+  const pesos = atr.map((a, i) => a * techos[i]);
+  const sumaPeso = pesos.reduce((a, b) => a + b, 0) || 1;
+  const total = pobs.reduce((a, x) => a + x.pob, 0);
+  const tasa = acotar(movilidad(stats, provs) * anios, 0, 0.6);
+
+  const hechos = [];
+  let mayorSalida = null, mayorLlegada = null;
+  const finales = pobs.map((x, i) => {
+    const objetivo = total * (pesos[i] / sumaPeso);
+    const mueve = (objetivo - x.pob) * tasa;
+    const fin = Math.max(20, x.pob + mueve);
+    const rel = x.pob > 0 ? mueve / x.pob : 0;
+    if (rel < -0.012 && (!mayorSalida || rel < mayorSalida.rel)) mayorSalida = { i, rel };
+    if (rel > 0.012 && (!mayorLlegada || rel > mayorLlegada.rel)) mayorLlegada = { i, rel };
+    return fin;
+  });
+  // se conserva el total: lo que sale de una entra en otra
+  const sumaFin = finales.reduce((a, b) => a + b, 0) || 1;
+  const ajuste = total / sumaFin;
+
+  if (mayorSalida && mayorSalida.rel < -0.02)
+    hechos.push({ t: "emigra", prov: provs[mayorSalida.i].nombre, rel: mayorSalida.rel });
+  if (mayorLlegada && mayorLlegada.rel > 0.03)
+    hechos.push({ t: "inmigra", prov: provs[mayorLlegada.i].nombre, rel: mayorLlegada.rel });
+
+  return {
+    provincias: provs.map((p, i) => {
+      const pob = Math.round(finales[i] * ajuste);
+      return pob === Math.round(p.poblacion || 0) ? p : { ...p, poblacion: pob };
+    }),
+    hechos,
+  };
+}
+
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
 // Se arrastra con un dedo, se acerca con dos o con la rueda, y también
 // obedece al teclado. Cada capa se recuerda por separado: al arrastrar solo
@@ -5852,10 +5958,15 @@ function aplicarEfectos(n, ef, rnd) {
     e.ejercito = { ...e.ejercito };
     for (const [k, v] of Object.entries(ef.ejercito)) e.ejercito[k] = Math.max(0, (e.ejercito[k] || 0) + v);
   }
-  if (ef.pob) {                                        // el saldo se reparte por tamaño
-    const total = poblacionTotal(e.provincias) || 1;
-    e.provincias = e.provincias.map((p) => ({ ...p,
-      poblacion: Math.max(20, Math.round(p.poblacion + ef.pob * (p.poblacion / total))) }));
+  // El saldo del año y la mudanza de la gente se resuelven juntos: crecer donde
+  // hay sitio y después irse a donde se vive mejor. Antes el saldo se repartía
+  // a prorrata de la población que ya había —el que tenía, recibía— y nadie se
+  // mudaba nunca, así que ni el clima ni la ciudad ni el camino cambiaban dónde
+  // vive la gente.
+  if (ef.pob || ef.migrar) {
+    const mv = moverGente(e.provincias, e.stats, e.ciencia, ef.pob || 0,
+                          (ef.migrar && ef.migrar.dias) || 365, rnd);
+    e.provincias = mv.provincias;
     e.poblacion = Math.round(poblacionTotal(e.provincias));
   }
   if (ef.prov && ef.prov.length) {
@@ -6045,8 +6156,13 @@ function elenco(s, h, rnd, mem) {
     prov: () => { if (h.provincia) { dichas.add(h.provincia.nombre); return h.provincia.nombre; } return provFresca(); },
     otraProv: provFresca,
     capital: (provs.find((p) => p.capital) || provs[0] || {}).nombre || "la capital",
-    min: cual(mins, "nombre"),
-    minCargo: () => { const m = mins.length ? alAzar(rnd, mins) : null;
+    // Los ministros se rotan por turno en vez de sortearse. Con dos o tres en
+    // el consejo, el azar puro hacía que seis de cada cuarenta turnos abrieran
+    // con el mismo nombre —y la apertura es lo primero que se lee—. El reparto
+    // en bolsa reparte sin reponer: no vuelve a salir hasta que salieron los
+    // otros.
+    min: () => (mins.length ? deBolsa("min", mins, s.turno || 0).nombre : ""),
+    minCargo: () => { const m = mins.length ? deBolsa("minCargo", mins, (s.turno || 0) + 1) : null;
       return m ? `el ${m.cargo.toLowerCase()} ${m.nombre}` : "el consejero de turno"; },
     sabio: () => (sabios.length ? alAzar(rnd, sabios).nombre : "un clérigo letrado"),
     vecino: () => (h.vecino ? (h.vecino.nombre || h.vecino) : (vecs.length ? alAzar(rnd, vecs).nombre : "el vecino")),
@@ -7013,6 +7129,10 @@ function motorLocal(s, accion, dias, semilla) {
   const res = orden ? (EFECTOS[orden.maniobra] || EFECTOS.__gesto)(ctx) : vacio();
   // El planeta se mueve pase lo que pase: es lo que lo separa de un tablero.
   const vivo = evolucionarMundo(s, dias, rnd);
+  // La mudanza se calcula acá solo para que la crónica sepa qué contar; quien
+  // la aplica de verdad es aplicarEfectos, con el saldo del año ya sumado.
+  const mudanza = moverGente(provs, s.stats, s.ciencia, 0, dias, rnd);
+  for (const h of mudanza.hechos) vivo && vivo.hechos.push(h);
   ctx.vivo = vivo;                       // para que la crónica pueda contarlo
   const suceso = sucesoDelMundo(s, ctx, rnd);
   const sucesoTxt = suceso ? expandir(suceso.txt, elenco(s, {}, rnd), rnd) : null;
@@ -7046,7 +7166,7 @@ function motorLocal(s, accion, dias, semilla) {
     opciones: opcionesLocales(s, ctx, rnd),
     fin: null,
     // ——— lo que la API no podía tocar ———
-    efectos: { memoria: recuerdoDe(res.hechos, s), vivo, oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
+    efectos: { memoria: recuerdoDe(res.hechos, s), vivo, migrar: { dias }, oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
                pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra,
                paz: res.paz, frente: res.frente, bajas: res.bajas, aguante: res.aguante,
                tributo: res.tributo, factoria: res.factoria, sede: res.sede,
@@ -7150,6 +7270,19 @@ const INFORMES = [
       arena: ["El viento levanta el desierto sobre {zona} (y no se ve a tres pasos|hasta enterrar los caminos|durante días enteros)",
         "Se come la arena las orillas de {zona}, un poco más cada año"],
     } },
+  // Que una comarca se vacíe es de las cosas más contables que hay: se ve en
+  // las casas cerradas mucho antes que en ningún padrón.
+  { id: "emigra", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "emigra") ? 7 : 0),
+    huecos: (s, c) => ({ zona: (((c.vivo || {}).hechos || []).find((h) => h.t === "emigra") || {}).prov || "el interior" }),
+    fr: ["Se va la gente de {zona}: (quedan los viejos y las casas cerradas|se van los que pueden y los que no, también|el que se marcha manda a buscar al hermano al año siguiente)",
+      "En {zona} (se cierran escuelas por falta de niños|hay más ovejas que vecinos|la misa de domingo cabe en tres bancos)",
+      "{zona} pierde vecinos (todos los años, de a poco|de golpe, después del mal año|sin que nadie lo declare), y (nadie sabe cómo pararlo|se habla de pararlo y no se hace nada)",
+      "Salen carros de {zona} camino de donde sea [y no vuelve ninguno]"] },
+  { id: "inmigra", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "inmigra") ? 6 : 0),
+    huecos: (s, c) => ({ zona: (((c.vivo || {}).hechos || []).find((h) => h.t === "inmigra") || {}).prov || "la capital" }),
+    fr: ["Llega gente a {zona} (de todas partes|más de la que cabe|con lo puesto): (se levantan barrios donde había huerta|suben los alquileres antes que los jornales|los de siempre miran mal a los de ahora)",
+      "No para de llegar gente a {zona}; (nadie los cuenta|el concejo pide que dejen de venir y siguen viniendo)",
+      "En {zona} se habla ya con tres acentos distintos [y se reza de dos maneras]"] },
   { id: "humo", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "humo") ? 7 : 0),
     huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "la capital" }),
     fr: ["No se ve el cielo sobre {zona}: (el humo de las fábricas se queda entre las casas|hay días que hay que encender las luces a mediodía|la ropa tendida amanece gris)",
