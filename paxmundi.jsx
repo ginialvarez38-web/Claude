@@ -121,7 +121,9 @@ const CARDINALES = ["del Norte", "del Sur", "de Oriente", "de Poniente", "Alta",
 // vivir sin cambiar cuánta gente cabe en total.
 function fertProv(p) {
   const t = TERRENOS[p.terreno] || TERRENOS.llanura;
-  const a = ambiente(p);
+  // el ambiente de hoy: si el clima derivó o se taló el monte, la tierra ya no
+  // es la que era y la cosecha tiene que notarlo
+  const a = ambDe(p);
   const clima = a && BIOMAS[a.bioma] ? 0.35 + 0.65 * BIOMAS[a.bioma].fert : 1;
   // El río vale poco donde ya llueve y lo vale todo donde no: el regadío de
   // un río exótico es lo que hace que un desierto dé dos cosechas.
@@ -1166,7 +1168,12 @@ function diasHelados(amb) {
 function factorCampania(reparto, amb) {
   const frio = amb && amb.tInvierno < -3 ? 0.55 : 0.78;
   const barro = amb && amb.lluvia > 900 ? 0.80 : 0.92;
-  return reparto[0] * frio + reparto[1] * barro + reparto[2] * 1.10 + reparto[3] * 0.95;
+  const estacion = reparto[0] * frio + reparto[1] * barro + reparto[2] * 1.10 + reparto[3] * 0.95;
+  // Y por dónde se camina. La selva y el pantano se tragan un ejército y la
+  // pradera lo deja correr: ese número estaba escrito en la tabla de biomas
+  // desde el primer día y no lo leía nadie.
+  const paso = amb && BIOMAS[amb.bioma] ? BIOMAS[amb.bioma].mov : 1;
+  return estacion * (0.55 + 0.45 * paso);
 }
 
 // ═══ EL MUNDO CAMBIA AUNQUE NADIE LO TOQUE ═══════════════════
@@ -1196,7 +1203,7 @@ function evolucionarMundo(s, dias, rnd, empuje) {
   let agotados = [];
 
   const nuevas = provs.map((p) => {
-    const a = ambiente(p);
+    const a = ambDe(p);
     if (!a) return p;
     const natural = BOSQUE_NATURAL[a.bioma] != null ? BOSQUE_NATURAL[a.bioma] : 0.3;
     // presión: cuánta gente vive de esa tierra, más lo que se lleva la
@@ -1287,6 +1294,12 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     if (p.humo && p.humo.aire === c.aire && p.humo.agua === c.agua && p.campo === campo) return p;
     return { ...p, humo: c, campo };
   });
+  // Al final de todo: el ambiente de hoy, con el clima ya derivado, el bosque
+  // ya talado y el humo ya contado. Va último porque depende de los tres.
+  const refresco = refrescarAmbiente(conCiudad, { ...s, mundo: { anomalia } }, anios);
+  const conAmbiente = refresco.provincias;
+  for (const h of refresco.hechos) hechos.push(h);
+
   const sucio = conCiudad.length ? enojo / conCiudad.length : 0;
   const peorAgua = conCiudad.reduce((m, q) => Math.max(m, (q.humo || {}).agua || 0), 0);
   // Igual que con el bosque: la suciedad no es noticia todos los años, es
@@ -1304,13 +1317,13 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     nuevaAguaDicha = peorAgua;
   } else if (aguaDicha - peorAgua > 0.15) nuevaAguaDicha = peorAgua;
   const rangoAntes = rangoCiudad(mayorCiudad(nuevas)).id;
-  const rangoAhora = rangoCiudad(mayorCiudad(conCiudad)).id;
+  const rangoAhora = rangoCiudad(mayorCiudad(conAmbiente)).id;
   if (rangoAntes !== rangoAhora) {
-    const mayor = conCiudad.reduce((a, b) => (((b.ciudad || {}).pob || 0) > ((a.ciudad || {}).pob || 0) ? b : a));
+    const mayor = conAmbiente.reduce((a, b) => (((b.ciudad || {}).pob || 0) > ((a.ciudad || {}).pob || 0) ? b : a));
     hechos.push({ t: "urbe", prov: mayor.nombre, rango: rangoCiudad((mayor.ciudad || {}).pob).n });
   }
 
-  return { provincias: conCiudad, reservas: { ...(s.reservas || {}), ...gasto },
+  return { provincias: conAmbiente, reservas: { ...(s.reservas || {}), ...gasto },
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
                     humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha },
            // lo que la suciedad se cobra: gente y paciencia
@@ -1556,7 +1569,7 @@ function tirarDesastres(provs, anio, dias, rnd) {
   const anios = dias / 365;
   const hechos = [];
   const nuevas = provs.map((p) => {
-    const a = ambiente(p);
+    const a = ambDe(p);
     if (!a) return p;
     for (const d of DESASTRES) {
       const pr = d.riesgo(p, a) * anios;
@@ -1685,7 +1698,7 @@ function movilidad(stats, provs) {
 // trabajar y poder llegar; lo que espanta es el humo, la ruina reciente y que
 // ya no quepa nadie más.
 function atractivoDe(p) {
-  const a = ambiente(p);
+  const a = ambDe(p);
   if (!a) return 0.5;
   let q = 0.25 + (a.habitabilidad / 100) * 0.75;
   // la ciudad tira aunque sea insalubre: es donde está el trabajo
@@ -1888,6 +1901,110 @@ function explorar(provs, s, dias, rnd, empuje) {
 function yacimientosConocidos(p, anio) {
   const hallado = new Set(p.hallado || []);
   return yacimientosVisibles(p, anio).filter((y) => hallado.has(y.id));
+}
+
+// ═══ EL AMBIENTE QUE CAMBIA ══════════════════════════════════
+// `ambiente()` es una caché estática por provincia, y tiene que serlo: la
+// latitud no cambia, la altura tampoco, y derivar el mundo entero cuesta lo
+// suyo. El problema es que eso dejó cuatro cosas calculadas y sin usar.
+//
+// El clima derivaba un grado en cien años de industria y ninguna provincia lo
+// notaba. El bosque se talaba y no dejaba de llover. El humo se acumulaba y la
+// habitabilidad seguía siendo la del día uno. Se calculaba la pendiente y el
+// movimiento por bioma y no los leía nadie.
+//
+// Esta es la capa de encima: lo mismo que dice el ambiente estático, corregido
+// por lo que pasó en la partida. Se recalcula una vez por turno y se deja
+// escrita en la provincia, como la secuela y la suciedad.
+
+// El calentamiento no reparte igual. Los polos se calientan más del doble que
+// el trópico —es de lo más robusto que hay en climatología— y por eso lo
+// primero que se ve de un grado global es que se deshiela el norte, no que
+// haga calor en Sevilla.
+const amplifPolar = (lat) => 1 + (Math.abs(lat) / 90) * 1.7;
+
+// Un bosque no solo recibe lluvia: la devuelve. En una selva, buena parte del
+// agua que cae la evaporó la propia selva unos días antes, así que talarla
+// seca la comarca. Es lo que pide el documento —«la deforestación modifica las
+// lluvias»— y además cierra el círculo: menos bosque, menos lluvia, y con
+// menos lluvia el bosque cuesta más de recuperar.
+function lluviaConBosque(base, bioma, bosque) {
+  const natural = BOSQUE_NATURAL[bioma] != null ? BOSQUE_NATURAL[bioma] : 0.3;
+  if (natural < 0.25) return base.lluvia;             // donde no hay monte, no hay nada que perder
+  const hoy = bosque != null ? bosque : natural;
+  const perdido = acotar((natural - hoy) / natural, 0, 1);
+  return base.lluvia * (1 - perdido * 0.26);
+}
+
+// La habitabilidad que el documento describe: la de siempre más contaminación,
+// infraestructura y seguridad. Antes se calculaba una vez con lo que la
+// geografía traía puesto y no se movía en toda la partida.
+function habitabilidadViva(base, p, cl, bioma) {
+  let h = habitabilidadDe(cl, bioma, base.altura, base.agua, p.costera, p.rio);
+  const humo = p.humo || {};
+  h -= (humo.agua || 0) * 16;                         // el agua sucia mata sin que se note
+  h -= (humo.aire || 0) * 9;
+  h += viaDe(p).soc * 8;                              // estar comunicado es vivir mejor
+  if (p.secuela != null && p.secuela < 1) h -= (1 - p.secuela) * 40;
+  if (p.ocupada) h -= 12;                             // vivir en tierra tomada no es vivir
+  return Math.round(acotar(h, 0, 100));
+}
+
+// El ambiente de una provincia hoy, no el del día que empezó la partida.
+function ambienteVivo(p, s) {
+  const base = ambiente(p);
+  if (!base) return null;
+  const anom = (s.mundo && s.mundo.anomalia) || 0;
+  const tMedia = +(base.tMedia + anom * amplifPolar(base.lat)).toFixed(1);
+  const dt = tMedia - base.tMedia;
+  const lluvia = Math.round(lluviaConBosque(base, base.bioma, p.bosque));
+  const cl = { tMedia, lluvia, amplitud: base.amplitud,
+    tVerano: +(base.tVerano + dt).toFixed(1), tInvierno: +(base.tInvierno + dt).toFixed(1) };
+  const bioma = biomaDe(tMedia, lluvia, base.altura, p.terreno, base.amplitud, base.lat);
+  return { ...base, ...cl, bioma,
+    // el mar sube: lo que pierde una provincia costera es justo lo que más
+    // vale de ella, que es la orilla donde está todo construido
+    marSube: p.costera && anom > 0.6 ? acotar((anom - 0.6) * 0.09, 0, 0.35) : 0,
+    habitabilidad: habitabilidadViva(base, p, cl, bioma) };
+}
+// Lo que la simulación lee en el camino caliente: ya calculado y guardado.
+const ambDe = (p) => (p && p._vivo) || ambiente(p);
+
+// Recalcula la capa viva de todas las provincias y avisa de lo que cambió de
+// naturaleza. Que una provincia deje de ser glaciar o pase a ser desierto no
+// es un número que se mueve: es otra tierra.
+//
+// Con una salvedad que resultó importante: la vegetación no sigue al clima el
+// mismo año. Los umbrales de Whittaker son cortes limpios, así que una décima
+// de grado bastaba para que dieciocho de veintiocho provincias rusas cambiaran
+// de bioma a la vez. Un robledal no se muere el año que pasa la isoterma:
+// aguanta, deja de reproducirse, y tarda una generación larga en ceder. Así
+// que el clima empuja y la tierra tarda; y de paso, si el clima vuelve, la
+// tierra no se había ido.
+const INERCIA_BIOMA = 30;                          // años de presión sostenida
+function refrescarAmbiente(provs, s, anios) {
+  const hechos = [];
+  const paso = anios || 1;
+  const nuevas = provs.map((p) => {
+    const v = ambienteVivo(p, s);
+    if (!v) return p;
+    const actual = p.biomaReal || ambiente(p).bioma;
+    const presion = v.bioma !== actual ? (p.biomaPresion || 0) + paso : 0;
+    let real = actual, resto = presion;
+    if (presion >= INERCIA_BIOMA) {
+      real = v.bioma;
+      resto = 0;
+      const seca = (BIOMAS[real].fert || 0) < (BIOMAS[actual].fert || 0);
+      hechos.push({ t: "bioma", prov: p.nombre, de: BIOMAS[actual].n, a: BIOMAS[real].n,
+        cual: actual === "glaciar" ? "deshielo" : seca ? "seca" : "verdea" });
+    }
+    return { ...p, biomaReal: real, biomaPresion: resto,
+             // lo que la simulación lee es la tierra que hay, no la que el
+             // clima pide: por eso el bioma del ambiente vivo es el realizado
+             _vivo: { ...v, biomaClima: v.bioma, bioma: real,
+                      habitabilidad: habitabilidadViva(ambiente(p), p, v, real) } };
+  });
+  return { provincias: nuevas, hechos };
 }
 
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
@@ -3190,7 +3307,7 @@ function amortiguacionCosecha(ciencia) {
 // llueve en el delta y se seca la meseta. De ahí sale el hambre local.
 function cosechaProvincia(p, cosNacional, ciencia) {
   const am = amortiguacionCosecha(ciencia);
-  const a = ambiente(p);
+  const a = ambDe(p);
   // Dónde se juega el año no es lo mismo en todas partes. Donde llueve poco,
   // la cosecha es una lotería: la diferencia entre 300 y 400 milímetros es la
   // diferencia entre comer y no comer, y esa diferencia la decide el cielo.
@@ -6028,7 +6145,12 @@ const EFECTOS = {
 // Las obras públicas comparten forma: cuestan, tardan y contentan a alguien.
 function obra(c, spec) {
   const r = vacio(), i = c.inten;
-  const costo = Math.round(c.ingreso * 0.35 * i);
+  // Levantar un puente en un valle y levantarlo en una garganta no cuestan lo
+  // mismo. La pendiente se calculaba desde el principio y no entraba en
+  // ninguna cuenta; ahora una obra en la sierra sale hasta la mitad más cara.
+  const destino = c.o.objetivos.provincia || c.provCapital;
+  const cuesta = destino ? (ambDe(destino) || {}).pendiente || 0 : 0;
+  const costo = Math.round(c.ingreso * 0.35 * i * (1 + cuesta * 0.55));
   if (c.oroDisp < costo * 0.4) { r.fallo = true; r.hechos.push({ t: "sin_oro" }); return r; }
   r.oro = -costo;
   for (const [k, v] of Object.entries(spec.d)) sumar(r, "d", k, Math.round(v * i));
@@ -6309,7 +6431,24 @@ function elenco(s, h, rnd, mem) {
                    : (s.gobierno || {}).forma === "Teocracia" ? "el sumo sacerdote"
                    : (s.gobierno || {}).forma === "Imperio" ? "el emperador" : "el rey";
                  M.sob = true; return nom; },
-    sobTit: `${(s.gobierno || {}).forma === "República" ? "El cónsul" : (s.gobierno || {}).forma === "Teocracia" ? "El sumo sacerdote" : (s.gobierno || {}).forma === "Imperio" ? "El emperador" : "El rey"} ${nom}`,
+    // Siete de las cuarenta aperturas empiezan por el soberano, así que si
+    // siempre se le nombra igual, seis de cada cuarenta turnos abren con las
+    // mismas tres palabras aunque la frase siga distinta. Un cronista no
+    // escribe «El rey Alfonso VIII» cuarenta veces: escribe el nombre a secas,
+    // el cargo a secas, y de vez en cuando «nuestro rey». Se rotan en bolsa
+    // por turno, como los ministros, y si el nombre ya salió en el párrafo se
+    // cae al cargo, que es lo que hace cualquiera que escriba.
+    sobTit: () => {
+      const tit = (s.gobierno || {}).forma === "República" ? "cónsul"
+        : (s.gobierno || {}).forma === "Teocracia" ? "sumo sacerdote"
+        : (s.gobierno || {}).forma === "Imperio" ? "emperador" : "rey";
+      const formas = nom === "el soberano" ? [`El ${tit}`, "El soberano"]
+        : [`El ${tit} ${nom}`, nom, `El ${tit}`, `Nuestro ${tit}`, "El soberano"];
+      let f = deBolsa("sobTit", formas, s.turno || 0);
+      if (M.sob && f.includes(nom)) f = `El ${tit}`;
+      if (f.includes(nom)) M.sob = true;
+      return f;
+    },
     edad: sob.nacio != null ? String(s.anio - sob.nacio) : "cuarenta",
     reino: (s.nacion || {}).nombre || "el reino",
     anio: fmtAnio(s.anio),
@@ -7439,6 +7578,24 @@ const INFORMES = [
   // Encontrar algo es de las pocas noticias buenas que puede dar un año sin
   // órdenes, y merece contarse distinto según qué sea: no se anuncia igual una
   // veta de hierro que una ciudad de la que solo quedaba el nombre.
+  // Que una provincia cambie de bioma es la consecuencia más visible del
+  // cambio climático y la que más cuesta creer hasta que se ve: la tierra que
+  // sostuvo a una comarca durante siglos deja de sostenerla.
+  { id: "bioma", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "bioma") ? 14 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "bioma") || {};
+      return { zona: h.prov || "el norte", tema: (h.a || "otra cosa").toLowerCase(),
+        obra: (h.de || "lo que era").toLowerCase(), cual: h.cual };
+    },
+    fr: ["{zona} deja de ser {obra} y pasa a ser {tema}"], porCual: {
+      deshielo: ["Se retira el hielo de {zona}: (aparece tierra que nadie había visto|se descubren piedras bajo el glaciar|hay pasto donde había ventisquero) [y hay quien va a poner ganado]",
+        "El hielo de {zona} ya no vuelve en invierno. (Los viejos no lo habían visto nunca|Se discute si es buena noticia|Ahora se puede pasar por donde no se pasaba)"],
+      seca: ["{zona} se seca: (donde había {obra} hay ahora {tema}|el pozo que nunca falló empieza a fallar|se abandona el secano y no se vuelve)",
+        "Retrocede {obra} en {zona} y avanza {tema}, (un poco más cada año|de una generación a la otra|sin que se sepa hasta dónde)",
+        "Ya no se siembra en {zona} lo que se sembraba: la tierra es otra"],
+      verdea: ["Verdea {zona}: (donde había {obra} crece {tema}|llueve donde no llovía|se roturan tierras que no daban nada)",
+        "{zona} da lo que no daba, y (nadie termina de fiarse|ya hay quien se muda para allá)"],
+    } },
   { id: "hallazgo", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "hallazgo") ? 12 : 0),
     huecos: (s, c) => {
       const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "hallazgo") || {};
