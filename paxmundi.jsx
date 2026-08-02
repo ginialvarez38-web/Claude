@@ -131,7 +131,7 @@ function fertProv(p) {
   // después —o dando de comer, si fue ceniza—. Viene ya calculado en la
   // provincia porque acá no se sabe en qué año estamos, y esta función se
   // llama cientos de veces por turno: no es sitio para averiguarlo.
-  return t.fert * clima * agua * (p.costera ? 1.06 : 1) * (p.secuela || 1);
+  return t.fert * clima * agua * (p.costera ? 1.06 : 1) * (p.secuela || 1) * (p.campo || 1);
 }
 // El techo nacional se reparte por fertilidad: la suma es idéntica a la de antes.
 function techoProvincia(p, provincias, ciencia) {
@@ -1268,7 +1268,36 @@ function evolucionarMundo(s, dias, rnd) {
     const f = sec ? +sec.fert.toFixed(3) : 1;
     return (p.secuela || 1) === f ? p : { ...p, secuela: f };
   });
-  const conCiudad = evolucionarCiudades(conSecuela, s.stats, dias);
+  const conCiudad0 = evolucionarCiudades(conSecuela, s.stats, dias);
+  // La suciedad se mide con las ciudades ya crecidas —es su causa— y se deja
+  // escrita en la provincia, igual que la secuela: el resto del juego la lee
+  // sin volver a calcularla.
+  let muertos = 0, enojo = 0;
+  const conCiudad = conCiudad0.map((p) => {
+    const c = contaminacionDe(p, s.stats);
+    const d = dañoContaminacion(c);
+    muertos += (p.poblacion || 0) * d.mortalidad * anios;
+    enojo += d.descontento;
+    const campo = +d.campo.toFixed(3);
+    if (p.humo && p.humo.aire === c.aire && p.humo.agua === c.agua && p.campo === campo) return p;
+    return { ...p, humo: c, campo };
+  });
+  const sucio = conCiudad.length ? enojo / conCiudad.length : 0;
+  const peorAgua = conCiudad.reduce((m, q) => Math.max(m, (q.humo || {}).agua || 0), 0);
+  // Igual que con el bosque: la suciedad no es noticia todos los años, es
+  // noticia cuando empeora. Si no, la crónica de un reino industrial no habla
+  // de otra cosa durante un siglo. Y el enojo del pueblo va con la noticia y
+  // no con el año: es la vez que empeora lo que saca a la gente a la calle, no
+  // el hecho de que siga igual de mal.
+  const humoDicho = (s.mundo && s.mundo.humoDicho != null) ? s.mundo.humoDicho : 0;
+  const aguaDicha = (s.mundo && s.mundo.aguaDicha != null) ? s.mundo.aguaDicha : 0;
+  let nuevoHumoDicho = humoDicho, nuevaAguaDicha = aguaDicha, empeora = false;
+  if (sucio - humoDicho > 0.3) { hechos.push({ t: "humo", n: +sucio.toFixed(1) }); nuevoHumoDicho = sucio; empeora = true; }
+  else if (humoDicho - sucio > 0.4) nuevoHumoDicho = sucio;      // si se limpia, vuelve a poder contarse
+  if (peorAgua > 0.4 && peorAgua - aguaDicha > 0.12) {
+    hechos.push({ t: "aguasucia", n: +peorAgua.toFixed(2) });
+    nuevaAguaDicha = peorAgua;
+  } else if (aguaDicha - peorAgua > 0.15) nuevaAguaDicha = peorAgua;
   const rangoAntes = rangoCiudad(mayorCiudad(nuevas)).id;
   const rangoAhora = rangoCiudad(mayorCiudad(conCiudad)).id;
   if (rangoAntes !== rangoAhora) {
@@ -1277,7 +1306,12 @@ function evolucionarMundo(s, dias, rnd) {
   }
 
   return { provincias: conCiudad, reservas: { ...(s.reservas || {}), ...gasto },
-           mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho }, hechos };
+           mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
+                    humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha },
+           // lo que la suciedad se cobra: gente y paciencia
+           muertos: Math.round(muertos),
+           fac: empeora ? { pueblo: -Math.min(4, Math.round(1 + sucio)) } : null,
+           hechos };
 }
 const mayorCiudad = (provs) =>
   (provs || []).reduce((m, p) => Math.max(m, (p.ciudad && p.ciudad.pob) || 0), 0);
@@ -1537,6 +1571,78 @@ function tirarDesastres(provs, anio, dias, rnd) {
     return p;
   });
   return { provincias: nuevas, hechos };
+}
+
+// ═══ CONTAMINACIÓN ═══════════════════════════════════════════
+// Dos suciedades distintas, con historias opuestas, y esa oposición es todo el
+// contenido de esta capa.
+//
+// El agua sucia es un problema viejo. Una ciudad medieval apretada bebe de
+// donde tira, y se muere de tifus y de cólera sin saber por qué. Cuanta más
+// gente junta, peor; y se arregla con alcantarillado y con saber que el agua
+// contagia. Es una curva que baja con el siglo.
+//
+// El humo es un problema nuevo. No existe hasta que hay carbón, empeora
+// durante un siglo largo, y se empieza a limpiar cuando el mismo desarrollo
+// que lo produjo paga por quitarlo. El aire de Londres estaba peor en 1890 que
+// en 1990. Es una curva que sube y después baja.
+//
+// Un juego donde la contaminación fuera una sola barra que crece perdería
+// justamente lo único que hay que entender de esto.
+
+// Cuánto humo produce el reino según lo que sabe hacer. Antes del carbón, casi
+// nada; el máximo está en plena industria pesada; después, la misma técnica
+// que lo creó lo va limpiando sin que desaparezca.
+function intensidadHumo(tec) {
+  const t = (tec || 0);
+  if (t < 48) return 0;
+  const sube = acotar((t - 48) / 32, 0, 1);
+  const limpia = acotar((t - 84) / 16, 0, 1);
+  return acotar(sube * (1 - limpia * 0.72), 0, 1);
+}
+// Y cuánto sabe limpiar el agua que bebe. Al principio no sabe nada: se bebe
+// del mismo río donde se tira todo.
+function saneamiento(tec) {
+  return acotar(((tec || 0) - 55) / 32, 0, 1);
+}
+
+// La suciedad de una provincia concreta. El aire se lo lleva el viento de la
+// costa y lo fija el valle cerrado; el agua se limpia sola si hay caudal y se
+// pudre si no lo hay.
+function contaminacionDe(p, stats) {
+  const a = ambiente(p);
+  if (!a) return { aire: 0, agua: 0 };
+  const tec = (stats || {}).tecnologia || 20;
+  const urb = (p.ciudad && p.poblacion ? p.ciudad.pob / p.poblacion : 0);
+  const densidad = acotar(urb * 1.4, 0, 1);
+
+  // el humo se queda donde no corre el aire y donde no hay monte que lo filtre
+  const encajonado = 1 + (a.altura > 900 ? 0.25 : 0) - (p.costera ? 0.28 : 0) - (p.bosque || 0) * 0.20;
+  const mina = Object.keys(a.yacimientos).some((y) => y === "carbon" || y === "petroleo") ? 0.25 : 0;
+  const aire = acotar(intensidadHumo(tec) * (0.35 + 0.9 * densidad + mina) * acotar(encajonado, 0.4, 1.4), 0, 1);
+
+  // el agua: mucha gente junta y poca agua que corra, menos lo que se sepa hacer
+  const caudal = acotar((a.lluvia / 900) + (p.rio ? 0.45 : 0), 0.15, 1.6);
+  const agua = acotar((0.25 + 1.5 * densidad) / caudal * (1 - saneamiento(tec) * 0.92), 0, 1);
+  return { aire: +aire.toFixed(3), agua: +agua.toFixed(3) };
+}
+
+// Lo que la suciedad le hace al reino. Nada de esto es una penalización
+// abstracta: el agua mata gente, el humo enferma y enfada, y la lluvia ácida
+// castiga al campo de alrededor.
+function dañoContaminacion(c) {
+  return {
+    // muertos al año por mil habitantes, más o menos: el cólera de una ciudad
+    // sin alcantarillas se llevaba esto y más
+    mortalidad: c.agua * 0.010 + c.aire * 0.004,
+    // El humo se ve, se huele y se protesta; el agua sucia se sufre callado
+    // hasta que alguien descubre por qué. Es presión sostenida, no un golpe:
+    // con seis puntos por año el pueblo llegaba a cero en una década y ahí se
+    // quedaba, que no es enojo sino una barra rota.
+    descontento: c.aire * 2.0,
+    // lluvia ácida y suelo cansado, solo cuando el humo es de verdad espeso
+    campo: 1 - Math.max(0, c.aire - 0.45) * 0.30,
+  };
 }
 
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
@@ -5720,6 +5826,19 @@ function aplicarEfectos(n, ef, rnd) {
     e.provincias = ef.vivo.provincias;
     e.reservas = ef.vivo.reservas;
     e.mundo = ef.vivo.mundo;
+    // La suciedad mata antes de que nadie sepa por qué: se descuenta acá y no
+    // como una penalización de la ficha, porque son personas, no un modificador.
+    if (ef.vivo.muertos > 0) {
+      const tot = poblacionTotal(e.provincias) || 1;
+      e.provincias = e.provincias.map((p) => ({ ...p,
+        poblacion: Math.max(20, p.poblacion - ef.vivo.muertos * (p.poblacion / tot)) }));
+    }
+    if (ef.vivo.fac) {
+      e.facciones = { ...e.facciones };
+      // suelo del enojo por suciedad: puede amargar al pueblo, no aniquilarlo
+      for (const [k, v] of Object.entries(ef.vivo.fac))
+        e.facciones[k] = acotar((e.facciones[k] ?? 50) + v, 22, 100);
+    }
   }
   if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
   if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
@@ -7031,6 +7150,18 @@ const INFORMES = [
       arena: ["El viento levanta el desierto sobre {zona} (y no se ve a tres pasos|hasta enterrar los caminos|durante días enteros)",
         "Se come la arena las orillas de {zona}, un poco más cada año"],
     } },
+  { id: "humo", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "humo") ? 7 : 0),
+    huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "la capital" }),
+    fr: ["No se ve el cielo sobre {zona}: (el humo de las fábricas se queda entre las casas|hay días que hay que encender las luces a mediodía|la ropa tendida amanece gris)",
+      "En {zona} (se tose distinto que en el campo|los médicos empiezan a escribir sobre el aire|se muere de pecho a los cuarenta)",
+      "El humo de {zona} (llega a dos leguas|se posa en los sembrados y los quema|no se va ni con el viento del norte), y ya hay quien pide que algo se haga",
+      "Se cuenta como progreso lo que en {zona} se respira todos los días"] },
+  { id: "aguasucia", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "aguasucia") ? 6 : 0),
+    huecos: (s, c) => ({ zona: ((s.provincias || []).slice().sort((a, b) =>
+      ((b.humo || {}).agua || 0) - ((a.humo || {}).agua || 0))[0] || {}).nombre || "la capital" }),
+    fr: ["Vuelve la fiebre a {zona} (con el calor, como todos los años|por los barrios de abajo|y se lleva sobre todo a los niños); (nadie sabe de dónde sale|se culpa al aire, que es lo que se cree)",
+      "En {zona} se bebe de donde se tira: (mueren más de lo que se anota|el pozo del barrio bajo tiene mala fama y con razón)",
+      "Se cierran los pozos de {zona} sin saber muy bien por qué, y (algo mejora|la gente sigue yendo al río)"] },
   { id: "urbe", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "urbe") ? 8 : 0),
     huecos: (s, c) => {
       const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "urbe") || {};
