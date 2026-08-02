@@ -1250,15 +1250,137 @@ function evolucionarMundo(s, dias, rnd) {
     nuevoClimaDicho = anomalia;
   }
 
-  return { provincias: nuevas, reservas: { ...(s.reservas || {}), ...gasto },
+  // Las ciudades crecen en el mismo paso: son parte de cómo cambia el mundo,
+  // no una consecuencia de lo que el jugador ordenó este turno.
+  const conCiudad = evolucionarCiudades(nuevas, s.stats, dias);
+  const rangoAntes = rangoCiudad(mayorCiudad(nuevas)).id;
+  const rangoAhora = rangoCiudad(mayorCiudad(conCiudad)).id;
+  if (rangoAntes !== rangoAhora) {
+    const mayor = conCiudad.reduce((a, b) => (((b.ciudad || {}).pob || 0) > ((a.ciudad || {}).pob || 0) ? b : a));
+    hechos.push({ t: "urbe", prov: mayor.nombre, rango: rangoCiudad((mayor.ciudad || {}).pob).n });
+  }
+
+  return { provincias: conCiudad, reservas: { ...(s.reservas || {}), ...gasto },
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho }, hechos };
 }
+const mayorCiudad = (provs) =>
+  (provs || []).reduce((m, p) => Math.max(m, (p.ciudad && p.ciudad.pob) || 0), 0);
+
 // Lo que queda de un yacimiento en esta partida, que no es lo que había.
 function reservaActual(s, p, id) {
   const k = p.id + "|" + id;
   if (s.reservas && s.reservas[k] != null) return s.reservas[k];
   const a = ambiente(p);
   return (a && a.yacimientos[id]) || 0;
+}
+
+// ═══ CIUDADES Y CAMINOS ══════════════════════════════════════
+// El mapa ya tenía siete mil trescientas ciudades reales dibujadas, pero eran
+// pintura: ninguna crecía, ninguna pesaba y ninguna se podía perder. Y las
+// provincias del reino tenían población pero no tenían dónde vivía esa gente.
+//
+// Una ciudad acá es la cabeza de su provincia y crece por dos motivos
+// distintos: porque crece la provincia, y porque la época permite que más
+// gente deje de arar. Eso segundo es lo que separa un mundo de aldeas de un
+// mundo de metrópolis, y no depende de la voluntad de nadie: hasta que no hay
+// excedente agrario y transporte, una ciudad de cien mil habitantes es
+// físicamente imposible de alimentar.
+
+// Los rangos son absolutos: cien mil habitantes son una gran ciudad en 1200 y
+// en 1900. Lo que cambia con el siglo no es el umbral sino cuántas hay.
+const RANGOS = [
+  { id: "aldea",      n: "Aldea",       desde: 0,    ico: "·" },
+  { id: "villa",      n: "Villa",       desde: 5,    ico: "▫" },
+  { id: "ciudad",     n: "Ciudad",      desde: 20,   ico: "▪" },
+  { id: "granCiudad", n: "Gran ciudad", desde: 100,  ico: "◼" },
+  { id: "metropoli",  n: "Metrópolis",  desde: 500,  ico: "⬢" },
+  { id: "megapolis",  n: "Megápolis",   desde: 3000, ico: "⬣" },
+];
+function rangoCiudad(miles) {
+  let r = RANGOS[0];
+  for (const q of RANGOS) if ((miles || 0) >= q.desde) r = q;
+  return r;
+}
+// Qué proporción de la gente puede vivir sin cultivar. Sube con lo que el
+// reino sabe, y sube despacio al principio y de golpe con la industria: es la
+// curva de la urbanización real, del cinco por ciento al sesenta y pico.
+function tasaUrbana(stats) {
+  const t = acotar(((stats || {}).tecnologia || 20) / 100, 0, 1);
+  return acotar(0.04 + 0.62 * t * t, 0.03, 0.7);
+}
+// Por qué una ciudad crece donde crece. Nunca es casualidad: un vado, un
+// puerto natural, tierra que da de comer alrededor, y el hecho de ser sede
+// del poder, que atrae más que cualquier otra cosa.
+function sitioUrbano(p) {
+  const a = ambiente(p);
+  let q = 0.35 + (a ? a.habitabilidad / 220 : 0.2);
+  if (p.rio) q += 0.30;                       // vado, molino, agua y transporte
+  if (p.costera) q += 0.26;                   // puerto
+  if (p.capital) q += 0.55;                   // la corte come, y da de comer
+  if (a && Object.keys(a.yacimientos).length) q += 0.12;
+  if (a && a.altura > 1800) q -= 0.18;        // a esa altura no se funda una capital
+  return Math.max(0.08, q);
+}
+// Reparte la población urbana del reino entre sus provincias según el sitio, y
+// mueve cada ciudad hacia lo que le toca. No salta: una ciudad tarda
+// generaciones en volverse otra cosa, y en vaciarse también.
+function evolucionarCiudades(provs, stats, dias) {
+  if (!provs || !provs.length) return provs;
+  const anios = dias / 365;
+  const urbana = tasaUrbana(stats);
+  const pesos = provs.map(sitioUrbano);
+  const suma = pesos.reduce((a, b) => a + b, 0) || 1;
+  const pobTotal = poblacionTotal(provs);
+  const tasa = Math.min(0.9, 0.055 * Math.max(0.4, Math.min(4, anios)));
+  return provs.map((p, i) => {
+    // el destino es su parte del total urbano, pero ninguna ciudad puede
+    // pasarse de la gente que hay en su propia provincia
+    const meta = Math.min((p.poblacion || 0) * 0.82, pobTotal * urbana * (pesos[i] / suma));
+    const hoy = p.ciudad && p.ciudad.pob != null ? p.ciudad.pob : meta;
+    const pob = +(hoy + (meta - hoy) * tasa).toFixed(2);
+    if (p.ciudad && Math.abs(p.ciudad.pob - pob) < 0.01) return p;
+    return { ...p, ciudad: { pob } };
+  });
+}
+
+// ——— los caminos ————————————————————————————————————————————
+// La infraestructura existe o no existe, y si no existe, el grano no llega.
+// Una provincia sin camino a la capital se muere de hambre con el granero
+// nacional lleno, que es exactamente lo que pasaba antes del ferrocarril.
+const VIAS = [
+  { id: "senda",       n: "senda",       tec: 0,  soc: 0.10 },
+  { id: "calzada",     n: "calzada",     tec: 25, soc: 0.35 },
+  { id: "carretera",   n: "carretera",   tec: 55, soc: 0.62 },
+  { id: "ferrocarril", n: "ferrocarril", tec: 72, soc: 1.00 },
+];
+// El mejor camino que la época sabe construir: de nada sirve decretar un
+// ferrocarril en 1300.
+function viaMaxima(stats) {
+  let n = 0;
+  for (let i = 0; i < VIAS.length; i++) if (((stats || {}).tecnologia || 0) >= VIAS[i].tec) n = i;
+  return n;
+}
+const viaDe = (p) => VIAS[acotar(Math.round(p && p.via != null ? p.via : 0), 0, VIAS.length - 1)];
+// Cuánto del excedente nacional alcanza a esta provincia. Es el socorro que ya
+// existía, pero repartido: antes el reino entero tenía un solo número y una
+// provincia aislada se salvaba igual que la capital.
+function socorroEn(p, ciencia) {
+  return alcanceSocorro(ciencia) * (0.28 + 0.72 * viaDe(p).soc);
+}
+// Lo que la red le agrega al reino: comercio interior. Una provincia bien
+// enlazada vende lo suyo; una aislada se lo come.
+function bonoRed(provs) {
+  if (!provs || !provs.length) return 1;
+  const m = provs.reduce((a, p) => a + viaDe(p).soc, 0) / provs.length;
+  return 1 + m * 0.22;
+}
+// Y lo que le agrega la ciudad: la gente que no cultiva paga impuestos de otra
+// manera, y sobre todo es la que se puede gravar.
+function bonoUrbano(provs) {
+  const pob = poblacionTotal(provs);
+  if (!pob) return 1;
+  const urb = (provs || []).reduce((a, p) => a + ((p.ciudad && p.ciudad.pob) || 0), 0);
+  return 1 + acotar(urb / pob, 0, 0.7) * 0.55;
 }
 
 // ═══ MAPA DEL MUNDO ═════════════════════════════════════════
@@ -2280,6 +2402,17 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     {yac.map((y) => y.n.toLowerCase()).join(" · ")}
                   </div>
                 )}
+                {sel.ciudad && sel.ciudad.pob >= 1 && (
+                  <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.ink }}>
+                    {rangoCiudad(sel.ciudad.pob).ico} {rangoCiudad(sel.ciudad.pob).n.toLowerCase()}
+                    <span style={{ color: C.muted }}> · {fmtPob(sel.ciudad.pob)}</span>
+                  </div>
+                )}
+                {sel.via > 0 && (
+                  <div style={{ fontSize: 10.5, fontFamily: mono, lineHeight: 1.5, color: C.muted }}>
+                    con {viaDe(sel).n}
+                  </div>
+                )}
               </>
             );
           })()}
@@ -2639,11 +2772,15 @@ function capacidadEconomica(ciencia) {
   return { fiscal, renta, fuentes };
 }
 // Ingreso anual del estado: lo que puede cobrar sobre su riqueza, más lo que su saber genera.
-function ingresoAnualDe(stats, gobierno, ciencia, poblacion, vecinos, factorias, ejercito) {
+function ingresoAnualDe(stats, gobierno, ciencia, poblacion, vecinos, factorias, ejercito, provincias) {
   const cap = capacidadEconomica(ciencia);
   const base = riquezaGravable(stats, poblacion ?? 4000) + bonoGobierno(gobierno);
   const ext = comercioExterior(vecinos, ciencia, stats, factorias, ejercito).total;
-  return Math.round(base * cap.fiscal + cap.renta + ext);
+  // Dos cosas que antes no entraban en la cuenta: que la gente viva en ciudad
+  // —lo urbano se grava y lo rural se esconde— y que las provincias estén
+  // enlazadas, porque sin camino no hay comercio interior que gravar.
+  const red = provincias ? bonoRed(provincias) * bonoUrbano(provincias) : 1;
+  return Math.round((base * cap.fiscal + cap.renta) * red + ext);
 }
 
 // ═══ EL EJÉRCITO ════════════════════════════════════════════
@@ -4263,7 +4400,7 @@ function turnPrompt(state, accion, dias) {
       facciones: (() => {
         const ctx = { cap: capacidadEconomica(state.ciencia),
           comercio: comercioExterior(state.vecinos, state.ciencia, state.stats, state.factorias, state.ejercito).total,
-          ingreso: ingresoAnualDe(state.stats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito),
+          ingreso: ingresoAnualDe(state.stats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias),
           pob: state.poblacion || 4000, techo: demografiaDe(state.ciencia).techo };
         return estadoFacciones(state, ctx).map((f) =>
           `${f.n}: ${f.satisf < 25 ? "hostil" : f.satisf < 45 ? "descontento" : f.satisf < 70 ? "conforme" : "leal"}` +
@@ -5287,7 +5424,7 @@ const EFECTOS = {
   },
 
   // ——— obras ———
-  caminos: (c) => obra(c, { d: { economia: 5, estabilidad: 2 }, fac: { mercaderes: 8, pueblo: 4 }, t: "caminos" }),
+  caminos: (c) => obra(c, { d: { economia: 5, estabilidad: 2 }, fac: { mercaderes: 8, pueblo: 4 }, t: "caminos", via: true }),
   puerto: (c) => obra(c, { d: { economia: 6, militar: 2 }, fac: { mercaderes: 12 }, t: "puerto" }),
   regadio: (c) => obra(c, { d: { economia: 4 }, fac: { pueblo: 10, nobleza: 3 }, t: "regadio", fert: true }),
   templo: (c) => obra(c, { d: { prestigio: 6, estabilidad: 3 }, fac: { clero: 16, pueblo: 5 }, t: "templo" }),
@@ -5373,6 +5510,10 @@ function obra(c, spec) {
   for (const [k, v] of Object.entries(spec.fac)) sumar(r, "fac", k, Math.round(v * i));
   const p = c.o.objetivos.provincia || c.provCapital;
   if (spec.fert && p) r.prov.push({ id: p.id, riego: true });
+  // Abrir caminos deja camino. Antes esta maniobra movía dos números de la
+  // ficha y no dejaba nada en el mapa: se podían «abrir caminos» diez veces
+  // seguidas y el reino seguía sin un solo camino.
+  if (spec.via && p) r.prov.push({ id: p.id, via: viaMaxima(c.s.stats) });
   r.hechos.push({ t: spec.t, provincia: p });
   return r;
 }
@@ -5445,7 +5586,12 @@ function aplicarEfectos(n, ef, rnd) {
   if (ef.prov && ef.prov.length) {
     e.provincias = e.provincias.map((p) => {
       const c = ef.prov.find((x) => x.id === p.id);
-      return c ? { ...p, ...(c.riego ? { rio: true } : {}), ...(c.fortificada ? { fortificada: true } : {}) } : p;
+      if (!c) return p;
+      // el camino solo sube: un tramo de calzada no se desanda porque el turno
+      // siguiente alguien abra una senda al lado
+      const via = c.via != null ? Math.max(p.via || 0, c.via) : p.via;
+      return { ...p, ...(c.riego ? { rio: true } : {}), ...(c.fortificada ? { fortificada: true } : {}),
+               ...(via != null ? { via } : {}) };
     });
   }
   if (ef.guerra && !e.guerra) {
@@ -6548,7 +6694,7 @@ function motorLocal(s, accion, dias, semilla) {
   const provs = s.provincias || [];
   const pob = poblacionTotal(provs) || s.poblacion || 1;
   const techo = demografiaDe(s.ciencia).techo || 1;
-  const ingreso = Math.max(8, ingresoAnualDe(s.stats, s.gobierno, s.ciencia, pob, s.vecinos, s.factorias, s.ejercito));
+  const ingreso = Math.max(8, ingresoAnualDe(s.stats, s.gobierno, s.ciencia, pob, s.vecinos, s.factorias, s.ejercito, provs));
   const vecs = s.vecinos || [];
   const sumaFert = provs.reduce((acc, x) => acc + fertProv(x), 0) || 1;
   const techoTotal = demografiaDe(s.ciencia).techo;
@@ -6699,6 +6845,14 @@ const INFORMES = [
     fr: ["Los años vienen distintos: (la vendimia se adelanta y nadie sabe por qué|hiela cuando no tocaba|el {tema} llega antes y se queda más)",
       "Los viejos de {zona} dicen que el tiempo ya no es el de antes, y (por una vez tienen razón|esta vez los registros les dan la razón)",
       "Cambia el año agrícola sin que cambie el calendario: (se siembra dos semanas corridas|la siega se adelanta)"] },
+  { id: "urbe", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "urbe") ? 8 : 0),
+    huecos: (s, c) => {
+      const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "urbe") || {};
+      return { zona: h.prov || "la capital", tema: (h.rango || "villa").toLowerCase() };
+    },
+    fr: ["{zona} ya no es lo que era: (se la empieza a llamar {tema}|hay que llamarla {tema} y a nadie le suena raro|es {tema} aunque el fuero siga diciendo otra cosa)",
+      "Crece {zona} más allá de sus muros; (los arrabales ya son media villa|hay barrio nuevo donde había era|se derriba la cerca vieja porque estorba)",
+      "En {zona} no cabe más gente dentro y (se construye hacia afuera|se levanta en altura|los alquileres lo dicen antes que el padrón)"] },
   { id: "helada", peso: (s, c) => (c.helada > 60 && c.reparto && c.reparto[0] > 0.2 ? 6 : 0),
     huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "la capital" }),
     fr: ["El hielo cierra los ríos y con ellos el comercio: nada entra ni sale de {zona} hasta el deshielo",
@@ -7227,7 +7381,7 @@ export default function PaxMundi() {
 
   function devaluar() {
     setState((st) => {
-      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito);
+      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
       const d = capacidadDevaluar(st.ciencia, st.devaluaciones, ing);
       if (!d.habilitado) return st;
       const deudaLicuada = Math.round((st.deuda || 0) * d.licua);
@@ -7372,7 +7526,7 @@ export default function PaxMundi() {
       const fac = { ...st.facciones };
       const stats = { ...st.stats };
       let txt;
-      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito);
+      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
       if (termino === "tributo") {
         trib.push({ hacia: g.vecino, monto: Math.round(ing * 0.13), quedan: 10 });
         stats.prestigio = clamp(stats.prestigio + 6);
@@ -7427,7 +7581,7 @@ export default function PaxMundi() {
 
   function pedirPrestado(monto) {
     setState((st) => {
-      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito);
+      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
       const cr = capacidadCredito(st.ciencia, st.stats, ing, st.anio, st.creditoVetado, st.devaluaciones);
       if (!cr.habilitado) return st;
       const cupo = Math.max(0, cr.tope - (st.deuda || 0));
@@ -7799,7 +7953,7 @@ export default function PaxMundi() {
       const ctxFac = {
         cap: capacidadEconomica(state.ciencia),
         comercio: comercioExterior(vecinosNuevos, state.ciencia, nuevosStats, state.factorias, state.ejercito).total,
-        ingreso: ingresoAnualDe(nuevosStats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito),
+        ingreso: ingresoAnualDe(nuevosStats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias),
         pob: state.poblacion || 4000,
         techo: demografiaDe(state.ciencia).techo,
       };
@@ -7938,7 +8092,7 @@ export default function PaxMundi() {
 
       // ═══ PRESUPUESTO: se cobra el mantenimiento y se reparte lo que sobra ═══
       const P = state.presupuesto || PRESUPUESTO_INICIAL;
-      const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito);
+      const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito, provs);
       const mantAnual = mantenimientoTotal(state.edu) + mantenimientoEjercito(state.ejercito);
       // servicio de la deuda: se paga antes que nada
       const deudaPrev = state.deuda || 0;
@@ -8578,7 +8732,7 @@ export default function PaxMundi() {
   const capEco = capacidadEconomica(s.ciencia);
   const rentaHab = rentaPorHabitante(s.stats, s.ciencia);
   const comExt = comercioExterior(s.vecinos, s.ciencia, s.stats, s.factorias, s.ejercito);
-  const oroBruto = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, poblacionUtil(s.provincias) || s.poblacion, s.vecinos, s.factorias, s.ejercito);
+  const oroBruto = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, poblacionUtil(s.provincias) || s.poblacion, s.vecinos, s.factorias, s.ejercito, s.provincias);
   const credHoy = capacidadCredito(s.ciencia, s.stats, oroBruto, s.anio, s.creditoVetado, s.devaluaciones);
   const servicioDeuda = (s.deuda || 0) * (credHoy.habilitado ? credHoy.tasa : TASA_BASE);
   const netoPres = oroBruto - mantT - servicioDeuda;
