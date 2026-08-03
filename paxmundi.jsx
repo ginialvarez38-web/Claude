@@ -1615,8 +1615,10 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     // y lo que están dispuestos a hacer, que va después del ánimo porque no es
     // lo mismo estar mal que estar dispuesto
     const bravos = radicalizarPops(pops, q, s);
-    return { ...q, pops: bravos, cosecha: +cos.toFixed(3), soc: resumenPops(bravos),
-             consumo: consumoDe(bravos) };
+    // y los de fuera van dejando de serlo, despacio y por generaciones
+    const asentados = asimilarPops(bravos, anios);
+    return { ...q, pops: asentados, cosecha: +cos.toFixed(3), soc: resumenPops(asentados),
+             consumo: consumoDe(asentados) };
   });
 
   // ——— y si alguna se levanta ———
@@ -2116,6 +2118,237 @@ function atractivoDe(p) {
   return Math.max(0.05, q);
 }
 
+// ═══ QUIÉN SE VA, Y QUÉ SE LLEVA PUESTO ══════════════════════
+// Mudarse movía un número: la provincia que perdía gente perdía un porcentaje
+// de cada uno de sus grupos, y la que la ganaba veía crecer los suyos. O sea
+// que el que llegaba se parecía exactamente a los que ya estaban, y una
+// migración no cambiaba nada más que la aritmética. Con eso no hay manera de
+// que el irlandés llegue a Liverpool siendo católico, ni de que un barrio
+// entero hable otra lengua, ni de que nadie eche de menos su tierra.
+//
+// Se mudan personas, y las personas llevan encima su clase, su cultura, su
+// religión, lo que saben leer y lo que tienen guardado. Tres cosas que la
+// historia de las migraciones repite en todas partes:
+//
+// · NO SE VA EL MÁS POBRE. Irse cuesta —el pasaje, el camino, los meses sin
+//   cobrar— y el que no tiene nada no puede pagarlo. Emigra el que está mal
+//   pero no el peor de todos, y por eso las grandes hambrunas expulsan menos
+//   gente en el peor año que en el siguiente.
+// · SE VA ADONDE YA HAY DE LOS SUYOS. Nadie elige un punto en un mapa: se va
+//   donde escribió un primo. Por eso la emigración se concentra en cuatro
+//   sitios en vez de repartirse, y por eso se forman barrios.
+// · Y LA ASIMILACIÓN TARDA GENERACIONES. El que llega no cambia de lengua ni
+//   de santo; su nieto sí. Y cuanto más numerosos son, más tardan, porque no
+//   les hace falta.
+
+// Las ganas de irse de un grupo, de 0 a 1. Y el poder irse, que es otra cosa.
+function ganasDeIrse(q, p, s) {
+  const C = CLASES[q.clase] || CLASES.campesino;
+  const E = q.eco || {};
+  let g = 0.10;
+  // lo que empuja
+  g += acotar(E.hambre || 0, 0, 1.2) * 0.55;
+  g += acotar((q.furia || 0) / 100, 0, 1) * 0.35;
+  g += acotar(1 - (E.decencia == null ? 1 : E.decencia), 0, 1) * 0.22;
+  if (p.ocupada) g += 0.18;
+  // el que sabe leer sabe adónde ir, y se entera antes
+  g += acotar(q.letras, 0, 1) * 0.16;
+  // lo que ata: la tierra, el rango y los años
+  g -= (C.renta || 0) > 8 ? 0.30 : 0;              // el que vive de la renta no se va: la renta es de aquí
+  g -= C.urb < 0.2 ? 0.06 : 0;                     // al que tiene tierra le cuesta soltarla
+  if (q.clase === "siervo" || q.clase === "esclavo") g -= 0.22;   // no se van porque no pueden
+  g = acotar(g, 0, 1);
+  // Y el pasaje. Irse cuesta, y el que no tiene absolutamente nada no puede
+  // pagarlo: emigra el que está mal, no el que está peor. Es de las cosas más
+  // contraintuitivas de la historia de las migraciones y una de las mejor
+  // documentadas —en el peor año de una hambruna emigra menos gente que al
+  // siguiente, cuando ya se pudo vender algo.
+  const bolsa = acotar(((q.caudal || 0) + (E.ingreso || 0) * 0.4) / 1.6, 0, 1);
+  return g * (0.12 + bolsa * 0.88);
+}
+
+// Cuánto tira un destino de un grupo concreto. Lo general lo dice el atractivo
+// de la provincia; lo particular, si hay de los suyos. Nadie elige un punto en
+// un mapa: se va donde escribió un primo.
+function tiraDe(destino, q, atrac) {
+  let t = atrac;
+  const soc = destino.soc || null;
+  if (soc) {
+    const gente = soc.gente || 0;
+    if (gente > 0) {
+      const mismos = (soc.culturas || {})[q.cultura] || 0;
+      const mismoCredo = (soc.credos || {})[q.religion] || 0;
+      // La cadena: basta con que haya unos pocos para que el destino tire mucho
+      // más. Es una raíz y no una proporción porque lo que importa es que haya
+      // alguien, no cuántos: el primero que llega vale más que el milésimo.
+      t *= 1 + Math.sqrt(acotar(mismos / gente, 0, 1)) * 1.9;
+      t *= 1 + Math.sqrt(acotar(mismoCredo / gente, 0, 1)) * 0.7;
+    }
+  }
+  return Math.max(0.001, t);
+}
+
+// La mudanza, hecha con gente y no con porcentajes.
+//
+// Y hecha sobre el flujo BRUTO y no sobre el saldo. Es la distinción que hace
+// que esto sirva de algo: el saldo neto de un reino en equilibrio es minúsculo
+// —un 0,13% al año— porque los que llegan y los que se van casi se cancelan.
+// Pero los que se van son unos y los que llegan son otros, y esa gente sí se
+// cuenta por miles. Una comarca puede perder un cinco por ciento de su gente y
+// ganar otro cinco, quedarse igual de grande y estar transformada en un siglo.
+// Moviendo solo el saldo, una migración no mezclaba nada.
+//
+// Acá se mueve el bruto, que es lo que decide QUIÉN está dónde, y el total de
+// cada provincia lo cuadra después quien lo tiene que cuadrar: el reparto ya
+// dijo cuánta gente hay en cada sitio, y esto dice de qué gente se trata.
+function mudarPops(provs, saldos, s, rnd, dias) {
+  if (!provs || provs.length < 2) return provs;
+  const anios = (dias || 365) / 365;
+  // cuánta gente se mueve de cada sitio, aunque el saldo sea cero
+  const churn = acotar(movilidad(s.stats, provs) * anios * 0.75, 0, 0.35);
+  const salen = [];
+  const conMenos = provs.map((p, i) => {
+    if (!p.pops || !p.pops.length) return p;
+    const hay = poblacionPops(p.pops);
+    if (!(hay > 0)) return p;
+    // el bruto de siempre, más lo que empuje el saldo si esta comarca se vacía
+    const extra = Math.max(0, -(saldos[i] || 0));
+    const irse = Math.min(hay * 0.45, hay * churn + extra);
+    if (!(irse > 0.01)) return p;
+    const ganas = p.pops.map((q) => q.n * ganasDeIrse(q, p, s));
+    const suma = ganas.reduce((a, b) => a + b, 0);
+    if (!(suma > 0)) return p;
+    const pops = [];
+    for (let k = 0; k < p.pops.length; k++) {
+      const q = p.pops[k];
+      const van = Math.min(q.n * 0.55, irse * (ganas[k] / suma));
+      if (van > 0.004) {
+        // Y el que se va llega con la mitad de la rabia. Irse ES hacer algo:
+        // el que cruzó el mar por hambre no llega a la otra orilla con la
+        // misma furia con la que se embarcó, y el sitio del que se fue se
+        // queda más tranquilo por haberlo perdido. Es la válvula de escape
+        // que se le atribuye a la emigración del XIX, y sin ella el modelo
+        // hacía lo contrario: los más furiosos se iban juntos, se juntaban en
+        // cuatro comarcas y las hacían arder.
+        salen.push({ ...q, n: +van.toFixed(3), de: p.id,
+          furia: Math.round((q.furia || 0) * 0.45) });
+        pops.push({ ...q, n: +(q.n - van).toFixed(3) });
+      } else pops.push(q);
+    }
+    return { ...p, pops: pops.filter((q) => q.n > 0.004) };
+  });
+  if (!salen.length) return conMenos;
+
+  const atrac = provs.map(atractivoDe);
+  // A cuántos sitios va cada grupo: a pocos. La migración real es a puñados —se
+  // va donde escribió un primo— y repartir a cada grupo entre las veintiocho
+  // comarcas por igual diluye la cultura hasta que no se nota en ninguna, que
+  // es justo lo contrario de lo que hace una migración.
+  const CUANTOS = 3;
+  const llegan = new Map();
+  for (const q of salen) {
+    const pesos = [];
+    for (let i = 0; i < provs.length; i++) {
+      if (provs[i].id === q.de) continue;
+      // el tirón general, el de los suyos, y el hueco que hay
+      const hueco = 1 + acotar((saldos[i] || 0) / Math.max(1, poblacionPops(provs[i].pops || []) * 0.05), -0.8, 2);
+      pesos.push({ i, w: tiraDe(conMenos[i], q, atrac[i]) * Math.max(0.05, hueco) });
+    }
+    if (!pesos.length) continue;
+    pesos.sort((a, b) => b.w - a.w);
+    const elegidos = pesos.slice(0, CUANTOS);
+    const suma = elegidos.reduce((a, x) => a + x.w, 0) || 1;
+    for (const e of elegidos) {
+      const parte = q.n * (e.w / suma);
+      if (parte < 0.003) continue;
+      const id = provs[e.i].id;
+      const l = llegan.get(id) || [];
+      l.push({ ...q, n: parte, de: undefined });
+      llegan.set(id, l);
+    }
+  }
+
+  return conMenos.map((p) => {
+    const l = llegan.get(p.id);
+    if (!l || !l.length) return p;
+    const pops = (p.pops || []).map((q) => ({ ...q }));
+    const idx = new Map(pops.map((q, k) => [q.clase + "|" + q.cultura + "|" + q.religion, k]));
+    for (const v of l) {
+      const k = v.clase + "|" + v.cultura + "|" + v.religion;
+      const j = idx.get(k);
+      if (j == null) {
+        // llega gente que aquí no había: un grupo nuevo, con lo suyo puesto
+        pops.push({ ...v, n: +v.n.toFixed(3), venido: true });
+        idx.set(k, pops.length - 1);
+      } else {
+        // se juntan con los suyos, y las medias se pesan
+        const y = pops[j], t = y.n + v.n;
+        y.letras = +((y.letras * y.n + v.letras * v.n) / t).toFixed(4);
+        y.animo = Math.round((y.animo * y.n + v.animo * v.n) / t);
+        if (y.salud != null || v.salud != null)
+          y.salud = Math.round(((y.salud == null ? 55 : y.salud) * y.n + (v.salud == null ? 55 : v.salud) * v.n) / t);
+        y.furia = Math.round(((y.furia || 0) * y.n + (v.furia || 0) * v.n) / t);
+        y.caudal = +(((y.caudal || 0) * y.n + (v.caudal || 0) * v.n) / t).toFixed(3);
+        y.n = +t.toFixed(3);
+      }
+    }
+    return { ...p, pops };
+  });
+}
+
+// ——— y con los años, dejar de ser de fuera ———
+// El que llega no cambia de lengua ni de santo; su nieto sí. Se asimila una
+// parte pequeña cada año, y menos cuanto más numerosos son los suyos: una
+// comunidad grande no necesita asimilarse porque se basta sola, y por eso los
+// barrios duran generaciones y el que llega solo se pierde en una.
+function asimilarPops(pops, anios) {
+  if (!pops || pops.length < 2) return pops;
+  const gente = poblacionPops(pops);
+  if (!gente) return pops;
+  const porCultura = {};
+  for (const q of pops) porCultura[q.cultura] = (porCultura[q.cultura] || 0) + q.n;
+  const mayor = Object.entries(porCultura).sort((a, b) => b[1] - a[1])[0];
+  if (!mayor || mayor[1] / gente > 0.995) return pops;
+  const dominante = mayor[0];
+  const fuera = [];
+  const idx = new Map();
+  for (const q of pops) {
+    const k = q.clase + "|" + q.cultura + "|" + q.religion;
+    if (!idx.has(k)) { idx.set(k, fuera.length); fuera.push({ ...q }); }
+    else { const y = fuera[idx.get(k)]; y.n = +(y.n + q.n).toFixed(3); }
+  }
+  const mueve = [];
+  for (const q of fuera) {
+    if (q.cultura === dominante) continue;
+    const suyos = (porCultura[q.cultura] || 0) / gente;
+    // Cuanto más grande la colonia, más despacio. Y despacio de verdad: al 3,5%
+    // anual una comunidad se disolvía en dos generaciones, y no es lo que pasa
+    // —los irlandeses de Boston dejaron de hablar irlandés pero siguen siendo
+    // católicos ciento cincuenta años después—. Acá se asimila la cultura y
+    // nunca la religión: se cambia de lengua mucho antes que de santo, y por
+    // eso el mapa de credos guarda memoria de migraciones que el de culturas ya
+    // olvidó.
+    const tasa = acotar(0.014 * (1 - Math.sqrt(acotar(suyos, 0, 1)) * 0.82), 0.0015, 0.014) * Math.min(3, anios);
+    const van = q.n * tasa;
+    if (van > 0.004) mueve.push({ q, van });
+  }
+  if (!mueve.length) return fuera;
+  for (const { q, van } of mueve) {
+    q.n = +(q.n - van).toFixed(3);
+    const k = q.clase + "|" + dominante + "|" + q.religion;
+    const j = idx.get(k);
+    if (j == null) {
+      idx.set(k, fuera.length);
+      fuera.push({ ...q, cultura: dominante, familia: undefined, n: +van.toFixed(3), venido: undefined });
+    } else {
+      const y = fuera[j], t = y.n + van;
+      y.letras = +((y.letras * y.n + q.letras * van) / t).toFixed(4);
+      y.n = +t.toFixed(3);
+    }
+  }
+  return fuera.filter((q) => q.n > 0.004);
+}
+
 // El reparto del turno: primero se crece donde hay sitio, después se mudan los
 // que se mudan. La suma no cambia: mudarse no crea gente.
 function moverGente(provs, stats, ciencia, nuevos, dias, rnd) {
@@ -2168,11 +2401,16 @@ function moverGente(provs, stats, ciencia, nuevos, dias, rnd) {
   if (mayorLlegada && mayorLlegada.rel > 0.03)
     hechos.push({ t: "inmigra", prov: provs[mayorLlegada.i].nombre, rel: mayorLlegada.rel });
 
+  // El saldo de cada provincia, que es lo que hace falta para mover gente de
+  // verdad: cuánta sale de una y cuánta entra en otra. Antes solo se devolvía
+  // la cifra final y quien la aplicaba no sabía de dónde había salido.
+  const saldos = provs.map((p, i) => finales[i] * ajuste - (p.poblacion || 0));
   return {
     provincias: provs.map((p, i) => {
       const pob = Math.round(finales[i] * ajuste);
       return pob === Math.round(p.poblacion || 0) ? p : { ...p, poblacion: pob };
     }),
+    saldos,
     hechos,
   };
 }
@@ -4266,6 +4504,12 @@ function resumenPops(pops) {
     esperanza: esperanzaDePops(pops),
     clases: porClase, culturas: porCultura, credos: porCredo,
     claseMayor: (mayor(porClase) || [null])[0], credoMayor: (mayor(porCredo) || [null])[0],
+    culturaMayor: (mayor(porCultura) || [null])[0],
+    // la parte de la comarca que no es de la cultura de la comarca. Es el
+    // número que hace visible una migración: una provincia puede tener la
+    // misma gente que hace un siglo y ser otro sitio.
+    forasteros: (() => { const m = mayor(porCultura);
+      return gente > 0 && m ? +(1 - m[1] / gente).toFixed(3) : 0; })(),
     animo: gente ? Math.round(pops.reduce((a, q) => a + q.n * q.animo, 0) / gente) : 60 };
 }
 
@@ -4749,6 +4993,14 @@ const VISTAS = [
     fmt: (v) => Math.round(v) + " años",
     mio: (m) => ((m.soc || {}).esperanza != null ? m.soc.esperanza : null),
     pie: "cuántos años se vive en cada comarca" },
+  // Quién no es de aquí. No es un juicio: es el dato que hace visible una
+  // migración, que si no pasa entera por debajo del mapa. Una comarca puede
+  // tener la misma gente que hace un siglo y ser otro sitio.
+  { id: "forasteros", n: "Gente de fuera", ambito: "reino", rampa: "gente",
+    cortes: [0.02, 0.06, 0.14, 0.26, 0.45],
+    fmt: (v) => (v < 0.02 ? "todos de aquí" : Math.round(v * 100) + "% viene de fuera"),
+    mio: (m) => ((m.soc || {}).forasteros != null ? m.soc.forasteros : null),
+    pie: "cuánta gente no es de la tierra" },
   { id: "hambre", n: "Hambre", ambito: "reino", rampa: "sucio",
     cortes: [0.01, 0.05, 0.12, 0.25, 0.45],
     fmt: (v) => (v < 0.005 ? "nadie pasa hambre" : Math.round(v * 100) + "% pasa hambre"),
@@ -6184,6 +6436,20 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     leen {Math.round((mia.soc.letras || 0) * 100)} de cada 100
                     {credo ? ` · ${credo.n}` : ""}
                   </div>
+                  {/* y si hay gente de fuera, decirlo: es lo que convierte una
+                      comarca en otra sin que cambie de tamaño */}
+                  {(mia.soc.forasteros || 0) > 0.02 && (() => {
+                    const otras = Object.entries(mia.soc.culturas || {})
+                      .filter(([k]) => k !== mia.soc.culturaMayor)
+                      .sort((a, b) => b[1] - a[1]);
+                    const cual = otras.length ? otras[0][0] : null;
+                    return (
+                      <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.4 }}>
+                        {Math.round(mia.soc.forasteros * 100)}% no es de aquí
+                        {cual ? `, sobre todo ${cual}` : ""}
+                      </div>
+                    );
+                  })()}
                 </>
               );
             })()}
@@ -9595,7 +9861,11 @@ function aplicarEfectos(n, ef, rnd) {
           golpe.estabilidad -= 1.6 * f; fac.pueblo = (fac.pueblo || 0) - 2 * f;
           porProv.set(a.provId, (porProv.get(a.provId) || 0) + 0.004 * f);
         } else if (a.id === "huelga") {
-          golpe.economia -= 2.2 * f; golpe.estabilidad -= 0.8 * f;
+          // Una huelga cuesta producción y casi nada de orden público: es una
+          // negociación, no una sedición, y tratarla como si fuera lo segundo
+          // dejaba a un reino industrial bien llevado con la estabilidad por
+          // los suelos solo por tener fábricas.
+          golpe.economia -= 2.2 * f; golpe.estabilidad -= 0.25 * f;
           fac.mercaderes = (fac.mercaderes || 0) - 4 * f;
           // una huelga que se sostiene arranca algo: por eso se hacían
           fac.pueblo = (fac.pueblo || 0) + 1.5 * f;
@@ -9641,24 +9911,21 @@ function aplicarEfectos(n, ef, rnd) {
   // mudaba nunca, así que ni el clima ni la ciudad ni el camino cambiaban dónde
   // vive la gente.
   if (ef.pob || ef.migrar) {
-    const antesDeMudar = new Map(e.provincias.map((p) => [p.id, p.poblacion || 0]));
     const mv = moverGente(e.provincias, e.stats, e.ciencia, ef.pob || 0,
                           (ef.migrar && ef.migrar.dias) || 365, rnd);
-    // Los que se mudan también son gente, así que los grupos de la provincia
-    // que se vacía tienen que menguar y los de la que se llena, crecer. Se hace
-    // a prorrata: por ahora el que se va es un vecino cualquiera, no un
-    // campesino en concreto, y el que llega se parece a los que ya estaban. Es
-    // una simplificación y se nota —una migración de verdad lleva su cultura y
-    // su oficio a cuestas— pero mantiene en pie lo único que no puede fallar:
-    // que la suma de los grupos sea la gente que hay. De eso cuelgan el reparto
-    // social, el consumo y la voz de los estamentos, y calcularlos sobre un
-    // total que no existe es peor que no calcularlos.
-    e.provincias = mv.provincias.map((p) => {
-      const antes = antesDeMudar.get(p.id);
-      if (!p.pops || !p.pops.length || !antes || !(p.poblacion > 0)) return p;
-      const k = p.poblacion / antes;
-      if (!Number.isFinite(k) || Math.abs(k - 1) < 0.002) return p;
-      const pops = p.pops.map((q) => ({ ...q, n: +(q.n * k).toFixed(3) }));
+    // Los que se mudan son gente, y la gente se lleva encima lo que es. Se
+    // sacan grupos concretos de las provincias que pierden —los que tienen
+    // ganas y con qué pagarse el camino— y se meten en las que ganan, con su
+    // clase, su cultura, su religión y sus letras puestas. Después se cuadra la
+    // suma, porque el total lo manda el reparto y no el detalle.
+    const mudados = mudarPops(mv.provincias, mv.saldos || mv.provincias.map(() => 0), e, rnd,
+      (ef.migrar && ef.migrar.dias) || 365);
+    e.provincias = mudados.map((p) => {
+      if (!p.pops || !p.pops.length || !(p.poblacion > 0)) return p;
+      const suma = poblacionPops(p.pops);
+      const k = suma > 0 ? p.poblacion / suma : 1;
+      const pops = Math.abs(k - 1) < 0.002 ? p.pops
+        : p.pops.map((q) => ({ ...q, n: +(q.n * k).toFixed(3) }));
       return { ...p, pops, soc: resumenPops(pops), consumo: consumoDe(pops) || p.consumo };
     });
     e.poblacion = Math.round(poblacionTotal(e.provincias));
