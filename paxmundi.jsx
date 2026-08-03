@@ -1612,20 +1612,49 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     const escala = suma > 0 && q.poblacion > 0 ? q.poblacion / suma : 1;
     const pops = Math.abs(escala - 1) < 0.002 ? vivos
       : vivos.map((x) => ({ ...x, n: +(x.n * escala).toFixed(3) }));
-    return { ...q, pops, cosecha: +cos.toFixed(3), soc: resumenPops(pops),
-             consumo: consumoDe(pops) };
+    // y lo que están dispuestos a hacer, que va después del ánimo porque no es
+    // lo mismo estar mal que estar dispuesto
+    const bravos = radicalizarPops(pops, q, s);
+    return { ...q, pops: bravos, cosecha: +cos.toFixed(3), soc: resumenPops(bravos),
+             consumo: consumoDe(bravos) };
   });
+
+  // ——— y si alguna se levanta ———
+  // Se decide con las provincias ya resueltas, porque hace falta saber cómo les
+  // fue el año para saber quién sale a la calle. Y se decide provincia por
+  // provincia: un reino no se subleva, se sublevan comarcas, y a veces una sola.
+  const alzadas = [];
+  const conCalle = conGente.map((q) => {
+    const r = revueltaDe(q, s, rnd);
+    if (!r) return q;
+    alzadas.push(r);
+    // y la comarca queda gastada: se descarga la furia y se apunta el año, que
+    // el rescoldo tarda en volver a prender
+    const k = 1 - (DESCARGA[r.id] || 0.3);
+    const pops = (q.pops || []).map((y) => ({ ...y, furia: Math.round((y.furia || 0) * k) }));
+    return { ...q, pops, alzada: { id: r.id, anio: s.anio || 0 } };
+  });
+  // El motín es de todos los años en algún sitio; la revuelta no. Se cuenta la
+  // más grave y se dice cuántas más hubo, que si no la crónica de un año malo
+  // no habla de otra cosa.
+  if (alzadas.length) {
+    alzadas.sort((a, b) => (REVUELTAS.findIndex((x) => x.id === b.id) - REVUELTAS.findIndex((x) => x.id === a.id))
+      || b.fuerza - a.fuerza);
+    const peor = alzadas[0];
+    hechos.push({ t: "revuelta", cual: peor.id, prov: peor.prov,
+      fuerza: peor.fuerza, cuantas: alzadas.length });
+  }
 
   // Al final de todo: el ambiente de hoy, con el clima ya derivado, el bosque
   // ya talado y el humo ya contado. Va último porque depende de los tres.
-  const refresco = refrescarAmbiente(conGente, { ...s, mundo: { anomalia } }, anios);
+  const refresco = refrescarAmbiente(conCalle, { ...s, mundo: { anomalia } }, anios);
   const conAmbiente = refresco.provincias;
   for (const h of refresco.hechos) hechos.push(h);
 
   // Y lo que el año del río da para contar: una crecida de las gordas, un
   // estiaje que deja el cauce en nada, o el día que se pudo navegar hasta
   // arriba por primera vez.
-  const conRio = conGente.filter((q) => q.crecida);
+  const conRio = conCalle.filter((q) => q.crecida);
   if (conRio.length) {
     const peor = conRio.reduce((a, b) => (b.crecida > a.crecida ? b : a));
     const seco = conRio.reduce((a, b) => ((b.estiaje || 9) < (a.estiaje || 9) ? b : a));
@@ -1670,6 +1699,8 @@ function evolucionarMundo(s, dias, rnd, empuje) {
            // Sin saber de dónde salieron los dos, no hay manera de sumar lo que
            // hizo cada uno: o se pierde la hambruna o se pierde el terremoto.
            pobAntes: Object.fromEntries(provs.map((p) => [p.id, p.poblacion || 0])),
+           // lo que se levantó este año, para que cueste lo que tiene que costar
+           alzadas,
            // la sociedad del reino, que es de donde salen los estamentos
            pops: sociedadDelReino(conAmbiente, s.anio, (s.gobierno || {}).forma),
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
@@ -3839,6 +3870,241 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
   return { pops: [...junta.values()], hechos };
 }
 
+// ═══ LA FURIA ════════════════════════════════════════════════
+// El ánimo dice cómo se está; la furia dice qué se está dispuesto a hacer. Son
+// dos cosas distintas y confundirlas es el error clásico: si bastara con estar
+// mal, las revoluciones las habrían hecho los siervos del año mil, que estaban
+// peor que nadie y no hicieron ninguna.
+//
+// Lo que las hace es otra cosa, y Tocqueville la escribió mirando 1789: no se
+// levantó la Francia más pobre sino la que llevaba treinta años mejorando. Una
+// clase numerosa que sabe leer, que ha empezado a vivir mejor y que sigue sin
+// pintar nada se vuelve peligrosa; la misma clase muerta de hambre y analfabeta
+// se amotina el martes y el jueves ya se le pasó. De ahí las tres cosas que
+// pesan acá, en este orden:
+//
+//   · EL HAMBRE hace motines. Estalla rápido, quema un pósito y se acaba.
+//   · LA ESTRECHEZ CRÓNICA hace huelgas, en cuanto hay con quién organizarlas.
+//   · LA VOZ NEGADA hace revoluciones, y solo cuenta si el que la sufre sabe
+//     leer. Es la distancia entre cuántos son y cuánto se los oye, y crece
+//     justo cuando el país se moderniza sin abrir el voto.
+//
+// Y la represión no cura nada: sube el listón para que estalle, no baja la
+// furia. Un reino que aguanta a fuerza de tropa acumula lo que no deja salir,
+// y el día que la tropa está en otra frontera, sale todo junto.
+
+// Cuánto le falta a un estamento de voz para lo que le tocaría por número. Es
+// cero en una sociedad de órdenes que nadie discute —el campesino de 1200 no
+// esperaba pintar nada, así que no le faltaba nada— y se dispara cuando la
+// época ya dice que debería contar y todavía no cuenta.
+// Cuánto de lo que uno es cree uno que debería contar. Cero mientras el orden
+// de los estamentos no se discute: el campesino de 1200 no pensaba que le
+// faltara nada porque nadie le había dicho que pudiera faltarle. Sube con la
+// imprenta, el correo, el café y el periódico, y para 1900 ya es la idea normal
+// de que un hombre es un voto. Es la mitad de la ecuación de Tocqueville y no
+// depende del gobierno: depende del siglo.
+const ideasDelSiglo = (anio) => acotar(((anio == null ? 1200 : anio) - 1580) / 320, 0, 1);
+
+function vozNegada(fac, s) {
+  const P = s.pops || {};
+  const peso = P.peso || null, clases = P.clases || null;
+  if (!peso || !clases) return 0;
+  let suyos = 0, todos = 0;
+  for (const [cl, n] of Object.entries(clases)) {
+    const C = CLASES[cl]; if (!C) continue;
+    todos += n; if (C.fac === fac) suyos += n;
+  }
+  if (!todos) return 0;
+  const porNumero = suyos / todos;
+  const porVoz = peso[fac] || 0;
+  // La distancia entre lo que uno cree que le toca y lo que le dan. Antes se
+  // multiplicaba por la apertura del voto, y eso lo anulaba solo: la apertura
+  // es justamente lo que cierra la distancia, así que multiplicar por ella daba
+  // cero cuando el voto estaba cerrado —que es cuando más se nota— y cero
+  // cuando estaba abierto, porque ya no faltaba nada. Lo que expande la
+  // expectativa no es la concesión sino el siglo.
+  return acotar((porNumero * ideasDelSiglo(s.anio) - porVoz) * 1.9, 0, 1);
+}
+
+// Lo que cada grupo está dispuesto a hacer este año. Es una brasa, no una
+// chispa: sube y baja despacio, se acuerda del año pasado, y lo que la enciende
+// —una carestía, una derrota, un impuesto nuevo— llega aparte.
+function radicalizarPops(pops, p, s) {
+  const anio = s.anio || 1200;
+  const st = s.stats || {};
+  const credoDe = (s.pops || {}).credo || null;
+  // La mano dura no quita el motivo: sube el precio de salir a la calle.
+  const mano = acotar(((st.militar || 50) - 45) / 130 + ((st.estabilidad || 50) - 45) / 190, -0.25, 0.42);
+  const negada = {};
+  for (const f of ["nobleza", "clero", "mercaderes", "ejercito", "pueblo"]) negada[f] = vozNegada(f, s);
+  // Lo que gana el que más gana de la comarca. Hace falta porque la gente no se
+  // compara con el pasado sino con el vecino: un obrero alimentado que ve al
+  // dueño de la fábrica ganar cuarenta veces lo suyo no está conforme, y de ahí
+  // salió el siglo XIX entero. Sin este término, un reino industrial próspero
+  // no tenía una sola huelga en cuatrocientos ochenta años, cuando la huelga es
+  // justamente lo que inventó la prosperidad industrial.
+  let arriba = 0;
+  for (const q of pops || []) arriba = Math.max(arriba, (q.eco || {}).ingreso || 0);
+  return (pops || []).map((q) => {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    const E = q.eco || { hambre: 0, decencia: 1 };
+    let meta = 0;
+    meta += acotar(E.hambre, 0, 1.2) * 52;                     // el hambre, que quema hoy
+    // y el pan caro, que enfurece antes de matar. Los motines de subsistencia
+    // no los hacía el que se estaba muriendo —ese ya no tiene fuerzas— sino el
+    // que de pronto paga el doble por lo mismo y sabe que alguien lo está
+    // acaparando. Solo pica a quien lo compra: al que lo cosecha, no.
+    if (C.urb > 0.4 && p.cosecha != null) meta += acotar(precioPan(p.cosecha) - 1.06, 0, 1.4) * 40;
+    meta += acotar(1 - (E.decencia == null ? 1 : E.decencia), 0, 1) * 40;
+    // Y no llegar a lo que la época llama vivir, que es distinto de pasar
+    // hambre y pesa más de lo que parece. Una familia que cubre el pan y el
+    // alquiler y ni un gasto más no se está muriendo: se está quedando fuera,
+    // y quedarse fuera de lo normal es lo que la gente no perdona. Sin este
+    // término la furia se apagaba en cuanto había de comer, y entonces el
+    // siglo XIX entero transcurría en paz.
+    if (E.gusto != null) meta += acotar(1 - E.gusto, 0, 1) * 20;
+    // y la voz negada, que solo muerde en quien sabe leer: un analfabeto sin
+    // voz no echa de menos lo que no sabe que existe
+    meta += negada[C.fac] * 96 * acotar(0.15 + q.letras * 1.1, 0, 1);
+    // La distancia con el de arriba. Una diferencia de cuatro veces es el orden
+    // de siempre y no indigna a nadie; de treinta, sí. Y hay que poder verla:
+    // el que lee el periódico sabe lo que gana el dueño, y el que no, no.
+    if (arriba > 0 && (E.ingreso || 0) > 0 && C.renta < 5) {
+      const brecha = acotar((arriba / Math.max(0.25, E.ingreso) - 4) / 26, 0, 1);
+      meta += brecha * 34 * acotar(0.2 + q.letras, 0, 1);
+    }
+    if (credoDe && q.religion !== credoDe)
+      meta += (1 - (RELIGIONES[credoDe] || { tolera: 0.6 }).tolera) * 34;
+    if (p.ocupada) meta += 26;
+    if (s.guerra) meta += 5;
+    meta -= mano * 26;
+    // El que tiene qué perder pierde las ganas. Pero «tener» es relativo al
+    // siglo: medido en raciones a secas, en 1900 cualquiera tenía más guardado
+    // que un noble de 1300 y salía que nadie se enfadaba nunca. Lo que calma es
+    // tener guardado respecto a lo que uno gana, no respecto a la Edad Media.
+    const colchon = E.ingreso > 0 ? acotar((q.caudal || 0) / (E.ingreso * 2), 0, 1) : 0;
+    meta -= colchon * 9;
+    meta = acotar(meta, 0, 100);
+    // La brasa sube más rápido de lo que baja. Una injusticia se aprende en un
+    // año y se olvida en diez, y por eso las comarcas que se levantaron una vez
+    // vuelven a levantarse: el rescoldo sigue ahí cuando ya se arregló todo.
+    const antes = q.furia == null ? Math.max(0, 40 - (q.animo || 60)) : q.furia;
+    const paso = meta > antes ? 0.30 : 0.11;
+    const furia = Math.round(antes + (meta - antes) * paso);
+    return furia === q.furia ? q : { ...q, furia };
+  });
+}
+
+// ——— y lo que la furia hace ———
+// Tres cosas distintas que la historia no confunde nunca, y que dependen de
+// quién esté furioso y no solo de cuánto.
+// Cada una tiene dos cosas distintas: las PUERTAS, que son categóricas y no se
+// negocian —no hay huelga donde no hay fábrica, no hay revolución sin nadie que
+// sepa redactar un programa— y la FUERZA, que se suma. Al principio eran todo
+// puertas, cuatro condiciones que había que cumplir a la vez, y en trescientos
+// veinte años de partida no se alinearon nunca las cuatro en la misma comarca
+// el mismo año: el sistema entero no llegó a ocurrir ni una sola vez. Lo
+// categórico va como puerta y lo que es cuestión de grado, como suma.
+const REVUELTAS = [
+  //
+  // Y en las tres, la furia es el motor y lo demás el multiplicador. Sumando en
+  // vez de multiplicando, un reino de 1900 con mucha clase media y el voto a
+  // medio abrir salía con doscientas ocho revoluciones en tres siglos, porque
+  // los términos de estructura llegaban al umbral ellos solos y la gente podía
+  // estar plácida. Que haya con qué hacer una revolución no es una revolución:
+  // hace falta que además alguien esté furioso.
+  { id: "motin", n: "motín", peso: 1, umbral: 26,
+    // Se amotina el de la ciudad, que compra el pan, y se amotina cuando el pan
+    // se pone caro: no hace falta llegar a la inanición, y de hecho el que ya
+    // se muere de hambre no tiene fuerzas para tirar una piedra.
+    puerta: () => true,
+    fuerza: (x) => x.furiaUrbana * (0.8 + x.panCaro * 2.4) + x.hambrientos * 55 },
+  { id: "huelga", n: "huelga", peso: 2, umbral: 47,
+    // Una huelga no la puede hacer un campesino disperso: hace falta gente
+    // junta, que dependa de un jornal y que sepa leer un pasquín. Por eso no
+    // hay huelgas antes de que haya fábricas, por mucha hambre que hubiera.
+    // Y el listón es bajo a propósito: una huelga no es la señal de que un
+    // reino va mal, es la forma normal en que se negocia cuando hay fábricas.
+    // La Inglaterra de 1880 estaba bien gobernada para lo que se estilaba y
+    // tenía huelgas todos los años; un modelo donde solo hay huelgas en los
+    // reinos que se hunden no ha entendido de qué va una huelga.
+    puerta: (x) => x.anio >= 1780 && x.obreros > 0.10 && x.letrasPueblo > 0.25,
+    fuerza: (x) => x.furiaPueblo * (0.75 + x.obreros * 1.1 + x.letrasPueblo * 0.35) },
+  { id: "revuelta", n: "revuelta", peso: 3, umbral: 74,
+    // Y una revuelta necesita dos cosas a la vez: mucha gente furiosa y alguien
+    // que sepa convertir la furia en un programa. Sin cabezas hay tumulto y no
+    // revolución, y eso también es histórico: los levantamientos campesinos sin
+    // letrados terminaron todos igual, colgados y sin cambiar nada. Que existan
+    // esas cabezas es una puerta y no una suma: hacen falta, pero que haya el
+    // doble no hace la revolución el doble de probable.
+    puerta: (x) => x.cabezas > 0.015,
+    fuerza: (x) => x.furiaMedia * (0.85 + x.negadaPueblo * 1.7) },
+];
+const cabeRevuelta = (R, x) => R.puerta(x) && R.fuerza(x) > R.umbral;
+// El retrato de una comarca en un año: de aquí salen las tres decisiones.
+function retratoDeFuria(p, s) {
+  const pops = p.pops || [];
+  if (!pops.length) return null;
+  let gente = 0, furia = 0, urbana = 0, gUrbana = 0, hambrientos = 0,
+      obreros = 0, cabezas = 0, furiaPueblo = 0, gPueblo = 0, letrasPueblo = 0;
+  for (const q of pops) {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    const f = q.furia || 0;
+    gente += q.n; furia += q.n * f;
+    if (C.urb > 0.5) { gUrbana += q.n; urbana += q.n * f; }
+    if ((q.eco || {}).hambre > 0.06) hambrientos += q.n;
+    if (q.clase === "obrero" || q.clase === "minero") obreros += q.n;
+    // Quien puede escribir un manifiesto. Gente de pluma, no la clase media
+    // entera: incluir a los mercaderes daba un cuarenta por ciento de cabezas
+    // en 1900, y con eso cualquier reino moderno tenía siempre lista una
+    // revolución. Un cura también sabe leer, pero no suele estar del otro lado.
+    if ((q.clase === "letrado" || q.clase === "burgues" || q.clase === "tecnico")
+      && q.letras > 0.72) cabezas += q.n;
+    if (C.fac === "pueblo") { gPueblo += q.n; furiaPueblo += q.n * f; letrasPueblo += q.n * q.letras; }
+  }
+  if (!gente) return null;
+  return { anio: s.anio || 1200,
+    // lo que se ha encarecido el pan este año en esta comarca, que es el motivo
+    // más viejo del mundo para salir a la calle
+    panCaro: p.cosecha == null ? 0 : Math.max(0, precioPan(p.cosecha) - 1),
+    furiaMedia: furia / gente,
+    furiaUrbana: gUrbana > 0 ? urbana / gUrbana : 0,
+    furiaPueblo: gPueblo > 0 ? furiaPueblo / gPueblo : 0,
+    letrasPueblo: gPueblo > 0 ? letrasPueblo / gPueblo : 0,
+    hambrientos: hambrientos / gente,
+    obreros: obreros / gente,
+    cabezas: cabezas / gente,
+    negadaPueblo: vozNegada("pueblo", s) };
+}
+// Qué pasa este año en esta comarca, si es que pasa algo. Se elige lo más
+// grave que quepa: donde hay revuelta ya no se cuenta el motín.
+// Cuánto tarda una comarca en volver a levantarse, y cuánta furia le queda al
+// día siguiente. Una revuelta se gasta: la gente sale, gana algo o la muelen a
+// palos, y en cualquiera de los dos casos al año siguiente está agotada. Sin
+// esto, cualquier provincia por encima del umbral se levantaba todos los años
+// para siempre —ochenta y cuatro revoluciones en ciento veinte años— que es un
+// estado de cosas que no existe: hasta las guerras civiles terminan.
+const DESCANSO = { motin: 4, huelga: 9, revuelta: 18 };
+const DESCARGA = { motin: 0.22, huelga: 0.38, revuelta: 0.62 };
+
+function revueltaDe(p, s, rnd) {
+  const ult = p.alzada;
+  if (ult && (s.anio || 0) - ult.anio < (DESCANSO[ult.id] || 4)) return null;
+  const x = retratoDeFuria(p, s);
+  if (!x) return null;
+  let elegida = null;
+  for (const R of REVUELTAS) if (cabeRevuelta(R, x) && (!elegida || R.peso > elegida.peso)) elegida = R;
+  if (!elegida) return null;
+  // La brasa no es la chispa. Que haya con qué no quiere decir que sea este
+  // año: se tira, y por eso las revueltas se agolpan tras un mal año y no
+  // llegan puntuales como un impuesto. Cuanto más se pasa del umbral, más
+  // probable, que es como arde algo que lleva tiempo secándose.
+  const prob = acotar((elegida.fuerza(x) - elegida.umbral) / 55, 0.03, 0.28);
+  if ((rnd ? rnd() : Math.random()) > prob) return null;
+  return { id: elegida.id, n: elegida.n, prov: p.nombre, provId: p.id,
+    fuerza: +acotar(elegida.fuerza(x) / 100, 0.1, 3).toFixed(2), retrato: x };
+}
+
 // Lo que cada grupo piensa del año que va. El ánimo no es un número que baja
 // solo: baja porque no se come, porque el aire apesta, porque hay guerra o
 // porque el que manda no es de los suyos, y sube cuando eso deja de pasar.
@@ -4336,6 +4602,20 @@ const VISTAS = [
     fmt: (v) => Math.round(v * 100) + "% del gasto no es pan",
     mio: (m) => ((m.consumo || {}).holgura != null ? m.consumo.holgura : null),
     pie: "lo que le queda a la gente después de comer" },
+  // Y la que dice dónde está el rescoldo. No es el ánimo —eso ya lo dice el
+  // nivel de vida— sino lo que la gente está dispuesta a hacer, que es otra
+  // cosa y a veces la contraria: una comarca puede estar mal y quieta, y otra
+  // razonablemente bien y a punto de arder.
+  { id: "furia", n: "Descontento", ambito: "reino", rampa: "sucio",
+    cortes: [8, 18, 30, 44, 60],
+    fmt: (v) => (v < 8 ? "en calma" : v < 30 ? "murmura" : v < 60 ? "se le oye" : "a punto"),
+    mio: (m) => {
+      const pops = m.pops || []; if (!pops.length) return null;
+      let g = 0, f = 0;
+      for (const q of pops) { g += q.n; f += q.n * (q.furia || 0); }
+      return g ? f / g : null;
+    },
+    pie: "qué está dispuesta a hacer la gente" },
   { id: "hambre", n: "Hambre", ambito: "reino", rampa: "sucio",
     cortes: [0.01, 0.05, 0.12, 0.25, 0.45],
     fmt: (v) => (v < 0.005 ? "nadie pasa hambre" : Math.round(v * 100) + "% pasa hambre"),
@@ -5810,6 +6090,25 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                       {Math.round(K.estrechez * 100)}% vive con lo justo
                     </div>
                   )}
+                  {(() => {
+                    // Cómo está la calle. Va con la cuenta de la casa porque es
+                    // su consecuencia: lo que la gente está dispuesta a hacer
+                    // sale de cómo le fue el año, no de su carácter.
+                    const pops = mia.pops || [];
+                    let g = 0, f = 0;
+                    for (const q of pops) { g += q.n; f += q.n * (q.furia || 0); }
+                    const fu = g ? f / g : 0;
+                    if (fu < 9 && !mia.alzada) return null;
+                    const dicho = fu < 18 ? "se murmura" : fu < 32 ? "se habla en voz alta"
+                      : fu < 48 ? "hay quien junta gente" : "esto va a estallar";
+                    return (
+                      <div style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.4,
+                        color: fu >= 32 ? "#D9534F" : C.muted }}>
+                        {dicho}
+                        {mia.alzada ? ` · se levantó en ${fmtAnio(mia.alzada.anio)}` : ""}
+                      </div>
+                    );
+                  })()}
                   {mia.cosecha != null && Math.abs(mia.cosecha - 1) > 0.08 && (
                     <div style={{ fontSize: 10.5, color: mia.cosecha < 1 ? "#D9534F" : "#57B26B",
                       marginTop: 2, lineHeight: 1.4 }}>
@@ -9140,6 +9439,49 @@ function aplicarEfectos(n, ef, rnd) {
       for (const [k, v] of Object.entries(ef.vivo.fac))
         e.facciones[k] = acotar((e.facciones[k] ?? 50) + v, 22, 100);
     }
+    // ——— y lo que cuesta que la gente salga a la calle ———
+    // Cada cosa cuesta lo suyo y a quien le toca. Un motín rompe cosas y asusta
+    // al orden; una huelga no rompe nada y para la economía, que es peor para
+    // quien la cobra; y una revuelta se lleva gente, hunde la lealtad de la
+    // comarca y le cuesta al rey lo único que no se compra, que es parecer que
+    // manda.
+    if ((ef.vivo.alzadas || []).length) {
+      const golpe = { estabilidad: 0, economia: 0, prestigio: 0 };
+      const fac = {};
+      const porProv = new Map();
+      for (const a of ef.vivo.alzadas) {
+        const f = acotar(a.fuerza || 1, 0.1, 3);
+        if (a.id === "motin") {
+          golpe.estabilidad -= 1.6 * f; fac.pueblo = (fac.pueblo || 0) - 2 * f;
+          porProv.set(a.provId, (porProv.get(a.provId) || 0) + 0.004 * f);
+        } else if (a.id === "huelga") {
+          golpe.economia -= 2.2 * f; golpe.estabilidad -= 0.8 * f;
+          fac.mercaderes = (fac.mercaderes || 0) - 4 * f;
+          // una huelga que se sostiene arranca algo: por eso se hacían
+          fac.pueblo = (fac.pueblo || 0) + 1.5 * f;
+        } else {
+          golpe.estabilidad -= 5 * f; golpe.prestigio -= 2.5 * f; golpe.economia -= 1.5 * f;
+          fac.pueblo = (fac.pueblo || 0) - 3 * f;
+          fac.nobleza = (fac.nobleza || 0) - 5 * f;
+          porProv.set(a.provId, (porProv.get(a.provId) || 0) + 0.02 * f);
+        }
+      }
+      e.stats = { ...e.stats };
+      for (const [k, v] of Object.entries(golpe))
+        if (v) e.stats[k] = acotar(Math.round((e.stats[k] || 50) + Math.max(-14, v)), 0, 100);
+      if (Object.keys(fac).length) {
+        e.facciones = { ...e.facciones };
+        for (const [k, v] of Object.entries(fac))
+          e.facciones[k] = acotar((e.facciones[k] ?? 50) + v, 8, 100);
+      }
+      if (porProv.size) {
+        e.provincias = e.provincias.map((p) => {
+          const d = porProv.get(p.id); if (!d) return p;
+          return { ...p, poblacion: Math.max(20, p.poblacion * (1 - d)),
+            lealtad: Math.max(0, (p.lealtad == null ? 60 : p.lealtad) - 22 * d * 50) };
+        });
+      }
+    }
   }
   if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
   if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
@@ -10447,6 +10789,39 @@ const INFORMES = [
   // Estos observadores no miran al reino sino al mundo. Son los que hacen que
   // un turno pasivo pueda contar algo que no decidió nadie: que el monte
   // retrocede, que una veta se acabó, que el invierno cerró los ríos.
+  // ——— la calle ———
+  // Se cuenta lo que se vio, no lo que significó: quien escribe la crónica está
+  // dentro y no sabe todavía si aquello fue un tumulto o el principio de algo.
+  // Los huecos son los del elenco de siempre —{donde} quiere un objeto con
+  // nombre y {n} un número— porque uno inventado se sustituye por nada y el
+  // texto sale a medias sin que nadie se entere.
+  { id: "motin", peso: (s, c) => (((c.vivo || {}).hechos || [])
+      .some((h) => h.t === "revuelta" && h.cual === "motin") ? 24 : 0),
+    huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "revuelta") || {};
+      return { donde: { nombre: h.prov || "la villa" }, n: Math.max(1, (h.cuantas || 1) - 1) }; },
+    fr: ["El pan sube y {donde} se echa a la calle: (asaltan el pósito|vuelcan los puestos del mercado|apedrean la casa del acaparador), y (hay que sacar la tropa|se reparte grano a la fuerza|el corregidor cede y baja la tasa)",
+      "En {donde} se amotinan por el precio del pan. (Dura dos días|Dura lo que tarda en llegar la tropa|No dura, pero se recuerda) y no cambia nada[, que es lo que suele pasar]",
+      "(Una mujer|Un ciego|Un fraile) empieza el alboroto en {donde} y al anochecer hay tres muertos y el granero abierto",
+      "Corre en {donde} que hay trigo escondido y la gente va a buscarlo (a casa del regidor|al convento|a los almacenes del puerto)",
+      "Se amotina {donde} por el pan, y con ella otras {n} comarcas: el año viene caro en todas partes"] },
+  { id: "huelga", peso: (s, c) => (((c.vivo || {}).hechos || [])
+      .some((h) => h.t === "revuelta" && h.cual === "huelga") ? 30 : 0),
+    huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "revuelta") || {};
+      return { donde: { nombre: h.prov || "la comarca" }, n: Math.max(1, (h.cuantas || 1) - 1) }; },
+    fr: ["Los obreros de {donde} paran el trabajo. (Piden jornal|Piden horas|Piden que se les hable de usted) y (se les manda la guardia|se negocia a puerta cerrada|se les concede la mitad)",
+      "En {donde} no entra nadie a las fábricas. Los dueños hablan de ruina y (los obreros, de hambre|nadie habla de los obreros)",
+      "Se para el trabajo en {donde}, y esta vez (leen un papel en voz alta antes|hay una caja de resistencia|no vuelven al tercer día como otras veces)",
+      "Paro en {donde}. Lo nuevo no es que estén furiosos: es que están organizados",
+      "Paran {donde} y otras {n} comarcas a la vez, y eso ya no es una queja: es una fecha"] },
+  { id: "revuelta", peso: (s, c) => (((c.vivo || {}).hechos || [])
+      .some((h) => h.t === "revuelta" && h.cual === "revuelta") ? 60 : 0),
+    huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "revuelta") || {};
+      return { donde: { nombre: h.prov || "la provincia" }, n: Math.max(1, h.cuantas || 1) }; },
+    fr: ["⚑ Se levanta {donde}. No piden pan: traen escrito lo que quieren, y eso no se había visto",
+      "⚑ {donde} se alza, y el alzamiento tiene papeles, imprenta y quien los firme",
+      "⚑ Lo de {donde} no es un motín: hay quien manda, hay un pliego y hay una bandera. Se tarda en entender lo que ha empezado",
+      "⚑ En {donde} echan a la autoridad y ponen otra. La corona lo llama desorden; en {donde} lo llaman de otra manera",
+      "⚑ Arden {n} comarcas y la primera fue {donde}. (Nadie sabe todavía cómo se llamará esto|Los que lo cuenten después dirán que se veía venir)"] },
   { id: "tala", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "tala") ? 5 : 0),
     huecos: (s, c) => ({ zona: (c.provCapital || {}).nombre || "el interior" }),
     fr: ["El monte retrocede (un poco más cada año|sin que nadie lo decida|a fuerza de hachas y hornos): en {zona} ya se trae la leña de lejos",
