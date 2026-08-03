@@ -1694,7 +1694,30 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     hechos.push({ t: "urbe", prov: mayor.nombre, rango: rangoCiudad((mayor.ciudad || {}).pob).n });
   }
 
+  // ——— y si toca votar ———
+  // Va al final porque hace falta la sociedad del año: quién hay, cuánto lee,
+  // qué tiene y cómo está de enfadado. Se vota cada cinco años y no todos los
+  // turnos, que es lo que hace que una elección sea una fecha y no un trámite.
+  const socHoy = sociedadDelReino(conAmbiente, s.anio, (s.gobierno || {}).forma);
+  const conVoto = { ...s, provincias: conAmbiente, pops: socHoy };
+  let urnas = null;
+  if (hayElecciones(conVoto)) {
+    const ultima = (s.gobierno || {}).votado;
+    if (ultima == null || (s.anio || 0) - ultima >= CADA_CUANTO) {
+      urnas = votar(conVoto, rnd);
+      if (urnas) {
+        urnas.anio = s.anio;
+        const antes = (s.gobierno || {}).partido || null;
+        urnas.cambio = antes != null && antes !== urnas.gana;
+        hechos.push({ t: "eleccion", gana: urnas.gana,
+          n: PARTIDO_IDX[urnas.gana].n, parte: urnas.partidos[0].parte,
+          censo: urnas.censo, cambio: urnas.cambio, antes });
+      }
+    }
+  }
+
   return { provincias: conAmbiente, reservas: { ...(s.reservas || {}), ...gasto },
+           urnas,
            // De qué población partió cada provincia. Hace falta porque el mundo
            // y el reino resuelven el mismo turno por separado —el terremoto por
            // un lado, la cosecha por el otro— y los dos mueven la misma cifra.
@@ -1704,7 +1727,7 @@ function evolucionarMundo(s, dias, rnd, empuje) {
            // lo que se levantó este año, para que cueste lo que tiene que costar
            alzadas,
            // la sociedad del reino, que es de donde salen los estamentos
-           pops: sociedadDelReino(conAmbiente, s.anio, (s.gobierno || {}).forma),
+           pops: socHoy,
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
                     humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha,
                     rioDicho: typeof nuevoRioDicho === "number" ? nuevoRioDicho : (s.mundo && s.mundo.rioDicho) || 0 },
@@ -4118,6 +4141,321 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
   return { pops: [...junta.values()], hechos };
 }
 
+// ═══ PARTIDOS Y ELECCIONES ═══════════════════════════════════
+// Un partido no es un bando: es un programa, y un programa le sirve a unos y
+// no a otros. Por eso acá los partidos no se eligen de una lista sino que
+// existen o no existen según a quién haya para representar: no hay partido
+// obrero donde no hay obreros, ni confesional donde nadie discute de religión,
+// y antes del XVIII no hay partidos en absoluto sino facciones de corte, que
+// es otra cosa —una facción se hereda y un partido se vota.
+//
+// Y lo que decide una elección no es cómo vota la gente sino QUIÉN VOTA. Con
+// sufragio censitario ganan los que tienen; con sufragio universal ganan los
+// que son. La misma sociedad, el mismo día, con dos leyes electorales
+// distintas, da dos gobiernos opuestos, y esa es la razón de que las peleas
+// del siglo XIX fueran por la ley electoral y no por los programas.
+//
+// La consecuencia que cierra el círculo con la calle: donde se puede votar, la
+// furia se convierte en votos. No desaparece —se cuenta— y por eso los países
+// que abrieron el voto a tiempo tuvieron partidos obreros y los que no,
+// barricadas.
+
+const PARTIDOS = [
+  { id: "orden", n: "Partido del Orden", corto: "Orden", col: "#C9A227", desde: 1750,
+    lema: "la tierra, el altar y lo de siempre",
+    eje: { renta: 0.55, orden: 0.95 },
+    base: { noble: 4.0, clero: 3.0, campesino: 1.1, soldado: 1.6, pastor: 1.0 },
+    // el que tiene qué conservar vota por conservarlo
+    porCaudal: 0.5, porLetras: -0.1 },
+  { id: "liberal", n: "Partido Liberal", corto: "Liberales", col: "#5B9BD5", desde: 1780,
+    lema: "el contrato, la aduana abierta y la carrera abierta al talento",
+    eje: { renta: 0.55, orden: -0.30 },
+    base: { burgues: 4.0, mercader: 3.0, letrado: 2.2, tecnico: 1.8, artesano: 1.2 },
+    porCaudal: 0.25, porLetras: 0.6 },
+  { id: "obrero", n: "Partido Obrero", corto: "Obreros", col: "#D9534F", desde: 1864,
+    lema: "la jornada, el jornal y quien lo trabaja",
+    // el técnico pesa aquí casi tanto como en el liberal: el cuello blanco se
+    // partió entre los dos, y suponer que una clase entera vota junta es de las
+    // cosas que hacen que un partido saque el setenta por ciento
+    eje: { renta: -0.50, orden: -0.70 },
+    base: { obrero: 4.0, minero: 4.0, artesano: 1.6, tecnico: 1.6, letrado: 1.4 },
+    // no lo funda un analfabeto: hace falta quien lea el periódico del partido
+    pideLetras: 0.28, porCaudal: -0.55, porFuria: 0.5 },
+  { id: "agrario", n: "Partido Agrario", corto: "Agrarios", col: "#5E9450", desde: 1860,
+    lema: "el precio del trigo y el camino hasta el mercado",
+    eje: { renta: -0.25, orden: 0.45 },
+    base: { campesino: 3.6, pastor: 3.2, pescador: 2.0, minero: 1.2 },
+    porCaudal: -0.1 },
+  // El que corta las clases por la mitad, y por eso existe. Un partido
+  // confesional no compite con el liberal por la burguesía: le quita el obrero
+  // creyente y el campesino creyente, y sin él una sociedad de comerciantes y
+  // técnicos le da al partido liberal el sesenta por ciento del país, que no
+  // pasó en ninguna parte. La pelea de la que vive no es entre credos sino
+  // entre el cura y el maestro, y esa la hubo también donde todos rezaban igual.
+  { id: "confesional", n: "Partido Confesional", corto: "Confesionales", col: "#B0A0D0", desde: 1830,
+    lema: "la escuela del cura y la ley de Dios",
+    eje: { renta: 0.05, orden: 0.80 },
+    base: { clero: 4.0, campesino: 2.4, artesano: 1.6, obrero: 1.3, pastor: 2.0,
+            mercader: 1.2, noble: 2.2 },
+    pideCredo: true, porLetras: -0.35, porCaudal: -0.05 },
+];
+const PARTIDO_IDX = Object.fromEntries(PARTIDOS.map((x) => [x.id, x]));
+
+// ——— quién vota ———
+// La pieza que decide todo lo demás. Devuelve, de 0 a 1, qué parte de un grupo
+// tiene voto. Cero mientras no hay elecciones; después, censitario —vota el que
+// paga, y por eso los liberales ganaban con el 3% del censo—; y al final
+// universal. Lo que mueve la ley por el camino es la apertura de la época, que
+// ya sabe del siglo y de la forma de gobierno.
+// A cuánta gente llama la ley a votar, sobre la población entera. No sobre los
+// adultos ni sobre los varones: sobre todo el mundo, que es como se cuenta acá
+// y es lo que hace legibles las cifras. En 1830, con voto censitario, votaba
+// alrededor del uno por ciento de la población de Francia; con sufragio
+// universal masculino, sobre el veinticinco; y con sufragio universal de
+// verdad, cerca de la mitad, porque la otra mitad son niños.
+//
+// Se expresa como CUOTA y no como umbral de renta, y esa es la lección que ya
+// costó una vez con las necesidades: un umbral fijo en raciones deja de morder
+// en cuanto la renta del siglo se multiplica por seis, y entonces el sufragio
+// censitario de 1860 llamaba a las urnas al noventa por ciento del país.
+const cuotaElectoral = (ap) => acotar(Math.pow(acotar(ap, 0, 1), 2.2) * 0.50, 0, 0.50);
+
+// El corte de riqueza que deja pasar exactamente esa cuota. Se calcula una vez
+// por elección recorriendo a la gente de más rica a más pobre.
+function corteElectoral(s) {
+  const ap = ((s.pops || {}).apertura != null) ? s.pops.apertura
+    : vozAbierta(s.anio, (s.gobierno || {}).forma);
+  const cuota = cuotaElectoral(ap);
+  if (cuota <= 0) return { ap, cuota, corte: Infinity };
+  const filas = [];
+  let gente = 0;
+  for (const p of s.provincias || []) for (const q of p.pops || []) {
+    gente += q.n;
+    filas.push({ n: q.n, v: (q.caudal || 0) * 0.5 + ((q.eco || {}).ingreso || 0) });
+  }
+  if (!gente) return { ap, cuota, corte: Infinity };
+  filas.sort((a, b) => b.v - a.v);
+  let acum = 0, corte = 0;
+  const tope = gente * cuota;
+  for (const f of filas) {
+    acum += f.n;
+    if (acum >= tope) { corte = f.v; break; }
+  }
+  // Y un segundo paso, porque la cuota dice CUÁNTOS votan y la apertura QUIÉNES,
+  // y son dos cosas: mezclando las dos sin cuadrar, un país con voto universal
+  // llamaba a las urnas al cien por cien de la población, niños incluidos. Se
+  // mide lo que sale del criterio mezclado y se escala para que la cuota se
+  // cumpla, que es lo que la ley electoral decide de verdad.
+  const c0 = { ap, cuota, corte, factor: 1 };
+  let bruto = 0;
+  for (const p of s.provincias || []) for (const q of p.pops || []) bruto += q.n * derechoDeVoto(q, s, c0);
+  return { ap, cuota, corte, factor: bruto > 0 ? acotar((gente * cuota) / bruto, 0, 1) : 1 };
+}
+
+function derechoDeVoto(q, s, corte) {
+  const c = corte || corteElectoral(s);
+  if (!(c.cuota > 0)) return 0;
+  const suyo = (q.caudal || 0) * 0.5 + ((q.eco || {}).ingreso || 0);
+  // Dos cosas distintas: CUÁNTOS votan —la cuota— y QUIÉNES. Con sufragio
+  // censitario los elige la riqueza; con sufragio universal no los elige nadie,
+  // votan todos los adultos y da igual lo que tengan. Seleccionando siempre por
+  // riqueza, un país con voto universal seguía teniendo un electorado de ricos
+  // y el partido liberal ganaba con el setenta por ciento en 1950.
+  const porRiqueza = c.corte === 0 ? 1
+    : acotar((suyo - c.corte) / Math.max(0.15, c.corte * 0.5) * 0.5 + 0.5, 0, 1);
+  // El suelo —la parte que vota sin que la riqueza la seleccione— sube con el
+  // cubo de la apertura y no con la apertura. Mezclándolo linealmente quedaba
+  // un suelo del veinte por ciento con el voto casi cerrado, y como después
+  // todo se escala para cuadrar la cuota, ese suelo plano deshacía la selección
+  // entera: un censo del 1,5% de la población daba el mismo resultado que el
+  // sufragio universal, que es exactamente lo contrario de para qué sirve una
+  // ley electoral.
+  const pasa = porRiqueza + Math.pow(c.ap, 3) * (1 - porRiqueza);
+  // Saber leer fue requisito en media Europa, y donde no lo fue por ley lo fue
+  // de hecho: hay que poder leer la papeleta. Se afloja cuando el voto se abre.
+  const letra = acotar(0.3 + q.letras * 1.4, 0, 1) * (1 - c.ap) + c.ap;
+  // los que nunca contaron: no es una ley, es que no se los llamaba
+  const suelo = q.clase === "esclavo" ? 0 : q.clase === "siervo" ? 0.15 : 1;
+  return acotar(pasa * letra * suelo * (c.factor == null ? 1 : c.factor), 0, 1);
+}
+
+// ——— qué partidos hay ———
+// No los que uno quiera: los que la época y la sociedad permiten.
+function partidosDe(s) {
+  const anio = s.anio || 1200;
+  const P = s.pops || {};
+  const clases = P.clases || {};
+  const gente = Object.values(clases).reduce((a, b) => a + b, 0) || 1;
+  const credos = Object.keys(P.credos || {}).length;
+  return PARTIDOS.filter((x) => {
+    if (anio < x.desde) return false;
+    // hace falta a quién representar: al menos una parte de su base
+    let suyos = 0;
+    for (const [cl, w] of Object.entries(x.base)) if (w >= 2.4) suyos += clases[cl] || 0;
+    if (suyos / gente < 0.02) return false;
+    if (x.pideLetras && (P.letras || 0) < x.pideLetras) return false;
+    // y el confesional, con que haya una iglesia a la que defender
+    if (x.pideCredo && credos < 1) return false;
+    return true;
+  });
+}
+
+// ——— a quién vota cada uno ———
+// La afinidad de un grupo con un programa: la clase pesa lo suyo, pero también
+// pesan lo que tiene, lo que lee y lo enfadado que está.
+// Dónde se sitúa una familia en los dos ejes que importan: cuánto tiene y
+// cuánto quiere que las cosas sigan como están. Hace falta porque el peso de
+// clase por sí solo hace votar a una clase entera junta, y entonces en una
+// sociedad de comerciantes y técnicos —que es lo que es un país de 1950— el
+// partido liberal saca el sesenta por ciento, que no pasó en ninguna parte.
+// Dentro de cualquier clase hay ricos y pobres, devotos y descreídos, y es esa
+// diferencia y no la clase la que parte el voto por la mitad.
+// El puesto en la fila y no la distancia a un promedio: los promedios de renta
+// los infla el de arriba, así que midiendo así casi todo el mundo salía «en la
+// media» y el partido obrero quedaba lejos del votante corriente. Con el puesto
+// en la fila, la mitad de abajo está abajo, que es donde está.
+function filaDeRenta(provs) {
+  const filas = [];
+  let gente = 0;
+  for (const p of provs || []) for (const q of p.pops || []) {
+    const v = (q.caudal || 0) * 0.5 + ((q.eco || {}).ingreso || 0);
+    filas.push({ n: q.n, v }); gente += q.n;
+  }
+  filas.sort((a, b) => a.v - b.v);
+  const cortes = [];
+  let acum = 0;
+  for (const f of filas) { acum += f.n; cortes.push({ v: f.v, q: gente ? acum / gente : 0 }); }
+  return { cortes, gente };
+}
+const puestoEnLaFila = (v, fila) => {
+  const c = (fila || {}).cortes || [];
+  if (!c.length) return 0.5;
+  let lo = 0, hi = c.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (c[m].v < v) lo = m + 1; else hi = m; }
+  return c[lo].v <= v ? c[lo].q : (lo > 0 ? c[lo - 1].q : 0);
+};
+
+function sitioDe(q, s, fila) {
+  const E = q.eco || {};
+  const suyo = (q.caudal || 0) * 0.5 + (E.ingreso || 0);
+  const renta = acotar((puestoEnLaFila(suyo, fila) - 0.5) * 2, -1, 1);
+  const oficial = (s.pops || {}).credo || null;
+  // conservar es cosa de tener qué conservar, de no leer y de rezar
+  let orden = 0.15;
+  orden += acotar(renta, 0, 1) * 0.4;
+  orden -= acotar(q.letras, 0, 1) * 0.55;
+  orden -= acotar((q.furia || 0) / 100, 0, 1) * 0.8;
+  orden += (CLASES[q.clase] || CLASES.campesino).urb < 0.4 ? 0.30 : -0.10;
+  orden += oficial && q.religion === oficial ? 0.18 : -0.35;
+  return { renta, orden: acotar(orden, -1, 1) };
+}
+
+function simpatiaDe(q, x, s, fila) {
+  const base = (x.base[q.clase] || 0);
+  const E = q.eco || {};
+  // Rico AQUÍ y no en raciones absolutas. Con un umbral fijo, en 1890 todo el
+  // mundo pasaba de seis raciones y el partido obrero le aplicaba su castigo al
+  // acomodado a sus propios obreros. Es la tercera vez que una medida absoluta
+  // de riqueza miente en cuanto el siglo multiplica la renta.
+  const rico = puestoEnLaFila((q.caudal || 0) * 0.5 + (E.ingreso || 0), fila);
+  // Lo que aporta la clase, que es mucho pero no es todo
+  let v = 0.55 + base * 0.62;
+  // y lo que aporta la distancia entre lo que la familia es y lo que el partido
+  // dice: el modelo espacial de siempre, que es lo que hace que dos técnicos
+  // con la misma nómina voten cosas distintas si uno es devoto y el otro no
+  const e = x.eje || { renta: 0, orden: 0 };
+  const yo = sitioDe(q, s, fila);
+  const d2 = Math.pow(yo.renta - e.renta, 2) + Math.pow(yo.orden - e.orden, 2);
+  v *= Math.exp(-d2 / 0.95);
+  v *= 1 + (x.porCaudal || 0) * (rico - 0.35);
+  v *= 1 + (x.porLetras || 0) * (acotar(q.letras, 0, 1) - 0.4);
+  v *= 1 + (x.porFuria || 0) * acotar((q.furia || 0) / 100, 0, 1);
+  if (x.pideCredo) {
+    const oficial = (s.pops || {}).credo || null;
+    // el que reza con la iglesia del país la vota; el que reza otra cosa huye
+    v *= oficial && q.religion === oficial ? 1.3 : 0.15;
+  }
+  // ——— el desgaste del poder ———
+  // El que gobierna pierde votos por gobernar. Es de lo más universal que hay
+  // en política: quien manda toma decisiones, y cada decisión disgusta a
+  // alguien mientras que la oposición no disgusta a nadie. Sin esto, el partido
+  // que ganaba la primera elección las ganaba todas durante ciento veinte años,
+  // y una democracia en la que nunca cambia el gobierno no es una democracia.
+  const G = s.gobierno || {};
+  if (G.partido === x.id) {
+    const mandando = acotar(((s.anio || 0) - (G.desdeEleccion || (s.anio || 0))) / 30, 0, 1);
+    v *= 0.86 - mandando * 0.16;
+    // y más aún si las cosas van mal, que para eso se vota
+    const mal = acotar((55 - ((s.stats || {}).estabilidad || 50)) / 55, 0, 1);
+    v *= 1 - mal * 0.28;
+  }
+  return Math.max(0.02, v);
+}
+
+// ——— la elección ———
+// Se cuenta comarca por comarca, porque una elección no es una encuesta: se
+// gana en sitios, y el mapa de quién gana dónde dice más de un país que el
+// porcentaje nacional.
+function votar(s, rnd) {
+  const lista = partidosDe(s);
+  if (!lista.length) return null;
+  const corte = corteElectoral(s);
+  // la fila de la renta del reino, para saber quién es rico AQUÍ: en raciones a
+  // secas, todo el mundo es rico en 1950 y pobre en 1300
+  const fila = filaDeRenta(s.provincias);
+  const votos = {};
+  for (const x of lista) votos[x.id] = 0;
+  let censo = 0, gente = 0;
+  const porProvincia = [];
+  for (const p of s.provincias || []) {
+    const suyos = {};
+    for (const x of lista) suyos[x.id] = 0;
+    let censoAqui = 0;
+    for (const q of p.pops || []) {
+      gente += q.n;
+      const puede = derechoDeVoto(q, s, corte) * q.n;
+      if (!(puede > 0)) continue;
+      censoAqui += puede;
+      let suma = 0;
+      const sim = lista.map((x) => { const v = simpatiaDe(q, x, s, fila); suma += v; return v; });
+      // El voto no se parte en cinco: se elige uno. Pero un grupo son muchas
+      // familias y no todas votan igual, así que el reparto es proporcional a
+      // la simpatía elevada, que concentra sin llegar a la unanimidad.
+      // El exponente concentra sin llegar a la unanimidad. A 2,1 el partido con
+      // la base más ancha se llevaba el setenta por ciento del país, y eso no
+      // pasa en ninguna democracia: una sociedad se parte, no se alinea.
+      let suma2 = 0;
+      const conc = sim.map((v) => { const w = Math.pow(v / suma, 1.45); suma2 += w; return w; });
+      for (let k = 0; k < lista.length; k++) suyos[lista[k].id] += puede * (conc[k] / (suma2 || 1));
+    }
+    censo += censoAqui;
+    for (const x of lista) votos[x.id] += suyos[x.id];
+    if (censoAqui > 0) {
+      const g = Object.entries(suyos).sort((a, b) => b[1] - a[1])[0];
+      porProvincia.push({ id: p.id, nombre: p.nombre, gana: g[0],
+        parte: +(g[1] / censoAqui).toFixed(3) });
+    }
+  }
+  const total = Object.values(votos).reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return null;
+  const orden = Object.entries(votos).map(([id, v]) => ({ id, n: PARTIDO_IDX[id].n,
+    corto: PARTIDO_IDX[id].corto, col: PARTIDO_IDX[id].col, parte: +(v / total).toFixed(4) }))
+    .sort((a, b) => b.parte - a.parte);
+  return { partidos: orden, gana: orden[0].id,
+    censo: +(censo / Math.max(1, gente)).toFixed(4),
+    porProvincia };
+}
+
+// Cada cuántos años se vota, y si se vota. Antes de que exista la idea, no; y
+// un imperio o una teocracia no convocan elecciones por mucho siglo XIX que sea.
+function hayElecciones(s) {
+  const forma = (s.gobierno || {}).forma;
+  if (forma === "Imperio" || forma === "Teocracia") return false;
+  const ap = ((s.pops || {}).apertura != null) ? s.pops.apertura : vozAbierta(s.anio, forma);
+  return ap >= 0.18;
+}
+const CADA_CUANTO = 5;
+
 // ═══ LA SALUD ════════════════════════════════════════════════
 // Hasta acá la salud era un número del reino: un multiplicador que salía de lo
 // que el reino sabía y se aplicaba igual a todo el mundo. Con eso, el minero de
@@ -4285,6 +4623,9 @@ function radicalizarPops(pops, p, s) {
   const mano = acotar(((st.militar || 50) - 45) / 130 + ((st.estabilidad || 50) - 45) / 190, -0.25, 0.42);
   const negada = {};
   for (const f of ["nobleza", "clero", "mercaderes", "ejercito", "pueblo"]) negada[f] = vozNegada(f, s);
+  const votando = hayElecciones(s);
+  const mando = PARTIDO_IDX[(s.gobierno || {}).partido] || null;
+  const filaRenta = mando ? filaDeRenta([{ pops }]) : null;
   // Lo que gana el que más gana de la comarca. Hace falta porque la gente no se
   // compara con el pasado sino con el vecino: un obrero alimentado que ve al
   // dueño de la fábrica ganar cuarenta veces lo suyo no está conforme, y de ahí
@@ -4328,6 +4669,24 @@ function radicalizarPops(pops, p, s) {
     // enterrar hijos enfurece, y enterrarlos sabiendo que en el barrio de
     // arriba no se mueren, más
     if (q.salud != null) meta += acotar((58 - q.salud) / 42, 0, 1) * 14;
+    // ——— y la urna, que es lo contrario de la barricada ———
+    // Donde se puede votar, la rabia se cuenta en vez de salir a la calle. No
+    // desaparece: cambia de forma. Y no basta con que haya elecciones: hace
+    // falta poder votar en ellas —de nada le sirve el sufragio censitario al
+    // que no llega al censo— y que gobierne alguien que sea algo suyo. Es la
+    // diferencia entre los países que abrieron el voto a tiempo y tuvieron
+    // partidos obreros, y los que no y tuvieron barricadas.
+    if (votando) {
+      const puede = derechoDeVoto(q, s);
+      meta -= puede * 16;                            // poder votar calma
+      if (mando) meta -= puede * (simpatiaDe(q, mando, s, filaRenta) >= 1.1 ? 16 : 0);
+      // Y al que la ley deja fuera, verlo votar a los demás le sienta peor que
+      // si no votara nadie. Pero menos de lo que calma poder votar: a diez, una
+      // monarquía con censo estrecho acumulaba tanto rencor que se le
+      // levantaba el reino cada década, y lo que hicieron esas monarquías fue
+      // durar un siglo mientras el censo se abría a empujones.
+      meta += (1 - puede) * 5;
+    }
     meta -= mano * 26;
     // El que tiene qué perder pierde las ganas. Pero «tener» es relativo al
     // siglo: medido en raciones a secas, en 1900 cualquiera tenía más guardado
@@ -5001,6 +5360,12 @@ const VISTAS = [
     fmt: (v) => (v < 0.02 ? "todos de aquí" : Math.round(v * 100) + "% viene de fuera"),
     mio: (m) => ((m.soc || {}).forasteros != null ? m.soc.forasteros : null),
     pie: "cuánta gente no es de la tierra" },
+  // Quién gana dónde. Una elección no es una encuesta: se gana en sitios, y el
+  // mapa de quién gana dónde dice de un país lo que el porcentaje nacional
+  // esconde —que el campo vota una cosa y la fábrica otra, y que eso es una
+  // frontera aunque no esté dibujada.
+  { id: "urnas", n: "Elecciones", ambito: "reino", clases: "partido",
+    pie: "qué se vota en cada comarca" },
   { id: "hambre", n: "Hambre", ambito: "reino", rampa: "sucio",
     cortes: [0.01, 0.05, 0.12, 0.25, 0.45],
     fmt: (v) => (v < 0.005 ? "nadie pasa hambre" : Math.round(v * 100) + "% pasa hambre"),
@@ -5074,6 +5439,7 @@ function colorMio(V, m, cortes) {
   if (V.clases === "via") return VIA_COL[acotar(Math.round(m.via || 0), 0, 3)];
   if (V.clases === "clase") return CLASE_COL[(m.soc || {}).claseMayor] || APAGADO;
   if (V.clases === "credo") return CREDO_COL[(m.soc || {}).credoMayor] || APAGADO;
+  if (V.clases === "partido") { const x = PARTIDO_IDX[(m.urna || {}).gana]; return x ? x.col : APAGADO; }
   const t = tramoDe(valorMio(V, m), cortes || V.cortes);
   return t < 0 ? APAGADO : RAMPAS[V.rampa][t];
 }
@@ -5932,6 +6298,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       return c ? "sobre todo " + c.n : null; }
     if (V.clases === "credo") { const c = RELIGIONES[((mio || {}).soc || {}).credoMayor];
       return c ? c.n : null; }
+    if (V.clases === "partido") { const x = PARTIDO_IDX[((mio || {}).urna || {}).gana];
+      return x ? `${x.corto}, ${Math.round((mio.urna.parte || 0) * 100)}%` : "todavía no se vota aquí"; }
     const v = mio ? valorMio(V, mio) : amb && V.val ? V.val(amb) : null;
     return v == null || !Number.isFinite(v) ? null : V.fmt(v);
   };
@@ -6661,6 +7029,31 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               hay grupos, y lo que interesa es cuántas comarcas son de cada uno.
               Se listan solo los que están en el mapa: la lista de quince
               estamentos posibles no la mira nadie. */}
+          {V.clases === "partido" && (
+            <div style={{ margin: "5px 0 2px" }}>
+              {(() => {
+                const cuenta = new Map();
+                for (const m of mias) { const g = (m.urna || {}).gana; if (g) cuenta.set(g, (cuenta.get(g) || 0) + 1); }
+                if (!cuenta.size) return (
+                  <div style={{ fontSize: 10, color: C.muted, opacity: 0.75 }}>
+                    todavía no se vota en este reino
+                  </div>
+                );
+                return [...cuenta.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => {
+                  const x = PARTIDO_IDX[k];
+                  return (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11,
+                      color: C.muted, padding: "1px 0" }}>
+                      <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                        background: (x || {}).col || APAGADO, border: "1px solid rgba(0,0,0,0.5)" }} />
+                      {(x || { corto: k }).corto}
+                      <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>{n}</span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
           {(V.clases === "clase" || V.clases === "credo") && (
             <div style={{ margin: "5px 0 2px" }}>
               {(() => {
@@ -9829,6 +10222,38 @@ function aplicarEfectos(n, ef, rnd) {
     e.reservas = ef.vivo.reservas;
     e.mundo = ef.vivo.mundo;
     if (ef.vivo.pops) e.pops = sociedadDelReino(e.provincias, n.anio, (n.gobierno || {}).forma);
+    // ——— y lo que sale de las urnas ———
+    // Un gobierno elegido no es un adorno: manda, y por eso los estamentos que
+    // lo votaron respiran y los que no, aprietan los dientes. Que la nobleza
+    // esté contenta con un gobierno obrero sería tan raro como lo contrario.
+    if (ef.vivo.urnas) {
+      const u = ef.vivo.urnas;
+      const seguia = (e.gobierno || {}).partido === u.gana;
+      e.gobierno = { ...e.gobierno, partido: u.gana, votado: u.anio,
+                     desdeEleccion: seguia ? ((e.gobierno || {}).desdeEleccion || u.anio) : u.anio,
+                     urnas: u.partidos.slice(0, 5), censo: u.censo };
+      // y cada comarca se queda con lo que votó, que es lo que pinta el mapa
+      const porProv = new Map((u.porProvincia || []).map((x) => [x.id, x]));
+      e.provincias = e.provincias.map((p) => {
+        const x = porProv.get(p.id);
+        return x ? { ...p, urna: { gana: x.gana, parte: x.parte, anio: u.anio } } : p;
+      });
+      const X = PARTIDO_IDX[u.gana];
+      if (X) {
+        e.facciones = { ...e.facciones };
+        // a cada estamento le sienta el gobierno según cuánto es suyo
+        const peso = {};
+        for (const [cl, w] of Object.entries(X.base)) {
+          const C = CLASES[cl]; if (!C) continue;
+          peso[C.fac] = Math.max(peso[C.fac] || 0, w);
+        }
+        for (const f of FACCIONES) {
+          const mio = peso[f.id] || 0;
+          const d = (mio >= 3 ? 7 : mio >= 1.5 ? 3 : -4) * (u.cambio ? 1.4 : 0.7);
+          e.facciones[f.id] = acotar((e.facciones[f.id] ?? 50) + d, 8, 100);
+        }
+      }
+    }
     // La suciedad mata antes de que nadie sepa por qué: se descuenta acá y no
     // como una penalización de la ficha, porque son personas, no un modificador.
     if (ef.vivo.muertos > 0) {
@@ -11196,6 +11621,25 @@ const INFORMES = [
   // Estos observadores no miran al reino sino al mundo. Son los que hacen que
   // un turno pasivo pueda contar algo que no decidió nadie: que el monte
   // retrocede, que una veta se acabó, que el invierno cerró los ríos.
+  // ——— las urnas ———
+  // Una elección se cuenta como la vivió quien la vivió: con el nombre del que
+  // ganó, con cuánta gente pudo votar —que es la mitad de la noticia— y sin
+  // saber todavía si aquello duraría. El peso va medido contra los demás
+  // informes del mundo: a cuarenta y dos, un reino que vota cada cinco años
+  // dejaba de hablar del monte y del clima.
+  { id: "eleccion", peso: (s, c) => (((c.vivo || {}).hechos || []).some((h) => h.t === "eleccion") ? 26 : 0),
+    huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "eleccion") || {};
+      return { donde: { nombre: (c.provCapital || {}).nombre || "la capital" },
+               n: Math.round((h.parte || 0) * 100), cual: h.cambio ? "cambio" : "sigue" }; },
+    porCual: {
+      cambio: ["🗳 Se vota, y cambia el gobierno: los {n} de cada cien no le alcanzan al que estaba. En {donde} lo celebran unos y lo entierran otros",
+        "🗳 Gana la oposición con {n} de cada cien votos. (Hay quien dice que es el fin de algo|Hay quien dice que no cambiará nada|Los dos tienen parte de razón)",
+        "🗳 El recuento da la vuelta al gobierno: {n} por ciento. (Se traspasa el poder sin sangre, que es lo nuevo|Nadie recuerda que esto se hiciera así antes)"],
+      sigue: ["🗳 Se vota y gana el que estaba, con {n} de cada cien. (Los mismos, cuatro años más|Cambian las caras y no el rumbo)",
+        "🗳 Elecciones: {n} por ciento para el gobierno. En {donde} el resultado se sabía y aun así se hizo cola",
+        "🗳 Se renueva el gobierno en las urnas con {n} de cada cien votos[, y la oposición dice que hubo trampa]"] },
+    fr: ["🗳 Se celebran elecciones y el gobierno saca {n} de cada cien votos"] },
+
   // ——— la calle ———
   // Se cuenta lo que se vio, no lo que significó: quien escribe la crónica está
   // dentro y no sabe todavía si aquello fue un tumulto o el principio de algo.
