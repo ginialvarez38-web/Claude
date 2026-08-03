@@ -1576,16 +1576,35 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     return { ...p, rioNav: ag.nav, crecida: ag.crecida, estiaje: ag.estiaje, salto: ag.salto };
   });
 
+  // ——— y la gente ———
+  // Va al final porque necesita todo lo anterior: el ambiente para saber de
+  // qué se vive, la cosecha para saber si se come, el humo para saber si se
+  // respira. La población de la provincia deja de ser el número que había y
+  // pasa a ser la suma de sus grupos; el número se conserva porque los grupos
+  // salen de él, pero ahora se sabe de quién es cada parte.
+  const conGente = conAguas.map((q) => {
+    const r = evolucionarPops(q, { ...s, provincias: conAguas }, dias, rnd);
+    for (const h of r.hechos) hechos.push(h);
+    const vivos = animarPops(r.pops, q, s, q.cosecha);
+    // el total lo sigue mandando la demografía del reino, que ya cuadra con el
+    // techo y con el hambre: los grupos se reparten ese total, no lo inventan
+    const suma = poblacionPops(vivos);
+    const escala = suma > 0 && q.poblacion > 0 ? q.poblacion / suma : 1;
+    const pops = Math.abs(escala - 1) < 0.002 ? vivos
+      : vivos.map((x) => ({ ...x, n: +(x.n * escala).toFixed(3) }));
+    return { ...q, pops, soc: resumenPops(pops) };
+  });
+
   // Al final de todo: el ambiente de hoy, con el clima ya derivado, el bosque
   // ya talado y el humo ya contado. Va último porque depende de los tres.
-  const refresco = refrescarAmbiente(conAguas, { ...s, mundo: { anomalia } }, anios);
+  const refresco = refrescarAmbiente(conGente, { ...s, mundo: { anomalia } }, anios);
   const conAmbiente = refresco.provincias;
   for (const h of refresco.hechos) hechos.push(h);
 
   // Y lo que el año del río da para contar: una crecida de las gordas, un
   // estiaje que deja el cauce en nada, o el día que se pudo navegar hasta
   // arriba por primera vez.
-  const conRio = conAguas.filter((q) => q.crecida);
+  const conRio = conGente.filter((q) => q.crecida);
   if (conRio.length) {
     const peor = conRio.reduce((a, b) => (b.crecida > a.crecida ? b : a));
     const seco = conRio.reduce((a, b) => ((b.estiaje || 9) < (a.estiaje || 9) ? b : a));
@@ -1624,6 +1643,8 @@ function evolucionarMundo(s, dias, rnd, empuje) {
   }
 
   return { provincias: conAmbiente, reservas: { ...(s.reservas || {}), ...gasto },
+           // la sociedad del reino, que es de donde salen los estamentos
+           pops: sociedadDelReino(conAmbiente, s.anio, (s.gobierno || {}).forma),
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
                     humoDicho: nuevoHumoDicho, aguaDicha: nuevaAguaDicha,
                     rioDicho: typeof nuevoRioDicho === "number" ? nuevoRioDicho : (s.mundo && s.mundo.rioDicho) || 0 },
@@ -3147,6 +3168,700 @@ function ciudadEnPunto(cs, x, y, tol) {
   return mejor;
 }
 
+// ═══ LA GENTE, POR GRUPOS ════════════════════════════════════
+// Hasta acá la población de una provincia era un número. Con un número se
+// puede saber cuánta gente hay y nada más: no quién es, ni de qué vive, ni qué
+// reza, ni si sabe leer. Y como no se sabe nada de ella, la población no podía
+// hacer nada —ni emigrar por un motivo, ni radicalizarse por otro, ni votar, ni
+// resistirse a una ley— y todo eso había que simularlo por otro lado, con
+// medidores nacionales que no salían de ninguna parte.
+//
+// Un POP es un grupo de personas iguales entre sí: veinticinco mil campesinos
+// bretones católicos, cuatro mil comerciantes flamencos, ochocientos nobles.
+// No se simula a nadie uno por uno —eso no aguanta tres mil años de partida—
+// pero sí se simula cada grupo con lo suyo, y con eso una provincia deja de
+// ser un número y pasa a ser una sociedad.
+//
+// Lo que se guarda de cada POP es corto a propósito: nueve campos. El
+// documento pide cuarenta, pero treinta de esos cuarenta —la natalidad, la
+// productividad, la probabilidad de emigrar, la de rebelarse— no son datos que
+// haya que guardar sino consecuencias que hay que calcular, y calcularlas sale
+// más barato que arrastrarlas y mucho más difícil de dejar inconsistentes.
+
+// ——— las clases ———
+// Cada una con lo suyo: cuándo existe, qué produce, cuánto suele saber leer,
+// cuánto suele tener, cuántos hijos cría y a qué estamento del reino empuja.
+// Ese último campo es el que ata esto a lo que ya había: las cinco facciones
+// del reino dejan de ser cinco números sueltos y pasan a ser lo que opina la
+// gente que hay.
+const CLASES = {
+  esclavo:    { n: "esclavos",    hasta: 1888, prod: 0.55, letras: 0.01, caudal: 0.05, hijos: 0.85, urb: 0.25, fac: "pueblo" },
+  siervo:     { n: "siervos",     hasta: 1861, prod: 0.70, letras: 0.02, caudal: 0.20, hijos: 1.05, urb: 0.02, fac: "pueblo" },
+  campesino:  { n: "campesinos",              prod: 0.85, letras: 0.06, caudal: 0.40, hijos: 1.15, urb: 0.03, fac: "pueblo" },
+  pastor:     { n: "pastores",                prod: 0.70, letras: 0.04, caudal: 0.35, hijos: 1.10, urb: 0.02, fac: "pueblo" },
+  pescador:   { n: "pescadores",              prod: 0.90, letras: 0.10, caudal: 0.45, hijos: 1.05, urb: 0.45, fac: "pueblo" },
+  minero:     { n: "mineros",                 prod: 1.15, letras: 0.12, caudal: 0.45, hijos: 1.10, urb: 0.35, fac: "pueblo" },
+  artesano:   { n: "artesanos",   hasta: 1920, prod: 1.20, letras: 0.30, caudal: 0.75, hijos: 0.95, urb: 0.90, fac: "mercaderes" , tope: 0.16, baja: "campesino"},
+  obrero:     { n: "obreros",     desde: 1780, prod: 1.45, letras: 0.45, caudal: 0.55, hijos: 1.05, urb: 0.95, fac: "pueblo" },
+  tecnico:    { n: "técnicos",    desde: 1860, prod: 2.10, letras: 0.92, caudal: 1.10, hijos: 0.80, urb: 0.95, fac: "mercaderes" , tope: 0.3, baja: "obrero"},
+  mercader:   { n: "mercaderes",              prod: 1.70, letras: 0.55, caudal: 1.60, hijos: 0.85, urb: 0.95, fac: "mercaderes" , tope: 0.18, baja: "artesano"},
+  burgues:    { n: "propietarios", desde: 1500, prod: 2.40, letras: 0.80, caudal: 3.00, hijos: 0.75, urb: 0.90, fac: "mercaderes" , tope: 0.07, baja: "mercader"},
+  letrado:    { n: "letrados",    desde: -500, prod: 1.30, letras: 1.00, caudal: 0.90, hijos: 0.70, urb: 0.88, fac: "clero" , tope: 0.05, baja: "mercader"},
+  clero:      { n: "clero",                   prod: 0.60, letras: 0.85, caudal: 0.95, hijos: 0.10, urb: 0.55, fac: "clero" , tope: 0.055, baja: "campesino"},
+  soldado:    { n: "soldados",                prod: 0.30, letras: 0.18, caudal: 0.50, hijos: 0.80, urb: 0.50, fac: "ejercito" , tope: 0.07, baja: "campesino"},
+  noble:      { n: "nobleza",     hasta: 1960, prod: 0.45, letras: 0.70, caudal: 4.00, hijos: 0.90, urb: 0.60, fac: "nobleza" , tope: 0.025, baja: "burgues"},
+};
+const CLASE_IDS = Object.keys(CLASES);
+const claseViva = (id, anio) => {
+  const c = CLASES[id];
+  return c && (c.desde == null || anio >= c.desde) && (c.hasta == null || anio <= c.hasta);
+};
+
+// ——— las culturas ———
+// Una cultura no es una nacionalidad: es lo que la gente habla, come y cree
+// que es. Sobrevive a los estados —hay bretones desde antes de Francia y los
+// habrá después— y por eso va con la gente y no con el mapa.
+const CULTURA_PAIS = {
+  Spain: ["castellana", "romance"], Portugal: ["portuguesa", "romance"],
+  France: ["francesa", "romance"], Italy: ["italiana", "romance"],
+  Romania: ["rumana", "romance"], "United Kingdom": ["inglesa", "germánica"],
+  Ireland: ["irlandesa", "celta"], Germany: ["alemana", "germánica"],
+  Austria: ["austríaca", "germánica"], Netherlands: ["neerlandesa", "germánica"],
+  Belgium: ["flamenca", "germánica"], Switzerland: ["suiza", "germánica"],
+  Denmark: ["danesa", "germánica"], Norway: ["noruega", "germánica"],
+  Sweden: ["sueca", "germánica"], Iceland: ["islandesa", "germánica"],
+  Finland: ["finesa", "urálica"], Estonia: ["estonia", "urálica"],
+  Hungary: ["húngara", "urálica"], Poland: ["polaca", "eslava"],
+  "Czech Republic": ["checa", "eslava"], Slovakia: ["eslovaca", "eslava"],
+  Russia: ["rusa", "eslava"], Ukraine: ["ucraniana", "eslava"],
+  Belarus: ["bielorrusa", "eslava"], Serbia: ["serbia", "eslava"],
+  Croatia: ["croata", "eslava"], Bulgaria: ["búlgara", "eslava"],
+  Slovenia: ["eslovena", "eslava"], Greece: ["griega", "helénica"],
+  Turkey: ["turca", "túrcica"], Lithuania: ["lituana", "báltica"],
+  Latvia: ["letona", "báltica"], Albania: ["albanesa", "ilírica"],
+  Morocco: ["magrebí", "bereber"], Algeria: ["magrebí", "bereber"],
+  Tunisia: ["magrebí", "bereber"], Libya: ["árabe", "semítica"],
+  Egypt: ["egipcia", "semítica"], "Saudi Arabia": ["árabe", "semítica"],
+  Iraq: ["árabe", "semítica"], Syria: ["árabe", "semítica"],
+  Israel: ["hebrea", "semítica"], Yemen: ["árabe", "semítica"],
+  Iran: ["persa", "irania"], Afghanistan: ["afgana", "irania"],
+  Pakistan: ["panyabí", "indoaria"], India: ["indostánica", "indoaria"],
+  Bangladesh: ["bengalí", "indoaria"], Nepal: ["nepalí", "indoaria"],
+  "Sri Lanka": ["cingalesa", "indoaria"], China: ["han", "sínica"],
+  Taiwan: ["han", "sínica"], Japan: ["japonesa", "japónica"],
+  "South Korea": ["coreana", "coreánica"], "North Korea": ["coreana", "coreánica"],
+  Mongolia: ["mongola", "mongólica"], Vietnam: ["vietnamita", "austroasiática"],
+  Thailand: ["tailandesa", "tai"], Myanmar: ["birmana", "tibetobirmana"],
+  Cambodia: ["jemer", "austroasiática"], Laos: ["lao", "tai"],
+  Indonesia: ["malaya", "austronesia"], Malaysia: ["malaya", "austronesia"],
+  Philippines: ["filipina", "austronesia"], Kazakhstan: ["kazaja", "túrcica"],
+  Uzbekistan: ["uzbeka", "túrcica"], Turkmenistan: ["turcomana", "túrcica"],
+  Azerbaijan: ["azerí", "túrcica"], Georgia: ["georgiana", "caucásica"],
+  Armenia: ["armenia", "armenia"], Ethiopia: ["amhárica", "semítica"],
+  Somalia: ["somalí", "cusita"], Kenya: ["suajili", "bantú"],
+  Tanzania: ["suajili", "bantú"], Nigeria: ["yoruba", "nigerocongolesa"],
+  Ghana: ["akán", "nigerocongolesa"], Mali: ["mandinga", "nigerocongolesa"],
+  Senegal: ["wolof", "nigerocongolesa"], "South Africa": ["zulú", "bantú"],
+  Angola: ["bantú", "bantú"], "Congo (Kinshasa)": ["bantú", "bantú"],
+  Sudan: ["árabe", "semítica"], Mexico: ["mexicana", "romance"],
+  Guatemala: ["maya", "amerindia"], Peru: ["quechua", "amerindia"],
+  Bolivia: ["aimara", "amerindia"], Ecuador: ["quechua", "amerindia"],
+  Colombia: ["colombiana", "romance"], Venezuela: ["venezolana", "romance"],
+  Brazil: ["brasileña", "romance"], Argentina: ["rioplatense", "romance"],
+  Chile: ["chilena", "romance"], Paraguay: ["guaraní", "amerindia"],
+  Uruguay: ["rioplatense", "romance"], Cuba: ["cubana", "romance"],
+  "United States of America": ["angloamericana", "germánica"],
+  Canada: ["canadiense", "germánica"], Australia: ["australiana", "germánica"],
+  "New Zealand": ["neozelandesa", "germánica"], "Papua New Guinea": ["papú", "papú"],
+};
+const culturaDe = (pais) => {
+  const c = CULTURA_PAIS[pais];
+  if (c) return { n: c[0], familia: c[1] };
+  return { n: (pais || "local").toLowerCase(), familia: "local" };
+};
+
+// ——— las religiones ———
+// Qué se reza en un sitio depende de dónde está y de cuándo. Es una tabla de
+// regiones con fecha de entrada y de salida, y se lee de abajo arriba: la
+// última que encaja es la que manda, porque las religiones se superponen y la
+// que llega desplaza a la que estaba. Por eso en Iberia hay dos entre 711 y
+// 1492, que es exactamente lo que había.
+const RELIGIONES = {
+  animismo:   { n: "animismo",       nat: 1.00, tolera: 0.7 },
+  politeismo: { n: "politeísmo",     nat: 1.00, tolera: 0.8 },
+  judaismo:   { n: "judaísmo",       nat: 1.05, tolera: 0.5 },
+  zoroastro:  { n: "zoroastrismo",   nat: 1.00, tolera: 0.6 },
+  hinduismo:  { n: "hinduismo",      nat: 1.10, tolera: 0.5 },
+  budismo:    { n: "budismo",        nat: 0.95, tolera: 0.8 },
+  confucio:   { n: "confucianismo",  nat: 1.05, tolera: 0.7 },
+  sintoismo:  { n: "sintoísmo",      nat: 1.00, tolera: 0.7 },
+  catolico:   { n: "catolicismo",    nat: 1.12, tolera: 0.4 },
+  ortodoxo:   { n: "cristianismo ortodoxo", nat: 1.10, tolera: 0.45 },
+  protestante:{ n: "protestantismo", nat: 1.02, tolera: 0.5 },
+  islam:      { n: "islam",          nat: 1.14, tolera: 0.45 },
+};
+// región, desde, hasta, religión. El orden importa: la última que encaje gana.
+const CREDO_MAPA = [
+  [-180, 180, -90, 90, -4000, 9999, "animismo"],
+  // el Mediterráneo antiguo
+  [-12, 45, 30, 60, -1200, 400, "politeismo"],
+  [20, 60, 20, 45, -1500, 700, "politeismo"],
+  // Asia meridional y oriental
+  [60, 92, 5, 35, -1500, 9999, "hinduismo"],
+  [95, 145, 18, 45, -1000, 9999, "confucio"],
+  [43, 63, 25, 42, -600, 650, "zoroastro"],
+  [33, 37, 29, 34, -900, 9999, "judaismo"],
+  [70, 92, 8, 35, -400, 1100, "budismo"],
+  [95, 145, 5, 32, 200, 9999, "budismo"],
+  [85, 110, 25, 45, 600, 9999, "budismo"],
+  [95, 122, 20, 45, 400, 9999, "confucio"],     // China vuelve a lo suyo
+  [128, 146, 30, 46, -300, 9999, "sintoismo"],  // y Japón a lo suyo
+  // la cristiandad
+  [-12, 30, 30, 60, 380, 9999, "catolico"],
+  [-12, 30, 35, 72, 500, 9999, "catolico"],
+  [20, 42, 30, 48, 400, 1054, "catolico"],
+  [20, 42, 33, 48, 1054, 9999, "ortodoxo"],
+  [28, 60, 44, 70, 988, 9999, "ortodoxo"],      // la Rus, desde su bautismo
+  [60, 180, 50, 78, 1600, 9999, "ortodoxo"],
+  // el islam
+  [33, 60, 12, 35, 622, 9999, "islam"],
+  [-18, 33, 20, 37, 700, 9999, "islam"],
+  [43, 75, 25, 45, 650, 9999, "islam"],
+  // Al-Ándalus no fue un recuadro quieto durante ocho siglos: fue una frontera
+  // que bajó. Se parte en tres tiempos, que es lo mínimo para que Toledo sea
+  // musulmana en 1000 y cristiana en 1200, como lo fue.
+  [-10, 0, 36, 43.5, 711, 1120, "islam"],
+  [-10, 0, 36, 39.5, 1085, 1250, "islam"],
+  [-7, -1, 36, 38.0, 1250, 1492, "islam"],
+  [62, 78, 24, 37, 1200, 9999, "islam"],        // el Indo, no el Ganges
+  [88, 93, 21, 27, 1300, 9999, "islam"],        // Bengala oriental
+  [95, 120, -10, 8, 1300, 9999, "islam"],
+  [25, 45, 38, 43, 1400, 9999, "islam"],        // Anatolia
+  [-15, 25, 5, 20, 1050, 9999, "islam"],        // el Sahel
+  // la Reforma: el norte, y solo el norte
+  [4, 16, 47, 56, 1530, 9999, "protestante"],   // el norte de Alemania
+  [4, 32, 54, 71, 1530, 9999, "protestante"],   // Escandinavia y el Báltico
+  [-8, 2, 50, 60, 1560, 9999, "protestante"],   // Gran Bretaña
+  [3, 8, 50, 54, 1570, 9999, "protestante"],    // los Países Bajos
+  [-2, 8, 42, 51, 1600, 9999, "catolico"],      // pero Francia se queda católica
+  [6, 19, 45, 51, 1620, 9999, "catolico"],      // y Austria y Baviera también
+  [-10, 20, 36, 47, 1560, 9999, "catolico"],    // y el sur entero
+  // el mundo nuevo
+  [-125, -60, 25, 62, 1620, 9999, "protestante"],
+  [-120, -30, -56, 33, 1520, 9999, "catolico"],
+  [-180, -125, 50, 72, 1750, 9999, "ortodoxo"],
+];
+function religionDe(lon, lat, anio) {
+  let cual = "animismo";
+  for (const [x0, x1, y0, y1, d, h, r] of CREDO_MAPA)
+    if (lon >= x0 && lon <= x1 && lat >= y0 && lat <= y1 && anio >= d && anio <= h) cual = r;
+  return cual;
+}
+// Y la que estaba antes, que no se va de un día para otro: cuando llega una
+// religión nueva, la vieja se queda de minoría y se apaga en generaciones.
+function credoAnterior(lon, lat, anio) {
+  for (let atras = 60; atras <= 400; atras += 40) {
+    const q = religionDe(lon, lat, anio - atras);
+    if (q !== religionDe(lon, lat, anio)) return q;
+  }
+  return null;
+}
+
+// Cuánto sabe leer el que no tenía por qué saber. Es un suelo, no un premio:
+// la escuela obligatoria no hizo leer más al clérigo, hizo leer al campesino.
+// Y llega tarde —no hay nada de eso hasta el siglo XVIII— así que el suelo se
+// queda en cero hasta que la técnica del reino da para sostener escuelas. Sin
+// eso, la Francia de 1400 leía el 28 %, cuando leía el cinco.
+const pisoLetras = (stats) => acotar((((stats || {}).tecnologia || 20) - 55) / 46, 0, 0.94);
+
+// ——— cuánta gente sigue en el campo ———
+// No es «uno menos la tasa urbana», y confundirlos cuesta un siglo entero. La
+// Inglaterra de 1850 era urbana a medias y agraria en un quinto: la diferencia
+// son los que vivían en el campo sin arar —jornaleros de oficio, mineros de
+// pueblo, ferroviarios— y sobre todo que un labrador con arado de hierro y
+// abono da de comer a diez y no a uno. La curva que importa es esta y no la
+// otra: cae de nueve de cada diez a menos de uno de cada diez, y lo que la
+// baja no es la ciudad sino el rendimiento de la tierra.
+function enElCampo(stats) {
+  const t = acotar(((stats || {}).tecnologia || 20) / 100, 0, 1);
+  // 0,20 → 91% · 0,50 → 68% · 0,62 → 46% · 0,75 → 24% · 0,85 → 14% · 0,95 → 10%
+  return acotar(0.06 + 0.87 / (1 + Math.exp((t - 0.60) * 9)), 0.06, 0.93);
+}
+
+// ——— sembrar la sociedad de una provincia ———
+// De dónde sale el reparto: de lo que ya sabe el juego. Cuánta gente puede
+// dejar de arar lo dice la técnica del siglo; de qué vive la comarca lo dicen
+// el bioma, la mina y el mar; y quién manda, la forma de gobierno. No hace
+// falta inventar nada, hace falta usarlo.
+function sembrarPops(p, s) {
+  const total = p.poblacion || 0;
+  if (total <= 0) return [];
+  const anio = s.anio || 1200;
+  const a = ambDe(p) || {};
+  const urb = acotar(tasaUrbana(s.stats), 0, 0.85);
+  const cul = culturaDe(p.pais || s.region);
+  const credo = religionDe((p.lon != null ? p.lon : 0), (p.lat != null ? p.lat : 40), anio);
+  const antes = credoAnterior((p.lon != null ? p.lon : 0), (p.lat != null ? p.lat : 40), anio);
+
+  // los de arriba: pocos y casi fijos, que es lo que fueron siempre
+  const forma = (s.gobierno || {}).forma || "Monarquía";
+  const partes = {};
+  partes.noble = claseViva("noble", anio) ? (forma === "República" ? 0.004 : 0.011) : 0;
+  partes.clero = forma === "Teocracia" ? 0.030 : 0.013;
+  partes.soldado = 0.012 + (s.guerra ? 0.010 : 0);
+  partes.letrado = claseViva("letrado", anio) ? 0.002 + urb * 0.012 : 0;
+
+  // la ciudad: se reparte entre los oficios que esa ciudad tiene de verdad
+  // De qué vive la parte urbana lo decide la geografía de la provincia, tenga
+  // ciudad contada o no. Antes se pedía un objeto ciudad y, si no lo había,
+  // todo lo urbano caía en «artesanos»: la Gran Bretaña de 1850 salía sin un
+  // solo obrero, que es de las cosas más falsas que se pueden decir de ella.
+  // Y cuánta gente hay aquí para repartir entre oficios de ciudad: todo el que
+  // no está en el campo, que es bastante más que el que vive en una ciudad. La
+  // tasa urbana sigue mandando en el tamaño de las ciudades —eso es lo que
+  // mide— pero no en cuánta gente ha dejado de arar.
+  const ciudadPob = acotar(1 - enElCampo(s.stats), 0.05, 0.92);
+  const mayor = (p.ciudad && p.ciudad.pob) || total * urb;
+  const oficios = industriasDe({ n: p.nombre, x: p.x, y: p.y, pob: mayor,
+    rango: rangoCiudad(mayor).id === "aldea" ? 8 : rangoCiudad(mayor).id === "villa" ? 6 : 4,
+    cap: p.capital ? 1 : 0, pais: p.pais }, anio);
+  const deOficio = { hierro: "minero", carbón: "minero", sal: "minero", cobre: "minero",
+    plata: "minero", oro: "minero", petróleo: "obrero", gas: "obrero",
+    acerías: "obrero", telares: "obrero", maquinaria: "obrero", química: "tecnico",
+    electrónica: "tecnico", automóvil: "obrero", oficinas: "tecnico",
+    puerto: "mercader", "tráfico fluvial": "mercader", mercado: "mercader",
+    caravanas: "mercader", banca: "burgues", universidad: "letrado",
+    astilleros: "artesano", curtidurías: "artesano", "paños": "artesano",
+    pesca: "pescador", turismo: "mercader" };
+  const urbanos = {};
+  let pesoU = 0;
+  for (const o of oficios) { const c = deOficio[o.n]; if (!c || !claseViva(c, anio)) continue;
+    urbanos[c] = (urbanos[c] || 0) + o.peso; pesoU += o.peso; }
+  if (!pesoU) { const c = claseViva("obrero", anio) ? "obrero" : "artesano"; urbanos[c] = 1; pesoU = 1; }
+  // Con un tope a la mina. Una comarca puede vivir del carbón y aun así la
+  // mina no emplea a uno de cada cinco: es un oficio de mucho peso económico y
+  // poca gente, y sin tope salían países enteros de mineros porque el subsuelo
+  // pesa mucho en la lista de oficios de la ciudad.
+  const TOPE_MINA = 0.22;
+  if (urbanos.minero != null && urbanos.minero / pesoU > TOPE_MINA) {
+    const sobra = urbanos.minero - pesoU * TOPE_MINA;
+    urbanos.minero -= sobra;
+    const a2 = claseViva("obrero", anio) ? "obrero" : "artesano";
+    urbanos[a2] = (urbanos[a2] || 0) + sobra;
+  }
+  // ——— y lo que la lista de oficios no puede decir ———
+  // La tabla de industrias nombra lo que una ciudad fabrica y extrae, que es
+  // lo que se ve desde fuera: las acerías de Essen, los telares de Manchester.
+  // Pero en cualquier ciudad de cualquier siglo hay más gente vendiendo,
+  // transportando, sirviendo y llevando cuentas que fabricando, y esa gente no
+  // aparece en ninguna industria. Sin esto, el reparto daba un 5% de
+  // comerciantes en 1400 y otro 5% en 1950: seis siglos de terciarización que
+  // no pasaban. La parte que se lleva el comercio y el servicio crece con la
+  // ciudad, no con la fábrica, y por eso se aparta antes de repartir el resto.
+  const terciario = acotar(0.26 + urb * 0.55 + Math.max(0, anio - 1850) / 1100, 0.26, 0.62);
+  const enServicio = {};
+  let pesoS = 0;
+  const meter = (c, w) => { if (!claseViva(c, anio) || w <= 0) return; enServicio[c] = (enServicio[c] || 0) + w; pesoS += w; };
+  meter("mercader", 6);                                   // vender y transportar, de siempre
+  meter("artesano", anio < 1850 ? 4 : 1);                 // el que sirve a mano, hasta que deja de haberlo
+  meter("tecnico", anio >= 1860 ? 3 + urb * 6 : 0);       // oficinas, escuelas, hospitales
+  meter("letrado", 1 + urb * 2);                          // leyes, cuentas y enseñanza
+  meter("clero", anio < 1800 ? 2 : 0.5);                  // que también era un servicio urbano
+  meter("burgues", anio >= 1500 ? 0.8 + urb * 1.2 : 0);   // el que es dueño de todo eso
+  if (!pesoS) { enServicio.mercader = 1; pesoS = 1; }
+  const deFabrica = 1 - terciario;
+  for (const c of Object.keys(urbanos)) partes[c] = (partes[c] || 0) + ciudadPob * deFabrica * (urbanos[c] / pesoU);
+  for (const c of Object.keys(enServicio)) partes[c] = (partes[c] || 0) + ciudadPob * terciario * (enServicio[c] / pesoS);
+
+  // el campo: lo que queda, repartido por lo que da la tierra
+  let usado = 0;
+  for (const v of Object.values(partes)) usado += v;
+  const campo = Math.max(0.05, 1 - usado);
+  const pastoreo = a.bioma === "estepa" || a.bioma === "tundra" || a.bioma === "desierto" ? 0.45
+    : a.bioma === "alpino" || a.altura > 900 ? 0.25 : 0.06;
+  const pesca = pescaDeProvincia(p) * 0.55;
+  // La servidumbre no terminó a la vez en todas partes: al oeste del Elba se
+  // había deshecho hacia 1500 y al este se endureció justo entonces y duró
+  // hasta el siglo XIX. Esa línea partió Europa en dos durante trescientos
+  // años y es de las que más explican, así que está en el mapa y no en una
+  // fecha única.
+  const alEste = (p.lon != null ? p.lon : 0) > 13;
+  const servil = claseViva("esclavo", anio) && anio < 400 ? 0.22
+    : !claseViva("siervo", anio) ? 0
+    : anio < 1500 ? 0.35
+    : alEste ? (anio < 1830 ? 0.34 : 0.10) : (anio < 1600 ? 0.10 : 0);
+  const resto = 1 - pastoreo - pesca;
+  partes.pastor = (partes.pastor || 0) + campo * pastoreo;
+  if (pesca > 0.01) partes.pescador = (partes.pescador || 0) + campo * pesca;
+  if (servil > 0) {
+    const cual = anio < 400 ? "esclavo" : "siervo";
+    partes[cual] = (partes[cual] || 0) + campo * resto * servil;
+  }
+  partes.campesino = (partes.campesino || 0) + campo * resto * (1 - servil);
+
+  // y de ahí a los POPs, con lo que cada clase suele saber y suele tener
+  const techoLetras = pisoLetras(s.stats);
+  const out = [];
+  for (const [clase, frac] of Object.entries(partes)) {
+    if (!(frac > 0.0008) || !claseViva(clase, anio)) continue;
+    const C = CLASES[clase];
+    const n = total * frac;
+    const nuevo = (religion, cuota) => out.push({
+      clase, cultura: cul.n, familia: cul.familia, religion,
+      n: +(n * cuota).toFixed(2),
+      letras: +acotar(techoLetras + (1 - techoLetras) * C.letras, 0, 1).toFixed(3),
+      caudal: C.caudal, animo: 62, edad: 26,
+    });
+    // si acaba de llegar una religión nueva, la vieja sigue ahí un tiempo
+    if (antes && anio - 100 < 9999) { nuevo(credo, 0.78); nuevo(antes, 0.22); }
+    else nuevo(credo, 1);
+  }
+  return out.filter((q) => q.n > 0.01);
+}
+const poblacionPops = (pops) => (pops || []).reduce((a, q) => a + q.n, 0);
+
+// ——— lo que cada grupo aporta y lo que le pasa ———
+// La productividad de una provincia deja de ser un número del terreno y pasa a
+// ser la suma de lo que produce cada quien: un valle de campesinos analfabetos
+// y un valle de técnicos con la misma tierra no rinden lo mismo, y esa es la
+// diferencia entre 1200 y 1950.
+function rindePops(pops) {
+  let suma = 0, gente = 0;
+  for (const q of pops || []) {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    suma += q.n * C.prod * (0.72 + q.letras * 0.55);
+    gente += q.n;
+  }
+  return gente > 0 ? +(suma / gente).toFixed(3) : 1;
+}
+// Y lo que sabe leer la provincia entera, que es de lo que salen la ciencia y
+// casi todo lo demás.
+function letrasPops(pops) {
+  const g = poblacionPops(pops);
+  if (!g) return 0;
+  return +((pops.reduce((a, q) => a + q.n * q.letras, 0)) / g).toFixed(3);
+}
+// Las cinco facciones del reino dejan de ser cinco números sueltos: son lo que
+// opina la gente que hay, pesada por lo que cada estamento manda. Un noble
+// pesa mucho más que un campesino —eso es lo que quiere decir ser noble— pero
+// diez mil campesinos pesan más que diez nobles.
+const PESO_VOZ = { noble: 38, clero: 22, burgues: 30, mercader: 12, letrado: 10,
+                   tecnico: 5, soldado: 8, artesano: 3, obrero: 2, minero: 2,
+                   campesino: 1, pastor: 1, pescador: 1, siervo: 0.5, esclavo: 0.1 };
+// Pero ese reparto no es el mismo en todos los siglos, y confundirlo es
+// confundir la historia entera. Un peso fijo dice que el obrero de 1860 contaba
+// lo mismo que el de 1960, y lo que cambió entre esas dos fechas es
+// exactamente eso: el sufragio no repartió la riqueza, repartió la voz. Antes
+// de 1800 un noble vale por cuarenta campesinos; después la distancia se
+// acorta hasta que un hombre es un voto. La apertura no es sólo del año: una
+// república la adelanta y una monarquía la retrasa.
+function vozAbierta(anio, forma) {
+  const siglo = acotar(((anio == null ? 1200 : anio) - 1790) / 160, 0, 1);
+  const g = forma === "Democracia" ? 0.34 : forma === "República" ? 0.20 : 0;
+  return acotar(siglo * 0.86 + g * (0.4 + siglo * 0.6), 0, 1);
+}
+// Con la apertura a cero cada clase pesa lo que pesaba; con la apertura a uno
+// todas pesan lo mismo. Elevar el peso a (1−apertura) hace justo eso y de
+// forma continua, sin escalones ni fechas mágicas.
+const pesoVoz = (clase, apertura) =>
+  Math.pow(PESO_VOZ[clase] || 1, 1 - acotar(apertura || 0, 0, 1));
+function vozDePops(pops, anio, forma) {
+  const ap = vozAbierta(anio, forma);
+  const voz = { nobleza: 0, clero: 0, mercaderes: 0, ejercito: 0, pueblo: 0 };
+  const peso = { nobleza: 0, clero: 0, mercaderes: 0, ejercito: 0, pueblo: 0 };
+  for (const q of pops || []) {
+    const C = CLASES[q.clase]; if (!C) continue;
+    const w = q.n * pesoVoz(q.clase, ap);
+    voz[C.fac] += w * q.animo;
+    peso[C.fac] += w;
+  }
+  const out = {};
+  for (const k of Object.keys(voz)) out[k] = peso[k] > 0 ? Math.round(acotar(voz[k] / peso[k], 0, 100)) : null;
+  return out;
+}
+
+// ——— el año de una sociedad ———
+// Nacer, morir, aprender a leer y cambiar de clase. Las cuatro cosas que le
+// pasan a un grupo de gente en un año, y las cuatro salen de lo que el grupo
+// es: un campesino tiene más hijos que un burgués y se le mueren más; un
+// obrero aprende a leer porque su oficio lo obliga y un siervo no; y el hijo
+// del campesino se hace obrero cuando hay fábrica donde hacerse obrero.
+function evolucionarPops(p, s, dias, rnd) {
+  let pops = p.pops && p.pops.length ? p.pops : sembrarPops(p, s);
+  if (!pops.length) return { pops, hechos: [] };
+  const anios = dias / 365;
+  const anio = s.anio || 1200;
+  const dem = demografiaDe(s.ciencia);
+  const hechos = [];
+  const techoLetras = pisoLetras(s.stats);
+  const urb = acotar(tasaUrbana(s.stats), 0, 0.85);
+  const techo = Math.max(1, techoProvincia(p, s.provincias, s.ciencia));
+  const gente = poblacionPops(pops);
+  const holgura = acotar(1 - gente / techo, -0.6, 1);
+
+  // ——— nacer y morir ———
+  const salud = 1 + dem.salud;
+  pops = pops.map((q) => {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    const R = RELIGIONES[q.religion] || RELIGIONES.animismo;
+    // la natalidad es de la clase y de lo que se reza; la mortalidad, de la
+    // salud del siglo y de lo que se come
+    // El rico tuvo algo más de hijos que le sobrevivieran, no el doble; y en el
+    // mundo moderno tuvo menos. Sin acotarlo, la nobleza se reproducía hasta
+    // ser el cuarenta por ciento del reino, que es de lo más absurdo que puede
+    // pasarle a un modelo de población.
+    const nace = 0.040 * C.hijos * R.nat * (0.90 + Math.min(1.2, q.caudal) * 0.09);
+    const muere = 0.031 / salud * (1 + Math.max(0, -holgura) * 1.6) * (q.animo < 35 ? 1.18 : 1);
+    const n = Math.max(0.005, q.n * (1 + (nace - muere) * anios * (0.5 + holgura * 0.6)));
+    // aprender a leer: cada clase tiende a su techo y el siglo mueve el techo
+    // El techo de la época es un suelo para todos, no un multiplicador del que
+    // ya sabía. Multiplicando, el campesino de 1950 leía el 11 %: la
+    // alfabetización universal no premió al que leía, levantó al que no.
+    const meta = acotar(techoLetras + (1 - techoLetras) * C.letras, 0, 1);
+    const letras = +(q.letras + (meta - q.letras) * Math.min(0.85, 0.045 * anios)).toFixed(4);
+    return { ...q, n: +n.toFixed(3), letras };
+  });
+
+  // ——— cuánta gente le sobra al campo ———
+  // La ciudad no se llena porque la ciudad llame: se llena porque el campo
+  // echa. Cuando el arado de hierro y el abono hacen que un labrador dé de
+  // comer a diez, nueve tienen que hacer otra cosa, y eso es toda la
+  // urbanización del siglo XIX en una frase. Al revés también vale: sin esa
+  // presión, los oficios de ciudad se apagan solos, porque tienen menos hijos
+  // que el campo. Sin este empujón el reino de 1650 salía con un 1% de
+  // comerciantes —los del 1400 muertos de viejos y nadie detrás— cuando lo que
+  // hubo fue lo contrario.
+  const enCampo = enElCampo(s.stats);
+  let rurales = 0;
+  for (const q of pops) if (((CLASES[q.clase] || {}).urb || 0) < 0.5) rurales += q.n;
+  const sobraCampo = acotar(rurales / Math.max(1, gente) - enCampo, -0.5, 0.85);
+  // El tirón se apaga cuando el campo ya no tiene gente de sobra, y ese apagado
+  // es lo importante: si el flujo hacia los oficios de ciudad corriera siempre,
+  // aunque fuera despacio, doscientos años de goteo dejarían media Europa de
+  // artesanos en 1650. Nadie se muda a la ciudad porque sí; se muda porque en
+  // casa ya no hace falta.
+  const tiron = acotar(sobraCampo * 7, 0, 4.5);
+
+  // ——— cambiar de clase ———
+  // Nadie cambia de clase por decreto: cambia porque hay sitio donde cambiar.
+  // El siervo deja de serlo cuando la ley deja de sostenerlo, el campesino se
+  // hace obrero cuando hay fábrica, y el obrero se hace técnico cuando hace
+  // falta alguien que sepa leer un plano.
+  const escalones = [
+    ["esclavo", "siervo", anio >= 300 ? 0.020 : 0, null],
+    ["esclavo", "campesino", anio >= 1780 ? 0.10 : 0, null],
+    ["siervo", "campesino", anio >= 1400 ? 0.016 + (anio >= 1789 ? 0.06 : 0) : 0, null],
+    ["campesino", "obrero", claseViva("obrero", anio) ? 0.055 * urb * tiron : 0, null],
+    ["campesino", "artesano", claseViva("artesano", anio) ? 0.006 * tiron : 0, null],
+    ["pastor", "campesino", 0.004 * tiron, null],
+    ["artesano", "obrero", claseViva("obrero", anio) ? 0.045 : 0, null],
+    ["obrero", "tecnico", claseViva("tecnico", anio) ? 0.030 : 0, 0.5],
+    // El comercio no sale del campo sino de la ciudad, y ese es el motivo por
+    // el que crece cuando crece la ciudad y no cuando crece la cosecha. Si el
+    // único camino al mercader saliera del campesino, la burguesía se
+    // extinguiría justo cuando el campesino se hace obrero —es decir, justo en
+    // el siglo en que la burguesía mandó— y el reino de 1860 tendría menos
+    // comerciantes que el de 1400.
+    ["campesino", "mercader", 0.004 * (0.3 + urb) * tiron, 0.25],
+    ["artesano", "mercader", 0.010 * (0.4 + urb), 0.3],
+    ["obrero", "mercader", claseViva("obrero", anio) ? 0.006 * urb : 0, 0.45],
+    ["tecnico", "mercader", claseViva("tecnico", anio) ? 0.012 : 0, 0.55],
+    ["mercader", "burgues", claseViva("burgues", anio) ? 0.012 : 0, 0.5],
+    ["tecnico", "burgues", claseViva("burgues", anio) ? 0.008 : 0, 0.65],
+  ];
+  const porClase = new Map();
+  for (const q of pops) {
+    const k = q.clase + "|" + q.cultura + "|" + q.religion;
+    porClase.set(k, q);
+  }
+  const mudanza = [];
+  for (const q of pops) {
+    for (const [de, a, tasa, pideLetras] of escalones) {
+      if (q.clase !== de || tasa <= 0 || !claseViva(a, anio)) continue;
+      // hace falta saber leer para subir a ciertos oficios: es el motivo por
+      // el que la escuela cambió una sociedad y el decreto no
+      const puerta = pideLetras == null ? 1 : acotar((q.letras - pideLetras) / 0.4, 0, 1);
+      const van = q.n * Math.min(0.5, tasa * anios) * puerta;
+      if (van > 0.004) mudanza.push({ q, a, van });
+    }
+  }
+  for (const { q, a, van } of mudanza) {
+    q.n = +(q.n - van).toFixed(3);
+    const k = a + "|" + q.cultura + "|" + q.religion;
+    const y = porClase.get(k);
+    if (y) y.n = +(y.n + van).toFixed(3);
+    else {
+      const C = CLASES[a];
+      const nuevo = { clase: a, cultura: q.cultura, familia: q.familia, religion: q.religion,
+        n: +van.toFixed(3), letras: Math.max(q.letras, C.letras * 0.6), caudal: C.caudal,
+        animo: q.animo, edad: q.edad };
+      pops.push(nuevo);
+      porClase.set(k, nuevo);
+    }
+  }
+
+  // ——— y las clases que el siglo ya no admite ———
+  // Cuando una clase deja de existir, su gente no se evapora: pasa a la de
+  // abajo. La abolición no mata a nadie, cambia el nombre de lo que son.
+  for (const q of pops) {
+    if (claseViva(q.clase, anio)) continue;
+    const destino = q.clase === "esclavo" || q.clase === "siervo" ? "campesino"
+      : q.clase === "artesano" ? (claseViva("obrero", anio) ? "obrero" : "mercader")
+      : q.clase === "noble" ? "burgues" : "mercader";
+    if (!claseViva(destino, anio)) continue;
+    const k = destino + "|" + q.cultura + "|" + q.religion;
+    const y = porClase.get(k);
+    const van = q.n;
+    q.n = 0;
+    if (y) y.n = +(y.n + van).toFixed(3);
+    else { const nq = { ...q, clase: destino, n: van, caudal: CLASES[destino].caudal };
+           pops.push(nq); porClase.set(k, nq); }
+    if (van > 0.5) hechos.push({ t: "clase", prov: p.nombre, de: CLASES[q.clase].n, a: CLASES[destino].n });
+  }
+
+  // ——— y el techo de cada estamento ———
+  // Una sociedad no puede ser un tercio de nobles ni la mitad de obispos. Lo
+  // que sobra de arriba cae al escalón de abajo, que es lo que pasaba: el
+  // segundón de una casa noble no era noble, era otra cosa.
+  // El techo es de la clase entera y no de cada grupo: una provincia con tres
+  // culturas tenía tres grupos de mercaderes y cada uno cabía hasta el tope,
+  // de modo que el tope del 18% dejaba pasar el 54%. Se suma primero y se
+  // recorta después, a prorrata.
+  const gente2 = poblacionPops(pops) || 1;
+  const sumaClase = new Map();
+  for (const q of pops) sumaClase.set(q.clase, (sumaClase.get(q.clase) || 0) + q.n);
+  for (const q of pops) {
+    const C = CLASES[q.clase];
+    if (!C || C.tope == null) continue;
+    const total = sumaClase.get(q.clase) || 0;
+    const limite = gente2 * C.tope;
+    if (total <= limite + 0.01) continue;
+    // y si la clase de abajo ya no existe en este siglo, se sigue bajando
+    // hasta encontrar una que sí: el tope no se salta porque el escalón
+    // siguiente se haya extinguido. Así los mercaderes dejaron de ser la
+    // mitad del país en cuanto el artesano desapareció en 1920.
+    let destino = C.baja, salto = 0;
+    while (destino && !claseViva(destino, anio) && salto++ < 4) destino = (CLASES[destino] || {}).baja;
+    if (!destino || !claseViva(destino, anio)) destino = claseViva("obrero", anio) ? "obrero" : "campesino";
+    if (destino === q.clase) continue;
+    const sobra = q.n * (1 - limite / total);
+    if (sobra <= 0.01) continue;
+    q.n = +(q.n - sobra).toFixed(3);
+    const k = destino + "|" + q.cultura + "|" + q.religion;
+    const y = porClase.get(k);
+    if (y) y.n = +(y.n + sobra).toFixed(3);
+    else { const nq = { ...q, clase: destino, n: +sobra.toFixed(3), caudal: CLASES[destino].caudal };
+           pops.push(nq); porClase.set(k, nq); }
+  }
+
+  pops = pops.filter((q) => q.n > 0.01);
+  // se juntan los que quedaron iguales, que si no la lista crece sin fin
+  const junta = new Map();
+  for (const q of pops) {
+    const k = q.clase + "|" + q.cultura + "|" + q.religion;
+    const y = junta.get(k);
+    if (!y) { junta.set(k, q); continue; }
+    const t = y.n + q.n;
+    y.letras = +((y.letras * y.n + q.letras * q.n) / t).toFixed(4);
+    y.animo = Math.round((y.animo * y.n + q.animo * q.n) / t);
+    y.n = +t.toFixed(3);
+  }
+  return { pops: [...junta.values()], hechos };
+}
+
+// Lo que cada grupo piensa del año que va. El ánimo no es un número que baja
+// solo: baja porque no se come, porque el aire apesta, porque hay guerra o
+// porque el que manda no es de los suyos, y sube cuando eso deja de pasar.
+function animarPops(pops, p, s, cosecha) {
+  const gobiernoDe = (s.pops || {}).credo || null;
+  return (pops || []).map((q) => {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    let meta = 58;
+    meta += (cosecha != null ? (cosecha - 1) * 45 : 0);
+    meta -= ((p.humo || {}).aire || 0) * 22 * (C.urb > 0.5 ? 1.3 : 0.6);
+    meta -= s.guerra ? 9 : 0;
+    meta -= p.ocupada ? 26 : 0;
+    meta += (q.caudal - 0.6) * 5;
+    meta += (q.letras - 0.4) * 6;
+    if (gobiernoDe && q.religion !== gobiernoDe)
+      meta -= (1 - (RELIGIONES[gobiernoDe] || { tolera: 0.6 }).tolera) * 40;
+    const animo = Math.round(q.animo + (acotar(meta, 3, 97) - q.animo) * 0.34);
+    return animo === q.animo ? q : { ...q, animo };
+  });
+}
+// El resumen que lee el resto del juego: cuántos son, qué rinden, cuánto leen
+// y qué opinan. Se calcula una vez por turno y se guarda.
+function resumenPops(pops) {
+  const gente = poblacionPops(pops);
+  const porClase = {}, porCultura = {}, porCredo = {};
+  for (const q of pops || []) {
+    porClase[q.clase] = (porClase[q.clase] || 0) + q.n;
+    porCultura[q.cultura] = (porCultura[q.cultura] || 0) + q.n;
+    porCredo[q.religion] = (porCredo[q.religion] || 0) + q.n;
+  }
+  const mayor = (o) => Object.entries(o).sort((a, b) => b[1] - a[1])[0];
+  return { gente: +gente.toFixed(1), rinde: rindePops(pops), letras: letrasPops(pops),
+    clases: porClase, culturas: porCultura, credos: porCredo,
+    claseMayor: (mayor(porClase) || [null])[0], credoMayor: (mayor(porCredo) || [null])[0],
+    animo: gente ? Math.round(pops.reduce((a, q) => a + q.n * q.animo, 0) / gente) : 60 };
+}
+
+// ——— y la sociedad del reino entero ———
+// Las provincias tienen cada una su gente; el reino es la suma. Y esa suma no
+// es un dato de adorno: de ella salen quiénes son los estamentos que le hablan
+// al rey. Hasta acá la nobleza pesaba lo que decía una fórmula del siglo; de
+// acá en adelante pesa lo que pesa la nobleza que hay, y si un reino no tiene
+// burguesía porque no tiene ciudades, no tiene a quién escuchar aunque estemos
+// en 1750.
+function sociedadDelReino(provincias, anio, forma) {
+  const todos = [];
+  for (const p of provincias || []) for (const q of p.pops || []) todos.push(q);
+  if (!todos.length) return null;
+  const ap = vozAbierta(anio, forma);
+  const r = resumenPops(todos);
+  const voz = vozDePops(todos, anio, forma);
+  // el credo de quien manda: el de los estamentos que mandan, no el de la
+  // mayoría. Un reino cristiano con mayoría musulmana existió muchas veces.
+  const arriba = {};
+  for (const q of todos) {
+    const w = pesoVoz(q.clase, ap) * q.n;
+    arriba[q.religion] = (arriba[q.religion] || 0) + w;
+  }
+  const credo = Object.entries(arriba).sort((a, b) => b[1] - a[1])[0];
+  // y cuánto pesa cada estamento en el total, que es lo que le da voz
+  const peso = { nobleza: 0, clero: 0, mercaderes: 0, ejercito: 0, pueblo: 0 };
+  let sumaW = 0;
+  for (const q of todos) {
+    const C = CLASES[q.clase]; if (!C) continue;
+    const w = q.n * pesoVoz(q.clase, ap);
+    peso[C.fac] += w; sumaW += w;
+  }
+  if (sumaW > 0) for (const k of Object.keys(peso)) peso[k] = +(peso[k] / sumaW).toFixed(4);
+  return { ...r, voz, peso, credo: credo ? credo[0] : null, apertura: +ap.toFixed(3) };
+}
+
+// ——— la sociedad del primer día ———
+// Una partida empezaba con las provincias dibujadas y vacías: la población era
+// un número del reino y no de ninguna tierra en concreto, y hasta que no
+// pasaba un turno el mapa de población, el de clases y el de credos pintaban
+// todos del mismo gris. El reino existe desde el primer día y su gente
+// también, así que se reparte acá: cada provincia recibe lo que su tierra
+// aguanta, y con eso ya se sabe quién vive en ella.
+function poblarAlEmpezar(provincias, s) {
+  const ps = provincias || [];
+  if (!ps.length) return ps;
+  const total = s.poblacion || 0;
+  const techos = ps.map((p) => Math.max(1, techoProvincia(p, ps, s.ciencia)));
+  const suma = techos.reduce((a, b) => a + b, 0) || 1;
+  const conPob = ps.map((p, i) => (p.poblacion > 0 ? p
+    : { ...p, poblacion: Math.max(20, Math.round(total * (techos[i] / suma))) }));
+  return conPob.map((p) => {
+    if (p.pops && p.pops.length) return p;
+    const pops = sembrarPops(p, { ...s, provincias: conPob });
+    return pops.length ? { ...p, pops, soc: resumenPops(pops) } : p;
+  });
+}
+
 // ═══ VISTAS DEL MAPA ═════════════════════════════════════════
 // Un mapa político dice una sola cosa: quién manda dónde. Todo lo demás que la
 // partida calcula por provincia —dónde se vive bien, cuánto llueve, cuánta
@@ -3265,7 +3980,38 @@ const VISTAS = [
     fmt: (v) => Math.round(v * 100) + "% reconocida",
     mio: (m) => (m.explorada != null ? m.explorada : null),
     pie: "cuánto se ha ido a mirar" },
+  // ——— y tres que salen de la gente ———
+  // Las anteriores pintan la tierra; estas pintan a quien la habita. Son las
+  // que hacen visible que un reino no es una superficie con un número de
+  // habitantes: en el mismo mapa hay una comarca de siervos que no leen y otra
+  // de obreros que sí, y hasta que no se ven en colores distintos no existen.
+  { id: "clases", n: "Clases", ambito: "reino", clases: "clase",
+    pie: "de qué vive la mayoría de cada comarca" },
+  { id: "letras", n: "Alfabetización", ambito: "reino", rampa: "bueno",
+    cortes: [0.05, 0.15, 0.35, 0.6, 0.85],
+    fmt: (v) => Math.round(v * 100) + "% sabe leer",
+    mio: (m) => ((m.soc || {}).letras != null ? m.soc.letras : null),
+    pie: "cuánta gente sabe leer" },
+  { id: "credos", n: "Religión", ambito: "reino", clases: "credo",
+    pie: "qué se reza en cada comarca" },
 ];
+// Un color por estamento, agrupados por lo que son: la tierra en verdes, el
+// taller y la fábrica en ocres, el comercio y la letra en azules, y arriba el
+// oro y el púrpura. Así un vistazo al mapa dice de qué vive el reino.
+const CLASE_COL = {
+  esclavo: "#6B4436", siervo: "#7E5B3E", campesino: "#5E9450", pastor: "#93A455",
+  pescador: "#3C7E93", minero: "#6A6047", artesano: "#BFA254", obrero: "#A87244",
+  tecnico: "#C4B85C", mercader: "#5B9BD5", burgues: "#46818C", letrado: "#8E7FC0",
+  clero: "#B0A0D0", soldado: "#D9534F", noble: "#C9A227",
+};
+// Y uno por credo, que no es decorativo: en el mapa de religiones lo que se
+// busca es dónde está la frontera, y para eso hacen falta colores que no se
+// confundan entre sí más que dentro de cada familia.
+const CREDO_COL = {
+  animismo: "#7E9152", politeismo: "#A98F4E", judaismo: "#8E7FC0", zoroastro: "#CE8E4C",
+  hinduismo: "#E09A38", budismo: "#D8C878", confucio: "#93A455", sintoismo: "#C4B85C",
+  catolico: "#5B9BD5", ortodoxo: "#46818C", protestante: "#6BA37F", islam: "#2F7D4C",
+};
 const VISTA_IDX = Object.fromEntries(VISTAS.map((v) => [v.id, v]));
 
 // Con qué criterio se reúnen las provincias del mundo para pintarlas. Sin
@@ -3314,6 +4060,8 @@ function colorMio(V, m, cortes) {
   const a = ambDe(m);
   if (V.clases === "bioma") return a && BIOMAS[a.bioma] ? BIOMAS[a.bioma].col : APAGADO;
   if (V.clases === "via") return VIA_COL[acotar(Math.round(m.via || 0), 0, 3)];
+  if (V.clases === "clase") return CLASE_COL[(m.soc || {}).claseMayor] || APAGADO;
+  if (V.clases === "credo") return CREDO_COL[(m.soc || {}).credoMayor] || APAGADO;
   const t = tramoDe(valorMio(V, m), cortes || V.cortes);
   return t < 0 ? APAGADO : RAMPAS[V.rampa][t];
 }
@@ -4168,6 +4916,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       : ambienteDe(r.idx, r.x, r.y, r.terreno, r.costera, false);
     if (V.clases === "bioma") return amb && BIOMAS[amb.bioma] ? BIOMAS[amb.bioma].n.toLowerCase() : null;
     if (V.clases === "via") return mio ? (mio.via ? "con " + viaDe(mio).n : "sin camino abierto") : null;
+    if (V.clases === "clase") { const c = CLASES[((mio || {}).soc || {}).claseMayor];
+      return c ? "sobre todo " + c.n : null; }
+    if (V.clases === "credo") { const c = RELIGIONES[((mio || {}).soc || {}).credoMayor];
+      return c ? c.n : null; }
     const v = mio ? valorMio(V, mio) : amb && V.val ? V.val(amb) : null;
     return v == null || !Number.isFinite(v) ? null : V.fmt(v);
   };
@@ -4637,6 +5389,44 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             )) : (
               <div style={{ fontSize: 11, color: C.muted }}>de lo que puede</div>
             )}
+            {/* Y quiénes son. Solo en las provincias del reino, porque de las
+                otras el juego no lleva la cuenta: fuera de tus tierras hay un
+                censo de hoy y nada más. Los tres estamentos mayores, que es
+                lo que se lee de un vistazo; el resto se suma en «los demás». */}
+            {mia && mia.soc && mia.soc.gente > 0 && (() => {
+              const g = mia.soc.gente;
+              const filas = Object.entries(mia.soc.clases)
+                .sort((a, b) => b[1] - a[1]).slice(0, 3)
+                .map(([k, n]) => [k, n / g]);
+              const resto = 1 - filas.reduce((a, f) => a + f[1], 0);
+              const credo = RELIGIONES[mia.soc.credoMayor];
+              return (
+                <>
+                  <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, color: C.brass,
+                    margin: "8px 0 4px" }}>─ QUIÉNES SON</div>
+                  {filas.map(([k, f]) => (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 7,
+                      fontSize: 11, color: C.ink, padding: "1px 0" }}>
+                      <span style={{ width: 9, height: 9, flex: "0 0 9px", borderRadius: 2,
+                        background: CLASE_COL[k] || APAGADO, border: "1px solid rgba(0,0,0,0.45)" }} />
+                      {(CLASES[k] || { n: k }).n}
+                      <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5, color: C.muted }}>
+                        {Math.round(f * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                  {resto > 0.02 && (
+                    <div style={{ fontSize: 10.5, color: C.muted, opacity: 0.7, padding: "1px 0 0 16px" }}>
+                      y {Math.round(resto * 100)}% en los demás oficios
+                    </div>
+                  )}
+                  <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, marginTop: 5, lineHeight: 1.5 }}>
+                    leen {Math.round((mia.soc.letras || 0) * 100)} de cada 100
+                    {credo ? ` · ${credo.n}` : ""}
+                  </div>
+                </>
+              );
+            })()}
             <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
               {x.a ? BIOMAS[x.a.bioma].n.toLowerCase() : ""}
               {x.mar ? ` · ${x.mar.n.toLowerCase()}` : ""}
@@ -4766,6 +5556,41 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+          {/* Las dos vistas de gente se leen igual: no hay escala que graduar,
+              hay grupos, y lo que interesa es cuántas comarcas son de cada uno.
+              Se listan solo los que están en el mapa: la lista de quince
+              estamentos posibles no la mira nadie. */}
+          {(V.clases === "clase" || V.clases === "credo") && (
+            <div style={{ margin: "5px 0 2px" }}>
+              {(() => {
+                const esClase = V.clases === "clase";
+                const cuenta = new Map();
+                for (const m of mias) {
+                  const k = esClase ? (m.soc || {}).claseMayor : (m.soc || {}).credoMayor;
+                  if (k) cuenta.set(k, (cuenta.get(k) || 0) + 1);
+                }
+                const filas = [...cuenta.entries()].sort((a, b) => b[1] - a[1]);
+                if (!filas.length) return (
+                  <div style={{ fontSize: 10, color: C.muted, opacity: 0.75 }}>
+                    todavía no hay gente contada; pasá un turno
+                  </div>
+                );
+                return filas.map(([k, n]) => {
+                  const tabla = esClase ? CLASES : RELIGIONES;
+                  return (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11,
+                      color: C.muted, padding: "1px 0" }}>
+                      <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                        background: (esClase ? CLASE_COL : CREDO_COL)[k] || APAGADO,
+                        border: "1px solid rgba(0,0,0,0.5)" }} />
+                      {(tabla[k] || { n: k }).n}
+                      <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>{n}</span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ CAPAS</div>
@@ -5350,13 +6175,24 @@ function poderFaccion(id, s) {
   const g = s.gobierno?.forma || "Monarquía";
   const anio = s.anio;
   const moderno = Math.max(0, Math.min(1, (anio + 500) / 2500));
+  let base;
   switch (id) {
-    case "nobleza": return Math.round(10 - 5 * moderno + (g === "Monarquía" || g === "Imperio" ? 3 : -2));
-    case "clero": return Math.round(9 - 6 * moderno + (g === "Teocracia" ? 6 : 0));
-    case "mercaderes": return Math.round(3 + 5 * moderno + (sab.has("organizacion.comercio.compania_acciones") ? 3 : 0));
-    case "ejercito": return Math.round(6 + (g === "Imperio" ? 3 : 0) + (s.stats.militar > 65 ? 2 : 0));
-    default: return Math.round(3 + 6 * moderno + (g === "Democracia" || g === "República" ? 3 : 0));
+    case "nobleza": base = 10 - 5 * moderno + (g === "Monarquía" || g === "Imperio" ? 3 : -2); break;
+    case "clero": base = 9 - 6 * moderno + (g === "Teocracia" ? 6 : 0); break;
+    case "mercaderes": base = 3 + 5 * moderno + (sab.has("organizacion.comercio.compania_acciones") ? 3 : 0); break;
+    case "ejercito": base = 6 + (g === "Imperio" ? 3 : 0) + (s.stats.militar > 65 ? 2 : 0); break;
+    default: base = 3 + 6 * moderno + (g === "Democracia" || g === "República" ? 3 : 0);
   }
+  // Y acá manda la gente que hay. La fórmula de arriba dice lo que el siglo y
+  // la forma de gobierno permiten; el peso social dice lo que el reino tiene
+  // de verdad. Un reino sin ciudades no tiene burguesía a la que oír aunque
+  // corra 1750, y uno que las tiene la oye aunque el rey preferiría no.
+  const peso = ((s.pops || {}).peso || {})[id];
+  if (peso == null) return Math.max(1, Math.round(base));
+  // el reparto de referencia: lo que pesaría cada estamento en un reino común
+  const patron = { nobleza: 0.21, clero: 0.13, mercaderes: 0.17, ejercito: 0.09, pueblo: 0.40 }[id] || 0.2;
+  const rel = acotar(peso / patron, 0.35, 2.1);
+  return Math.max(1, Math.round(base * (0.45 + rel * 0.55)));
 }
 // Hacia dónde tiende su humor, y por qué. Todo motivo es visible para el jugador.
 function humorFaccion(id, s, ctx) {
@@ -5395,6 +6231,13 @@ function humorFaccion(id, s, ctx) {
     add(-(ctx.cap.fiscal - 1) * 16, "los tributos aprietan");
     add(-(s.devaluaciones || 0) * 11, "los precios se disparan");
   }
+  // Lo que siente su propia gente. Hasta acá el humor de un estamento salía de
+  // la ficha del reino: el presupuesto, las guerras, los saberes. Pero un
+  // estamento son personas, y las personas de una provincia con hambre o con
+  // humo no opinan lo mismo que las de otra. Esto es lo que la ficha no sabía.
+  const suyos = ((s.pops || {}).voz || {})[id];
+  if (suyos != null) add((suyos - 55) * 0.55, suyos >= 60 ? "los suyos están conformes"
+    : suyos <= 45 ? "los suyos no lo están" : "");
   const ag = AGRAVIOS[id] || {};
   // los agravios se acumulan con rendimiento decreciente: se resignan a lo inevitable
   let neg = 0, pos = 0;
@@ -7834,6 +8677,7 @@ function aplicarEfectos(n, ef, rnd) {
     e.provincias = ef.vivo.provincias;
     e.reservas = ef.vivo.reservas;
     e.mundo = ef.vivo.mundo;
+    if (ef.vivo.pops) e.pops = ef.vivo.pops;
     // La suciedad mata antes de que nadie sepa por qué: se descuenta acá y no
     // como una penalización de la ficha, porque son personas, no un modificador.
     if (ef.vivo.muertos > 0) {
@@ -9778,6 +10622,22 @@ export default function PaxMundi() {
         rasgo: m.rasgo || "", esSabio: false,
         nacio: init.anio - (36 + Math.floor(Math.random() * 22)),
       }));
+      const cienciaIni = { ...semillaEpoca(init.anio),
+        nombresCompletadas: semillaEpoca(init.anio).sabidos.map((i) => MED_IDX[i].nombre),
+        pi: 20, foco: null, acum: {}, maduros: {}, problemas: [] };
+      const statsIni = {
+        economia: clamp(init.stats.economia), militar: clamp(init.stats.militar),
+        estabilidad: clamp(init.stats.estabilidad), diplomacia: clamp(init.stats.diplomacia),
+        tecnologia: clamp(init.stats.tecnologia), prestigio: clamp(init.stats.prestigio),
+      };
+      const pobIni = Math.round(demografiaDe(cienciaIni).techo * 0.88);
+      // La gente del primer día: repartida por lo que aguanta cada tierra, y
+      // con su reparto social hecho. Sin esto el mapa arranca en blanco y el
+      // jugador decide su primer turno sin saber a quién gobierna.
+      const provsIni = poblarAlEmpezar(
+        generarProvincias({ sabidos: semillaEpoca(init.anio).sabidos }, pais || init.nacion?.nombre || era, paisSel),
+        { anio: init.anio, poblacion: pobIni, ciencia: cienciaIni, stats: statsIni,
+          region: paisSel, gobierno: { forma: formaGob } });
       setState({
         era, anio: init.anio, dia: 0, turno: 1, nacion: init.nacion,
         presupuesto: { ...PRESUPUESTO_INICIAL },
@@ -9789,22 +10649,14 @@ export default function PaxMundi() {
         facPeso: {}, reservaGrano: 0,
         dilema: null, dilemasVistos: {}, guerra: null, tributos: [],
         ejercito: { infanteria: 2 }, generales: [], bajasRecientes: 0,
-        provincias: generarProvincias({ sabidos: semillaEpoca(init.anio).sabidos }, pais || init.nacion?.nombre || era, paisSel),
-        poblacion: Math.round(demografiaDe({ sabidos: semillaEpoca(init.anio).sabidos }).techo * 0.88),
+        provincias: provsIni,
+        poblacion: pobIni,
+        pops: sociedadDelReino(provsIni, init.anio, formaGob),
         gobierno: { forma: formaGob, miembros },
-        stats: {
-          economia: clamp(init.stats.economia), militar: clamp(init.stats.militar),
-          estabilidad: clamp(init.stats.estabilidad), diplomacia: clamp(init.stats.diplomacia),
-          tecnologia: clamp(init.stats.tecnologia), prestigio: clamp(init.stats.prestigio),
-        },
+        stats: statsIni,
         vecinos: init.vecinos || [],
         opciones: init.opciones || [],
-        ciencia: {
-          ...semillaEpoca(init.anio),
-          nombresCompletadas: semillaEpoca(init.anio).sabidos.map((i) => MED_IDX[i].nombre),
-          pi: 20, foco: null,
-          acum: {}, maduros: {}, problemas: [],
-        },
+        ciencia: cienciaIni,
         edu: { oro: 100, instituciones: {}, sabios: [], sedes: [] },
         proyectos: [],
         cronica: [{ anio: init.anio, dia: 0, tipo: "situacion", texto: init.situacion }],
