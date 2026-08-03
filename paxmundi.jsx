@@ -3605,7 +3605,11 @@ function rindePops(pops) {
   let suma = 0, gente = 0;
   for (const q of pops || []) {
     const C = CLASES[q.clase] || CLASES.campesino;
-    suma += q.n * C.prod * (0.72 + q.letras * 0.55);
+    // Y quien está enfermo trabaja menos. Es la parte menos contada de la salud
+    // pública: no se hicieron cloacas por caridad, se hicieron porque un pueblo
+    // con fiebres no rinde, y eso lo notaba el que pagaba los jornales.
+    const sal = q.salud == null ? 1 : 0.62 + acotar(q.salud, 0, 100) / 160;
+    suma += q.n * C.prod * (0.72 + q.letras * 0.55) * sal;
     gente += q.n;
   }
   return gente > 0 ? +(suma / gente).toFixed(3) : 1;
@@ -3680,7 +3684,7 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
   // hijo a la escuela y quién puede permitirse cambiar de oficio. Un año se le
   // hace largo o corto a una familia según cómo le salgan estas cuentas.
   const eco = economiaDeProvincia(pops, p, s, cosecha);
-  pops = eco.pops;
+  pops = saludDePops(eco.pops, p, s);
 
   // ——— nacer y morir ———
   const salud = 1 + dem.salud;
@@ -3700,8 +3704,14 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
     // un promedio: en el mismo pueblo se morían los jornaleros y no se moría el
     // cura, y el promedio no sabe la diferencia. Ahora la sabe.
     const carestia = 1 + acotar(E.hambre, 0, 1.2) * 2.6;
-    const muere = 0.031 / salud * (1 + Math.max(0, -holgura) * 0.9) * carestia
-      * (q.animo < 35 ? 1.18 : 1) * (1 - (E.cubre.medico || 0) * 0.22);
+    // Y se muere según la salud que se tiene, no según la que tiene el reino.
+    // Antes la mortalidad salía de un número único —lo que el reino sabía— y el
+    // minero de la cuenca y el obispo de la capital se morían al mismo ritmo.
+    // Ahora el minero se muere de minero.
+    const suSalud = q.salud == null ? 55 : q.salud;
+    const flaqueza = Math.pow(58 / Math.max(12, suSalud), 1.25);
+    const muere = 0.031 / salud * flaqueza * (1 + Math.max(0, -holgura) * 0.9) * carestia
+      * (q.animo < 35 ? 1.18 : 1);
     const n = Math.max(0.005, q.n * (1 + (nace - muere) * anios * (0.5 + holgura * 0.6)));
     // aprender a leer: cada clase tiende a su techo y el siglo mueve el techo
     // El techo de la época es un suelo para todos, no un multiplicador del que
@@ -3870,6 +3880,106 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
   return { pops: [...junta.values()], hechos };
 }
 
+// ═══ LA SALUD ════════════════════════════════════════════════
+// Hasta acá la salud era un número del reino: un multiplicador que salía de lo
+// que el reino sabía y se aplicaba igual a todo el mundo. Con eso, el minero de
+// Asturias y el obispo de Toledo se morían al mismo ritmo, que es de las cosas
+// más falsas que se pueden decir de un siglo cualquiera.
+//
+// Y la historia de la salud tiene tres hechos que un modelo tiene que
+// reproducir o no está diciendo nada:
+//
+// 1. NO SE MOVIÓ EN SEISCIENTOS AÑOS. La esperanza de vida en 1200 y en 1750
+//    era casi la misma, treinta y pocos años, y no porque no hubiera médicos:
+//    los había, y sangraban. Se dobló entre 1850 y 1950, y lo que la dobló no
+//    fue la medicina sino el agua limpia, la cloaca y la comida regular. El
+//    antibiótico llega cuando la mitad del camino ya estaba hecho.
+//
+// 2. LA CIUDAD MATABA. Hasta bien entrado el XIX, la mortalidad urbana superaba
+//    a la rural con holgura: las ciudades no crecían por nacimientos sino por
+//    gente que llegaba del campo a reemplazar a la que se moría. Es el «urban
+//    graveyard effect» y explica por qué la urbanización necesitó siempre un
+//    campo lleno detrás.
+//
+// 3. EL OFICIO MATA. Un minero no se moría de lo mismo ni a la misma edad que
+//    un escribano, y eso no lo arregla ningún promedio del reino.
+
+// Lo que le cuesta a la salud ganarse la vida de cada manera. No es pobreza
+// —eso ya lo mide el bolsillo— sino el daño que hace el trabajo mismo: el
+// polvo de la mina, el telar sin ventanas, el mar en invierno, la campaña.
+const OFICIO_DANO = {
+  minero: 26, obrero: 15, soldado: 20, pescador: 12, esclavo: 22, siervo: 8,
+  campesino: 5, pastor: 4, artesano: 7, tecnico: 3, mercader: 3,
+  letrado: 1, clero: 2, burgues: 1, noble: 2,
+};
+// Cuánto sabe curar la época. Va aparte del techo demográfico porque son cosas
+// distintas: el techo dice cuánta gente cabe y esto dice cuánto dura cada una.
+const medicinaDe = (dem) => acotar((dem || {}).salud || 0, 0, 1.3);
+
+// La salud de un grupo, de 0 a 100. Es un caudal y no un número del año: una
+// infancia mal alimentada no se arregla con una buena cosecha, y por eso se
+// mueve despacio hacia donde las condiciones lo llevan.
+function saludDePops(pops, p, s) {
+  const st = s.stats || {};
+  const dem = demografiaDe(s.ciencia);
+  const med = medicinaDe(dem);
+  const san = saneamiento(st.tecnologia);
+  const humo = p.humo || { aire: 0, agua: 0 };
+  // El hacinamiento de esta comarca: cuánta gente vive junta. Antes de la
+  // cloaca, vivir junto es lo que mata; después, deja de importar y hasta
+  // ayuda, porque el hospital y el agua corriente llegan primero a la ciudad.
+  const techo = Math.max(1, techoProvincia(p, s.provincias, s.ciencia));
+  const apretado = acotar((p.poblacion || 0) / techo, 0, 1.4);
+  return (pops || []).map((q) => {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    const E = q.eco || { hambre: 0, decencia: 1, cubre: {} };
+    // La base es baja a propósito: es la salud de una población sin cloaca, sin
+    // vacuna y sin nada que curar de verdad, que es donde estuvo la humanidad
+    // hasta anteayer. Todo lo que la sube por encima de esto es cosa sabida y
+    // pagada, y por eso el salto de la esperanza de vida cae donde cae.
+    let meta = 38;
+    // lo que se come, que es la mitad de todo
+    meta -= acotar(E.hambre, 0, 1.2) * 38;
+    meta -= acotar(1 - (E.decencia == null ? 1 : E.decencia), 0, 1) * 12;
+    // Y lo que hay para comer, que no es lo mismo que lo que se puede pagar.
+    // Con la cosecha corta el que tiene grano lo vende más caro y sale de las
+    // cuentas del año sin pasar hambre —eso está bien y es histórico— pero
+    // comer, come menos. Sin este término, una comarca con malas cosechas
+    // seguidas salía viviendo dos años más que una con buenas, que es el
+    // absurdo al que lleva medir la comida en dinero.
+    if (p.cosecha != null) meta -= acotar(1 - p.cosecha, 0, 0.55) * 30;
+    // el agua, que es la otra mitad y la que de verdad cambió
+    meta -= humo.agua * 34 * (1 - san * 0.9);
+    // el aire, que es cosa de ciudad e industria
+    meta -= humo.aire * 16 * (0.35 + C.urb);
+    // vivir amontonado antes de que hubiera con qué: la ciudad como cementerio
+    meta -= apretado * C.urb * 26 * (1 - san);
+    // el oficio
+    meta -= (OFICIO_DANO[q.clase] == null ? 6 : OFICIO_DANO[q.clase]) * (1 - med * 0.35);
+    // lo que la época sabe curar, y lo que esta familia puede pagar de eso
+    meta += med * 44;
+    meta += med * (E.cubre.medico || 0) * 22;
+    // y tener con qué: abrigo, casa seca, no trabajar enfermo
+    meta += acotar((q.caudal || 0) / Math.max(0.5, (E.ingreso || 1) * 2), 0, 1) * 7;
+    meta = acotar(meta, 5, 96);
+    // Se mueve despacio: la salud de una población es la de la gente que ya
+    // nació, y esa no cambia porque este año haya buena cosecha.
+    const antes = q.salud == null ? meta : q.salud;
+    const salud = Math.round(antes + (meta - antes) * 0.16);
+    return salud === q.salud ? q : { ...q, salud };
+  });
+}
+// De la salud a los años que se viven, que es el número que la gente entiende.
+// La horquilla no es caprichosa: treinta y pocos en el mundo antiguo, setenta
+// largos en el moderno, y casi todo el salto en un siglo.
+const esperanzaDe = (salud) => Math.round(20 + acotar(salud == null ? 55 : salud, 0, 100) * 0.60);
+// Y la del reino entero, pesada por la gente que hay.
+function esperanzaDePops(pops) {
+  let g = 0, sal = 0;
+  for (const q of pops || []) { g += q.n; sal += q.n * (q.salud == null ? 55 : q.salud); }
+  return g ? esperanzaDe(sal / g) : null;
+}
+
 // ═══ LA FURIA ════════════════════════════════════════════════
 // El ánimo dice cómo se está; la furia dice qué se está dispuesto a hacer. Son
 // dos cosas distintas y confundirlas es el error clásico: si bastara con estar
@@ -3977,6 +4087,9 @@ function radicalizarPops(pops, p, s) {
       meta += (1 - (RELIGIONES[credoDe] || { tolera: 0.6 }).tolera) * 34;
     if (p.ocupada) meta += 26;
     if (s.guerra) meta += 5;
+    // enterrar hijos enfurece, y enterrarlos sabiendo que en el barrio de
+    // arriba no se mueren, más
+    if (q.salud != null) meta += acotar((58 - q.salud) / 42, 0, 1) * 14;
     meta -= mano * 26;
     // El que tiene qué perder pierde las ganas. Pero «tener» es relativo al
     // siglo: medido en raciones a secas, en 1900 cualquiera tenía más guardado
@@ -4147,6 +4260,10 @@ function resumenPops(pops) {
   }
   const mayor = (o) => Object.entries(o).sort((a, b) => b[1] - a[1])[0];
   return { gente: +gente.toFixed(1), rinde: rindePops(pops), letras: letrasPops(pops),
+    salud: (() => { let g = 0, v = 0;
+      for (const q of pops || []) { g += q.n; v += q.n * (q.salud == null ? 55 : q.salud); }
+      return g ? +(v / g).toFixed(1) : null; })(),
+    esperanza: esperanzaDePops(pops),
     clases: porClase, culturas: porCultura, credos: porCredo,
     claseMayor: (mayor(porClase) || [null])[0], credoMayor: (mayor(porCredo) || [null])[0],
     animo: gente ? Math.round(pops.reduce((a, q) => a + q.n * q.animo, 0) / gente) : 60 };
@@ -4450,8 +4567,14 @@ function poblarAlEmpezar(provincias, s) {
     // con las cuentas de la casa ya hechas, que si no el primer día el mapa de
     // nivel de vida y el de hambre salen en gris y la ficha de una ciudad no
     // sabe decir cómo le va a su gente
-    const pops = economiaDeProvincia(crudos, p, { ...s, provincias: conPob }, 1).pops;
-    return { ...p, pops, cosecha: 1, soc: resumenPops(pops), consumo: consumoDe(pops) };
+    const conCuentas = economiaDeProvincia(crudos, p, { ...s, provincias: conPob }, 1).pops;
+    // y con la salud ya calculada, que si no el mapa de esperanza de vida
+    // arranca enseñando el valor por defecto —cincuenta y tres años en 1200,
+    // que es media vida de más— hasta que pasa un turno
+    const conHumo = { ...p, humo: p.humo || contaminacionDe(p, s.stats) };
+    const pops = saludDePops(conCuentas, conHumo, { ...s, provincias: conPob });
+    return { ...p, pops, cosecha: 1, humo: conHumo.humo,
+      soc: resumenPops(pops), consumo: consumoDe(pops) };
   });
 }
 
@@ -4616,6 +4739,16 @@ const VISTAS = [
       return g ? f / g : null;
     },
     pie: "qué está dispuesta a hacer la gente" },
+  // Los años que se viven, que es el número que la gente entiende sin que se lo
+  // expliquen. Va en escala absoluta y no relativa: treinta años es treinta
+  // años en 1200 y en 1950, y ver que en tu reino se sigue viviendo treinta
+  // cuando ya se sabe hacer una cloaca es exactamente la información que hace
+  // falta para decidir dónde poner el dinero.
+  { id: "salud", n: "Esperanza de vida", ambito: "reino", rampa: "bueno",
+    cortes: [30, 38, 47, 58, 68],
+    fmt: (v) => Math.round(v) + " años",
+    mio: (m) => ((m.soc || {}).esperanza != null ? m.soc.esperanza : null),
+    pie: "cuántos años se vive en cada comarca" },
   { id: "hambre", n: "Hambre", ambito: "reino", rampa: "sucio",
     cortes: [0.01, 0.05, 0.12, 0.25, 0.45],
     fmt: (v) => (v < 0.005 ? "nadie pasa hambre" : Math.round(v * 100) + "% pasa hambre"),
@@ -6080,6 +6213,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     <span style={{ color: C.muted }}>del gasto, no es pan</span>
                     <span>{Math.round(K.holgura * 100)}%</span>
                   </div>
+                  {(mia.soc || {}).esperanza != null && (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8,
+                      fontFamily: mono, fontSize: 10.5, color: C.ink, marginTop: 1 }}>
+                      <span style={{ color: C.muted }}>se vive</span>
+                      <span>{mia.soc.esperanza} años</span>
+                    </div>
+                  )}
                   {K.hambrientos > 0.005 && (
                     <div style={{ fontSize: 10.5, color: "#D9534F", marginTop: 3, lineHeight: 1.4 }}>
                       {Math.round(K.hambrientos * 100)}% no llega a comer este año
@@ -10792,11 +10932,15 @@ const INFORMES = [
   // ——— la calle ———
   // Se cuenta lo que se vio, no lo que significó: quien escribe la crónica está
   // dentro y no sabe todavía si aquello fue un tumulto o el principio de algo.
+  // Los pesos están medidos contra los demás informes del mundo —un desastre
+  // vale cuarenta— y no por encima: con la huelga a treinta, un reino
+  // industrial no hablaba de otra cosa y los hallazgos, el monte y el clima
+  // desaparecían de la crónica. Una revolución sí merece portada.
   // Los huecos son los del elenco de siempre —{donde} quiere un objeto con
   // nombre y {n} un número— porque uno inventado se sustituye por nada y el
   // texto sale a medias sin que nadie se entere.
   { id: "motin", peso: (s, c) => (((c.vivo || {}).hechos || [])
-      .some((h) => h.t === "revuelta" && h.cual === "motin") ? 24 : 0),
+      .some((h) => h.t === "revuelta" && h.cual === "motin") ? 13 : 0),
     huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "revuelta") || {};
       return { donde: { nombre: h.prov || "la villa" }, n: Math.max(1, (h.cuantas || 1) - 1) }; },
     fr: ["El pan sube y {donde} se echa a la calle: (asaltan el pósito|vuelcan los puestos del mercado|apedrean la casa del acaparador), y (hay que sacar la tropa|se reparte grano a la fuerza|el corregidor cede y baja la tasa)",
@@ -10805,7 +10949,7 @@ const INFORMES = [
       "Corre en {donde} que hay trigo escondido y la gente va a buscarlo (a casa del regidor|al convento|a los almacenes del puerto)",
       "Se amotina {donde} por el pan, y con ella otras {n} comarcas: el año viene caro en todas partes"] },
   { id: "huelga", peso: (s, c) => (((c.vivo || {}).hechos || [])
-      .some((h) => h.t === "revuelta" && h.cual === "huelga") ? 30 : 0),
+      .some((h) => h.t === "revuelta" && h.cual === "huelga") ? 15 : 0),
     huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "revuelta") || {};
       return { donde: { nombre: h.prov || "la comarca" }, n: Math.max(1, (h.cuantas || 1) - 1) }; },
     fr: ["Los obreros de {donde} paran el trabajo. (Piden jornal|Piden horas|Piden que se les hable de usted) y (se les manda la guardia|se negocia a puerta cerrada|se les concede la mitad)",
@@ -10814,7 +10958,7 @@ const INFORMES = [
       "Paro en {donde}. Lo nuevo no es que estén furiosos: es que están organizados",
       "Paran {donde} y otras {n} comarcas a la vez, y eso ya no es una queja: es una fecha"] },
   { id: "revuelta", peso: (s, c) => (((c.vivo || {}).hechos || [])
-      .some((h) => h.t === "revuelta" && h.cual === "revuelta") ? 60 : 0),
+      .some((h) => h.t === "revuelta" && h.cual === "revuelta") ? 45 : 0),
     huecos: (s, c) => { const h = ((c.vivo || {}).hechos || []).find((x) => x.t === "revuelta") || {};
       return { donde: { nombre: h.prov || "la provincia" }, n: Math.max(1, h.cuantas || 1) }; },
     fr: ["⚑ Se levanta {donde}. No piden pan: traen escrito lo que quieren, y eso no se había visto",
