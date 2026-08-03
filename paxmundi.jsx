@@ -4141,6 +4141,205 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
   return { pops: [...junta.values()], hechos };
 }
 
+// ═══ QUIÉN VA A LA GUERRA ════════════════════════════════════
+// Los brazos para las armas eran un cuatro y medio por ciento de la población,
+// igual en 1200 que en 1940, y reclutar no sacaba a nadie de ninguna parte: el
+// ejército aparecía pagando oro y la sociedad no se enteraba.
+//
+// Pero de dónde salen los soldados es una de las cosas que más cambian entre
+// una época y otra, y cambia todo lo demás:
+//
+// · LA LEVA SEÑORIAL. El señor trae a los suyos, sirven una temporada y vuelven
+//   a la siega. Sale barata en oro y carísima en cosecha, y no da para
+//   campañas largas: por eso las guerras medievales duraban un verano.
+// · LA TROPA MERCENARIA. No es tu gente: la compras. No te cuesta un solo
+//   brazo del país y te cuesta el triple de oro, y el día que no cobra se va o
+//   te saquea. Es la solución de quien tiene dinero y poca gente.
+// · EL EJÉRCITO PERMANENTE. Profesional, largo, sacado de los que no tienen
+//   tierra. Cuesta sostenerlo todo el año y por eso lo inventó el estado
+//   fiscal y no el rey guerrero.
+// · LA CONSCRIPCIÓN. Todos sirven, y por eso los ejércitos se multiplican por
+//   diez de golpe. Pero solo funciona donde el estado se siente propio: la
+//   levée en masse no fue un decreto, fue un decreto que la gente obedeció. Sin
+//   legitimidad, una conscripción da desertores y motines, que es lo que le
+//   pasó a todo el que copió el decreto sin copiar la revolución.
+
+// El régimen lo manda el siglo y el saber lo mejora, no al revés. Atarlos al
+// nodo de ciencia dejaba la conscripción esperando a un saber que en el árbol
+// llega en el año dos mil, y así ningún reino levantaba una leva napoleónica
+// en el siglo de Napoleón.
+const RECLUTAS = [
+  { id: "senorial", n: "leva señorial", hasta: 1700, cuota: 0.020, oro: 0.55,
+    // el que va vuelve para la siega, así que la cosecha lo nota
+    campo: 0.55, dice: "el señor trae a los suyos" },
+  { id: "mercenaria", n: "tropa mercenaria", desde: 1350, hasta: 1800, cuota: 0.014, oro: 2.4,
+    ajena: true, campo: 0, dice: "se compran compañías donde las haya" },
+  { id: "permanente", n: "ejército permanente", desde: 1650, cuota: 0.032, oro: 1.15,
+    mejora: "organizacion.militar_org.ejercito_permanente", campo: 0.15,
+    dice: "se sirve por años y se cobra una paga" },
+  { id: "conscripcion", n: "conscripción", desde: 1793, cuota: 0.095, oro: 0.75,
+    mejora: "organizacion.militar_org.conscripcion", campo: 0.30, pideNacion: true,
+    dice: "sirve todo el que puede, porque el país es de todos" },
+];
+const RECLUTA_IDX = Object.fromEntries(RECLUTAS.map((x) => [x.id, x]));
+
+// Cuánto siente la gente que el estado es suyo. Es la pieza sin la cual la
+// conscripción no es más que un papel: Prusia y Austria copiaron el decreto
+// francés y no les salieron los mismos ejércitos, porque lo que Francia tenía
+// no era una ley sino un país que se creía dueño de sí mismo.
+function legitimidad(s) {
+  const P = s.pops || {};
+  const st = s.stats || {};
+  let v = 0.18;
+  // que a uno se le oiga: votar, y que su estamento cuente
+  v += acotar(P.apertura || 0, 0, 1) * 0.30;
+  if (hayElecciones(s)) v += 0.10;
+  // que las cosas vayan
+  v += acotar((((s.facciones || {}).pueblo ?? 50) - 40) / 60, -0.2, 0.30);
+  v += acotar(((st.estabilidad || 50) - 45) / 110, -0.15, 0.25);
+  // y que uno rece con el que manda, que en su siglo pesaba
+  const credo = P.credo, credos = P.credos || {};
+  const gente = P.gente || 0;
+  if (credo && gente > 0) v += acotar((credos[credo] || 0) / gente - 0.6, -0.25, 0.15);
+  return acotar(v, 0.05, 1);
+}
+
+// Qué régimen de reclutamiento tiene este reino hoy: el mejor de los que la
+// época y el saber le permiten.
+function regimenDeLeva(s) {
+  const anio = s.anio || 1200;
+  let mejor = null;
+  for (const x of RECLUTAS) {
+    if (x.ajena) continue;                       // el mercenario no es una época
+    if (x.desde && anio < x.desde) continue;
+    if (x.hasta && anio > x.hasta) continue;
+    if (!mejor || x.cuota > mejor.cuota) mejor = x;
+  }
+  // Y si el año cae en un hueco entre dos regímenes, el último que ya empezó,
+  // no el primero de la lista: con el respaldo mal puesto, un reino de 1900
+  // levantaba huestes señoriales.
+  if (!mejor) for (const x of RECLUTAS) {
+    if (x.ajena) continue;
+    if ((x.desde || 0) > anio) continue;
+    if (!mejor || (x.desde || 0) > (mejor.desde || 0)) mejor = x;
+  }
+  // El mercenario, en cambio, no es un siglo: es una decisión, y la tomaba
+  // siempre el mismo tipo de estado. La república rica y despoblada que no
+  // quería sacar a sus mercaderes del negocio, y el príncipe que prefería no
+  // poner armas en manos de su propia gente, compraban compañías mientras
+  // hubo con qué pagarlas. Cuando se acababa el oro se acababa el ejército, y
+  // ahí terminó el negocio de los condotieros.
+  const merc = RECLUTA_IDX.mercenaria;
+  if (anio >= merc.desde && anio <= merc.hasta && !(mejor && mejor.pideNacion)) {
+    const oro = ((s.edu || {}).oro || 0);
+    const fac = s.facciones || {};
+    const comercio = ((fac.mercaderes ?? 50) - 45) / 55;
+    const lazo = legitimidad(s);
+    // hace falta caja, y hace falta no fiarse de la propia gente
+    if (oro > 320 && comercio + (0.55 - lazo) > 0.30) return merc;
+  }
+  return mejor || RECLUTAS[0];
+}
+// Lo que el saber le suma al régimen que ya se tiene: un ejército permanente
+// con estado mayor rinde más que uno sin él, pero sigue siendo permanente.
+function cuotaDeLeva(reg, ciencia) {
+  const sab = new Set(((ciencia || {}).sabidos) || []);
+  return reg.cuota * (reg.mejora && sab.has(reg.mejora) ? 1.35 : 1);
+}
+
+// Quién puede ir. No todo el mundo: el noble manda pero no forma en la línea,
+// el clero no va, y el que ya es soldado ya está. Y el que va sale de la
+// cosecha y del taller, que es el coste que nunca aparecía en ninguna cuenta.
+const SIRVE = { campesino: 1, pastor: 0.9, pescador: 0.8, minero: 0.9, obrero: 1,
+  artesano: 0.8, siervo: 0.85, esclavo: 0.25, tecnico: 0.6, mercader: 0.4,
+  letrado: 0.3, burgues: 0.2, clero: 0.05, noble: 0.35, soldado: 0 };
+
+// Los brazos que este reino puede poner en pie, y de dónde salen.
+function brazosDelReino(s) {
+  const reg = regimenDeLeva(s);
+  const leg = legitimidad(s);
+  let aptos = 0, gente = 0;
+  for (const p of s.provincias || []) for (const q of p.pops || []) {
+    gente += q.n;
+    // y hay que estar sano para servir: un reino enfermo no llena las filas
+    const sano = q.salud == null ? 1 : acotar(0.45 + q.salud / 90, 0.4, 1.15);
+    aptos += q.n * (SIRVE[q.clase] == null ? 0.7 : SIRVE[q.clase]) * sano;
+  }
+  if (!gente) return { reg, leg, total: 0, aptos: 0 };
+  // La conscripción solo rinde lo que promete donde el país se siente propio.
+  // Con legitimidad baja, el decreto está escrito y las filas vacías.
+  const rinde = reg.pideNacion ? (0.30 + leg * 0.85) : (0.80 + leg * 0.25);
+  return { reg, leg, aptos: +aptos.toFixed(1),
+    total: Math.round(aptos * cuotaDeLeva(reg, s.ciencia) * rinde) };
+}
+
+// ——— y sacarlos de donde estaban ———
+// Un ejército no aparece: se lleva gente del campo y del taller, y esa gente
+// deja de arar y de tejer. Es el coste que no aparecía en ninguna cuenta, y es
+// el motivo por el que una guerra larga arruinaba una cosecha.
+function llamarAFilas(provs, cuantos, s, rnd) {
+  if (!(cuantos > 0)) return { provincias: provs, tomados: 0 };
+  const reg = regimenDeLeva(s);
+  // el mercenario no sale del país: se compra fuera
+  if (reg.ajena) return { provincias: provs, tomados: 0 };
+  let peso = 0;
+  const pesos = [];
+  for (const p of provs || []) {
+    let w = 0;
+    for (const q of p.pops || []) {
+      const apto = SIRVE[q.clase] == null ? 0.7 : SIRVE[q.clase];
+      // el pobre va antes que el rico, y no por casualidad: el que podía pagar
+      // un sustituto lo pagaba, y eso fue la ley durante casi todo el XIX
+      const pobre = 1 / (1 + acotar((q.caudal || 0) * 0.5 + ((q.eco || {}).ingreso || 0), 0, 30) * 0.12);
+      w += q.n * apto * pobre;
+    }
+    pesos.push(w); peso += w;
+  }
+  if (!(peso > 0)) return { provincias: provs, tomados: 0 };
+  let tomados = 0;
+  const out = (provs || []).map((p, i) => {
+    const cuota = cuantos * (pesos[i] / peso);
+    if (!(cuota > 0.01) || !p.pops || !p.pops.length) return p;
+    let w = 0;
+    const ws = p.pops.map((q) => {
+      const apto = SIRVE[q.clase] == null ? 0.7 : SIRVE[q.clase];
+      const pobre = 1 / (1 + acotar((q.caudal || 0) * 0.5 + ((q.eco || {}).ingreso || 0), 0, 30) * 0.12);
+      const v = q.n * apto * pobre; w += v; return v;
+    });
+    if (!(w > 0)) return p;
+    const pops = [];
+    // El que va a filas no deja de ser quien era: un recluta bretón sigue
+    // hablando bretón en el cuartel. Por eso los que salen se agrupan por
+    // lengua y credo y no en un montón único, que es lo que después hace que
+    // un ejército sea de una nación o de tres pueblos mal avenidos.
+    const banderas = new Map();
+    let alFrente = 0;
+    for (let k = 0; k < p.pops.length; k++) {
+      const q = p.pops[k];
+      const van = Math.min(q.n * 0.35, cuota * (ws[k] / w));
+      if (van > 0.004 && q.clase !== "soldado") {
+        pops.push({ ...q, n: +(q.n - van).toFixed(3) });
+        const clave = q.cultura + "|" + q.religion;
+        const y = banderas.get(clave);
+        if (y) y.n += van; else banderas.set(clave, { de: q, n: van });
+        alFrente += van;
+      } else pops.push(q);
+    }
+    if (alFrente > 0.004) {
+      tomados += alFrente;
+      for (const { de, n } of banderas.values()) {
+        const j = pops.findIndex((q) => q.clase === "soldado"
+          && q.cultura === de.cultura && q.religion === de.religion);
+        if (j >= 0) pops[j] = { ...pops[j], n: +(pops[j].n + n).toFixed(3) };
+        else pops.push({ ...de, clase: "soldado", n: +n.toFixed(3),
+          caudal: CLASES.soldado.caudal });
+      }
+    }
+    return { ...p, pops: pops.filter((q) => q.n > 0.004) };
+  });
+  return { provincias: out, tomados: +tomados.toFixed(2) };
+}
+
 // ═══ PARTIDOS Y ELECCIONES ═══════════════════════════════════
 // Un partido no es un bando: es un programa, y un programa le sirve a unos y
 // no a otros. Por eso acá los partidos no se eligen de una lista sino que
@@ -7410,7 +7609,17 @@ function ramaDisponible(rama, ciencia) {
   if (!r) return false;
   return !r.req || new Set(ciencia?.sabidos || []).has(r.req);
 }
-function brazosMaximos(poblacion) { return Math.round((poblacion || 0) * 0.045); }
+// Los brazos del reino. Si hay sociedad contada, salen de ella —de quién hay,
+// de cómo está de salud y de qué régimen de leva permite el siglo—; si no, del
+// cuatro y medio por ciento de siempre, que es lo que había antes y sirve de
+// suelo para una partida vieja o un turno sin gente.
+function brazosMaximos(poblacion, s) {
+  if (s && (s.provincias || []).some((p) => (p.pops || []).length)) {
+    const b = brazosDelReino(s);
+    if (b.total > 0) return b.total;
+  }
+  return Math.round((poblacion || 0) * 0.045);
+}
 function brazosOcupados(ej) { return brazosEnFilas(ej); }
 // Cuántas unidades podés sostener: población, riqueza y saber organizativo.
 const LIMITE_SABER = {
@@ -7441,8 +7650,8 @@ function brazosEnFilas(ej) {
   return RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.brazos, 0);
 }
 // Reserva de hombres: cuántos brazos hay disponibles para las armas.
-function reservaHombres(poblacion, ej, bajas) {
-  const total = Math.round((poblacion || 0) * 0.045);
+function reservaHombres(poblacion, ej, bajas, s) {
+  const total = brazosMaximos(poblacion, s);
   return { total, enFilas: brazosEnFilas(ej), bajas: Math.round(bajas || 0),
     libres: Math.max(0, total - brazosEnFilas(ej) - Math.round(bajas || 0)) };
 }
@@ -9481,7 +9690,7 @@ const salio = (rnd, p) => rnd() < acotar(p, 0, 1);
 // Un resultado vacío al que cada efecto le va agregando.
 const vacio = () => ({ hechos: [], d: {}, fac: {}, oro: 0, deuda: 0, pob: 0,
                        vec: [], ejercito: {}, prov: [], grano: 0, fallo: false,
-                       explora: null });
+                       leva: 0, explora: null });
 const sumar = (r, campo, k, v) => { r[campo][k] = (r[campo][k] || 0) + v; };
 
 const EFECTOS = {
@@ -9650,19 +9859,31 @@ const EFECTOS = {
     }
     const pedidas = Math.max(1, Math.round((c.o.num || 2) * i));
     const puede = Math.floor(c.oroDisp / rama.costo);
-    const brazos = Math.floor((brazosMaximos(c.pob) - brazosOcupados(c.s.ejercito)) / rama.brazos);
+    const brazos = Math.floor((brazosMaximos(c.pob, c.s) - brazosOcupados(c.s.ejercito)) / rama.brazos);
     const n = Math.max(0, Math.min(pedidas, puede, brazos));
     if (!n) {
       r.fallo = true;
       r.hechos.push({ t: "sin_medios", rama, oro: c.oroDisp < rama.costo, brazos: brazos <= 0 });
       return r;
     }
-    r.oro = -n * rama.costo;
+    // Lo que cuesta en oro depende del régimen: el mercenario cuesta el triple
+    // y no cuesta un solo brazo del país; la leva señorial es barata en dinero
+    // y cara en cosecha.
+    const reg = regimenDeLeva(c.s);
+    r.oro = -Math.round(n * rama.costo * reg.oro);
     r.ejercito[rama.id] = n;
     sumar(r, "d", "militar", Math.min(9, n * 2));
     sumar(r, "fac", "ejercito", 8);
-    sumar(r, "fac", "pueblo", -Math.round(4 * i));
-    r.hechos.push({ t: "recluta", rama, n });
+    // Y lo que le sienta al pueblo depende de quién vaya. Al mercenario nadie
+    // lo llora; una leva que se lleva a los hijos de la comarca, sí, y una
+    // conscripción en un país que se siente propio se lleva menos rencor que
+    // en uno que no.
+    const leg = legitimidad(c.s);
+    const duele = reg.ajena ? 0.25 : reg.pideNacion ? 1.5 - leg : 1.1;
+    sumar(r, "fac", "pueblo", -Math.round(4 * i * duele));
+    // y salen de donde estaban: del campo y del taller
+    r.leva = reg.ajena ? 0 : n * rama.brazos;
+    r.hechos.push({ t: "recluta", rama, n, regimen: reg.id });
     return r;
   },
   licenciar: (c) => {
@@ -10318,6 +10539,17 @@ function aplicarEfectos(n, ef, rnd) {
       }
     }
   }
+  // ——— y los que se van a filas ———
+  // Un ejército no aparece: se lleva gente del campo y del taller, y esa gente
+  // deja de arar y de tejer mientras sirve.
+  if (ef.leva > 0 && (e.provincias || []).some((p) => (p.pops || []).length)) {
+    const lv = llamarAFilas(e.provincias, ef.leva, e, rnd);
+    if (lv.tomados > 0) {
+      e.provincias = lv.provincias.map((p) => (p.pops && p.pops.length
+        ? { ...p, soc: resumenPops(p.pops) } : p));
+      e.pops = sociedadDelReino(e.provincias, n.anio, (n.gobierno || {}).forma);
+    }
+  }
   if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
   if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
   if (ef.pi) e.ciencia = { ...e.ciencia, pi: Math.max(0, (e.ciencia.pi || 0) + ef.pi) };
@@ -10602,6 +10834,10 @@ function elenco(s, h, rnd, mem) {
     facUno: () => (h.faccion ? VOZ_FAC[h.faccion.id].uno : "(un notable|un vecino principal)"),
     estacion: alAzar(rnd, ["en pleno invierno", "con la siega a medias", "antes de las lluvias",
       "en lo peor del verano", "cuando ya apretaba el frío", "con los caminos embarrados"]),
+    // cómo se junta la tropa en este siglo: no es lo mismo la hueste del señor
+    // que el decreto que llama a todos
+    levaNom: () => (RECLUTA_IDX[h.regimen] || RECLUTAS[0]).n,
+    levaDice: () => capitalizar((RECLUTA_IDX[h.regimen] || RECLUTAS[0]).dice) + ".",
   };
 }
 
@@ -10667,11 +10903,11 @@ const ACTO = {
   paz_rechazada: ["{vecinoNom} rechaza la propuesta: cree que puede sacar más",
     "Los emisarios vuelven (con las manos vacías|humillados|sin haber sido recibidos) de la corte de {vecinoNom}",
     "{vecinoNom} contesta con (condiciones imposibles|silencio|una lista de exigencias) [y sigue la guerra]"],
-  recluta: ["Se levantan {n} cuerpos de {rama}. (Los tambores no paran en las plazas|Las madres miran pasar la columna|Se pagan enganches en metálico)",
+  recluta: ["Por {levaNom} se levantan {n} cuerpos de {rama}. (Los tambores no paran en las plazas|Las madres miran pasar la columna|Se pagan enganches en metálico)",
     "Alistan {n} de {rama} {estacion}; (muchos van por el pan|van los que no tienen tierra|se llevan hasta a los que sobran en casa)",
-    "{n} unidades nuevas de {rama} juran bandera [ante {sob}]",
+    "{n} unidades nuevas de {rama} juran bandera [ante {sob}]. {levaDice}",
     "La leva de {rama} da {n} cuerpos, (menos de los prometidos|más de los previstos|justo los que hacían falta|y una cuarta parte deserta antes de llegar)",
-    "Se arman {n} de {rama} con (lo que había|prisa|dinero prestado) [y armas de dos generaciones atrás]"],
+    "Se arman {n} de {rama} por {levaNom}, con (lo que había|prisa|dinero prestado) [y armas de dos generaciones atrás]"],
   rama_imposible: ["Nadie en el reino sabe todavía formar {rama}"],
   sin_medios: ["No hay (oro ni brazos|caudal ni hombres|dinero ni voluntarios) para levantar más tropa",
     "Se intenta la leva y (no acude nadie|no alcanza el dinero|los concejos se niegan)"],
@@ -11575,7 +11811,7 @@ function motorLocal(s, accion, dias, semilla) {
     fin: null,
     // ——— lo que la API no podía tocar ———
     efectos: { memoria: recuerdoDe(res.hechos, s), vivo, migrar: { dias }, oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
-               pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra,
+               pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra, leva: res.leva,
                paz: res.paz, frente: res.frente, bajas: res.bajas, aguante: res.aguante,
                tributo: res.tributo, factoria: res.factoria, sede: res.sede,
                sabio: res.sabio, general: res.general, destituir: res.destituir, pi: res.pi },
@@ -12443,14 +12679,25 @@ export default function PaxMundi() {
       const r = RAMAS_EJERCITO.find((x) => x.id === rid); if (!r) return st;
       const ej = { ...(st.ejercito || {}) };
       const lim = limiteFuerzas(st.stats, st.ciencia, st.poblacion);
-      const rv = reservaHombres(st.poblacion, ej, st.bajasRecientes);
-      if (unidadesTotales(ej) >= lim || st.edu.oro < r.costo || rv.libres < r.brazos) return st;
-      ej[rid] = (ej[rid] || 0) + Math.max(1, cuantas || 1);
-      return { ...st, ejercito: ej,
-        edu: { ...st.edu, oro: st.edu.oro - r.costo },
+      const rv = reservaHombres(st.poblacion, ej, st.bajasRecientes, st);
+      const reg = regimenDeLeva(st);
+      const costo = Math.round(r.costo * reg.oro);
+      if (unidadesTotales(ej) >= lim || st.edu.oro < costo || rv.libres < r.brazos) return st;
+      const n = Math.max(1, cuantas || 1);
+      ej[rid] = (ej[rid] || 0) + n;
+      // Y los hombres salen de algún lado: del campo y del taller, salvo que se
+      // compren fuera. El que se lleva la leva deja de arar.
+      const lv = llamarAFilas(st.provincias, reg.ajena ? 0 : n * r.brazos, st, dado("leva" + st.anio + rid));
+      const provincias = lv.tomados > 0
+        ? lv.provincias.map((p) => (p.pops && p.pops.length ? { ...p, soc: resumenPops(p.pops) } : p))
+        : st.provincias;
+      return { ...st, ejercito: ej, provincias,
+        pops: lv.tomados > 0 ? sociedadDelReino(provincias, st.anio, (st.gobierno || {}).forma) : st.pops,
+        edu: { ...st.edu, oro: st.edu.oro - costo },
         facciones: { ...st.facciones, ejercito: Math.min(100, (st.facciones?.ejercito ?? 50) + 3) },
         cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
-          texto: `⚔ Se levanta una nueva unidad de ${r.n.toLowerCase()}: ${fmtPob(r.brazos)} hombres a las armas, ⚜${r.mant} al año de sostén.` }] };
+          texto: `⚔ ${capitalizar(reg.n)}: se levanta una unidad de ${r.n.toLowerCase()}, ${fmtPob(r.brazos)} hombres a las armas`
+            + `${reg.ajena ? " compradas fuera del reino" : " sacados del campo y del taller"}, ⚜${r.mant} al año de sostén.` }] };
     });
   }
   function licenciar(rid) {
@@ -15584,8 +15831,10 @@ export default function PaxMundi() {
               const lim = limiteFuerzas(s.stats, s.ciencia, s.poblacion);
               const uds = unidadesTotales(s.ejercito);
               const mantEj = mantenimientoEjercito(s.ejercito);
-              const bmax = brazosMaximos(s.poblacion);
+              const bmax = brazosMaximos(s.poblacion, s);
               const bocu = brazosOcupados(s.ejercito);
+              const brz = (s.provincias || []).some((p) => (p.pops || []).length) ? brazosDelReino(s) : null;
+              const reg = regimenDeLeva(s);
               return (
               <div style={{ padding: "13px 14px" }}>
                 {/* ── fuerza total ── */}
@@ -15613,6 +15862,42 @@ export default function PaxMundi() {
                   )}
                 </div>
 
+                {/* ── de dónde salen los hombres ── */}
+                {brz && (
+                  <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                    background: C.panel2, border: `1px solid ${C.line}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                        ⚑ CÓMO SE LEVANTA LA TROPA
+                      </span>
+                      <span style={{ fontFamily: mono, fontSize: 12, color: C.gold }}>{brz.reg.n}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{capitalizar(brz.reg.dice)}.</div>
+                    {[["Hombres en edad y salud de servir", fmtPob(Math.round(brz.aptos)), C.ink],
+                      ["De ellos, los que se puede llamar", `${fmtPob(brz.total)} · cuota ${(cuotaDeLeva(brz.reg, s.ciencia) * 100).toFixed(1)}%`, C.ink],
+                      ["El estado se siente propio", `${Math.round(brz.leg * 100)}%`,
+                        brz.leg > 0.6 ? C.green : brz.leg < 0.35 ? C.red : C.gold],
+                      ["Cuesta en oro", `×${brz.reg.oro.toFixed(2)}`, brz.reg.oro > 1.3 ? C.red : C.green]]
+                      .map(([a2, b2, col]) => (
+                      <div key={a2} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginTop: 3 }}>
+                        <span>{a2}</span><span style={{ color: col, fontFamily: mono }}>{b2}</span>
+                      </div>
+                    ))}
+                    {brz.reg.pideNacion && brz.leg < 0.45 && (
+                      <div style={{ fontSize: 11, color: C.red, marginTop: 5, lineHeight: 1.4 }}>
+                        La conscripción está decretada pero el país no se siente suyo: se presentan
+                        muchos menos de los que la ley manda, y los que van desertan.
+                      </div>
+                    )}
+                    {brz.reg.ajena && (
+                      <div style={{ fontSize: 11, color: C.gold, marginTop: 5, lineHeight: 1.4 }}>
+                        La tropa se compra fuera: no le saca un solo brazo a la cosecha, pero se va
+                        con el que pague mejor.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* ── ramas ── */}
                 <div style={{ fontSize: 10, letterSpacing: 1.8, textTransform: "uppercase", color: C.muted,
                   fontFamily: mono, marginBottom: 7 }}>─ cuerpos del ejército</div>
@@ -15620,7 +15905,8 @@ export default function PaxMundi() {
                   const disp = ramaDisponible(r, s.ciencia);
                   const cal = calidadRama(r, s.ciencia);
                   const n = (s.ejercito || {})[r.id] || 0;
-                  const puede = disp && s.edu.oro >= r.costo && uds < lim && bocu + r.brazos <= bmax;
+                  const costo = Math.round(r.costo * reg.oro);
+                  const puede = disp && s.edu.oro >= costo && uds < lim && bocu + r.brazos <= bmax;
                   return (
                     <div key={r.id} style={{ padding: "9px 11px", marginBottom: 6, borderRadius: 7,
                       background: C.panel2, border: `1px solid ${n ? r.col + "77" : C.line}`, opacity: disp ? 1 : 0.5 }}>
@@ -15653,7 +15939,7 @@ export default function PaxMundi() {
                             style={{ flex: 1, padding: "6px 8px", cursor: puede ? "pointer" : "not-allowed", borderRadius: 5,
                               background: puede ? `${r.col}18` : "transparent", border: `1px solid ${puede ? r.col : C.line}55`,
                               color: puede ? C.ink : C.muted, fontFamily: mono, fontSize: 10.5 }}>
-                            RECLUTAR ⚜{r.costo} · {fmtPob(r.brazos)} · −{r.mant}/año
+                            RECLUTAR ⚜{costo} · {fmtPob(r.brazos)} · −{r.mant}/año
                           </button>
                           {n > 0 && (
                             <button onClick={() => licenciar(r.id)} disabled={pensando}
