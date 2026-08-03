@@ -119,6 +119,8 @@ const CARDINALES = ["del Norte", "del Sur", "de Oriente", "de Poniente", "Alta",
 // El factor va comprimido a propósito: el techo nacional se reparte entre las
 // provincias del reino, así que esto redistribuye gente hacia donde se puede
 // vivir sin cambiar cuánta gente cabe en total.
+// Con cuánta gente arranca un reino, medido contra su techo demográfico.
+const ARRANQUE_POB = 0.72;
 function fertProv(p) {
   const t = TERRENOS[p.terreno] || TERRENOS.llanura;
   // el ambiente de hoy: si el clima derivó o se taló el monte, la tierra ya no
@@ -419,9 +421,16 @@ function provinciasDePais(pais, ciencia) {
     const [a, b] = ar.split("-").map(Number);
     provs[a].ady.push(provs[b].id); provs[b].ady.push(provs[a].id);
   }
+  // Al 72% del techo y no al 88%. Un reino que arranca pegado a su techo
+  // demográfico no puede crecer —eso es lo que quiere decir un techo— así que
+  // el jugador veía cien años seguidos de números que bajaban: lo poco que
+  // crecía no daba ni para pagar los terremotos y el agua sucia. Con sitio por
+  // delante, el primer siglo se llena y después la partida se asienta en la
+  // meseta hasta que la técnica levanta el techo, que es la forma que tuvo de
+  // verdad la población europea antes de 1700.
   const dem = demografiaDe(ciencia);
   const sumF = provs.reduce((a, x) => a + fertProv(x), 0);
-  for (const p of provs) p.poblacion = Math.round(dem.techo * 0.88 * (fertProv(p) / sumF));
+  for (const p of provs) p.poblacion = Math.round(dem.techo * ARRANQUE_POB * (fertProv(p) / sumF));
   return provs;
 }
 const PAISES = Object.keys(PAIS_PROV).sort((a, b) => a.localeCompare(b, "es"))
@@ -1655,6 +1664,12 @@ function evolucionarMundo(s, dias, rnd, empuje) {
   }
 
   return { provincias: conAmbiente, reservas: { ...(s.reservas || {}), ...gasto },
+           // De qué población partió cada provincia. Hace falta porque el mundo
+           // y el reino resuelven el mismo turno por separado —el terremoto por
+           // un lado, la cosecha por el otro— y los dos mueven la misma cifra.
+           // Sin saber de dónde salieron los dos, no hay manera de sumar lo que
+           // hizo cada uno: o se pierde la hambruna o se pierde el terremoto.
+           pobAntes: Object.fromEntries(provs.map((p) => [p.id, p.poblacion || 0])),
            // la sociedad del reino, que es de donde salen los estamentos
            pops: sociedadDelReino(conAmbiente, s.anio, (s.gobierno || {}).forma),
            mundo: { anomalia, bosqueDicho: nuevoBosqueDicho, climaDicho: nuevoClimaDicho,
@@ -6086,10 +6101,10 @@ function generarProvincias(ciencia, semilla, paisId) {
       costera: i === 0 ? rnd() < 0.7 : rnd() < 0.4,
       rio: rnd() < 0.45, capital: i === 0, lealtad: 60 + Math.round(rnd() * 25), poblacion: 0 });
   }
-  // repartir la población inicial: cada una al 88% de su propio techo
+  // repartir la población inicial: cada una a la misma parte de su propio techo
   const dem = demografiaDe(ciencia);
   const sumF = provs.reduce((a, x) => a + fertProv(x), 0);
-  for (const p of provs) p.poblacion = Math.round(dem.techo * 0.88 * (fertProv(p) / sumF));
+  for (const p of provs) p.poblacion = Math.round(dem.techo * ARRANQUE_POB * (fertProv(p) / sumF));
   return disponerProvincias(provs, rnd);
 }
 
@@ -9058,11 +9073,57 @@ function aplicarEfectos(n, ef, rnd) {
   // Lo que el mundo hizo por su cuenta. Va antes que todo lo demás porque el
   // resto del turno se aplica sobre las provincias, y si se pisaran, ganaría
   // el jugador: acá el que tiene la última palabra sobre el bosque es el bosque.
+  //
+  // Pero la última palabra sobre el bosque no es la última palabra sobre la
+  // gente, y durante catorce versiones lo fue. Acá se hacía
+  //     e.provincias = ef.vivo.provincias
+  // de un plumazo, y como el mundo se resuelve sobre el estado con el que
+  // empezó el turno, esa línea devolvía las provincias a la población que
+  // tenían antes. El bloque demográfico entero —el crecimiento contra el techo,
+  // la cosecha, el socorro entre provincias, los muertos de la hambruna y el
+  // golpe a la lealtad de la comarca golpeada— se calculaba, escribía su
+  // párrafo en la crónica y se tiraba a la basura. El reino anunciaba hambrunas
+  // que no mataban a nadie y no crecía jamás.
+  //
+  // Cada capa manda en lo suyo: el mundo, en lo que le pasa a la tierra; el
+  // reino, en lo que le pasa a su gente. La lista corta es la del reino, así
+  // que es la que se nombra: todo lo demás viene del mundo, y cuando el mundo
+  // aprenda a hacer una cosa nueva no habrá que acordarse de esta línea.
   if (ef.vivo) {
-    e.provincias = ef.vivo.provincias;
+    const porId = new Map((n.provincias || []).map((p) => [p.id, p]));
+    const antes = ef.vivo.pobAntes || null;
+    e.provincias = (ef.vivo.provincias || []).map((w) => {
+      const mio = porId.get(w.id);
+      if (!mio) return w;
+      let p = w, cambia = false;
+      // La población la mueven los dos, y por eso no vale quedarse con una: el
+      // terremoto es del mundo y la hambruna es del reino, y las dos pasaron.
+      // Se suman los dos saldos sobre la cifra de la que ambos partieron.
+      const base = antes ? antes[w.id] : null;
+      if (base != null && mio.poblacion != null && w.poblacion != null) {
+        const delReino = mio.poblacion - base;
+        if (Math.abs(delReino) > 0.001) {
+          p = { ...w, poblacion: Math.max(20, w.poblacion + delReino) };
+          cambia = true;
+        }
+      }
+      // La lealtad la mueve solo el reino —al mundo le da igual quién manda—
+      // así que ahí la suya es la buena y no hay nada que componer.
+      if (mio.lealtad !== w.lealtad) { if (!cambia) { p = { ...w }; cambia = true; } p.lealtad = mio.lealtad; }
+      // y si la gente cambió, los grupos tienen que sumar la gente que hay: el
+      // mundo los repartió sobre un total que ya no es el total
+      if (cambia && p.pops && p.pops.length && w.poblacion > 0 && p.poblacion !== w.poblacion) {
+        const k = p.poblacion / w.poblacion;
+        if (Math.abs(k - 1) > 0.002) {
+          p.pops = p.pops.map((q) => ({ ...q, n: +(q.n * k).toFixed(3) }));
+          p.soc = resumenPops(p.pops);
+        }
+      }
+      return p;
+    });
     e.reservas = ef.vivo.reservas;
     e.mundo = ef.vivo.mundo;
-    if (ef.vivo.pops) e.pops = ef.vivo.pops;
+    if (ef.vivo.pops) e.pops = sociedadDelReino(e.provincias, n.anio, (n.gobierno || {}).forma);
     // La suciedad mata antes de que nadie sepa por qué: se descuenta acá y no
     // como una penalización de la ficha, porque son personas, no un modificador.
     if (ef.vivo.muertos > 0) {
@@ -9098,10 +9159,28 @@ function aplicarEfectos(n, ef, rnd) {
   // mudaba nunca, así que ni el clima ni la ciudad ni el camino cambiaban dónde
   // vive la gente.
   if (ef.pob || ef.migrar) {
+    const antesDeMudar = new Map(e.provincias.map((p) => [p.id, p.poblacion || 0]));
     const mv = moverGente(e.provincias, e.stats, e.ciencia, ef.pob || 0,
                           (ef.migrar && ef.migrar.dias) || 365, rnd);
-    e.provincias = mv.provincias;
+    // Los que se mudan también son gente, así que los grupos de la provincia
+    // que se vacía tienen que menguar y los de la que se llena, crecer. Se hace
+    // a prorrata: por ahora el que se va es un vecino cualquiera, no un
+    // campesino en concreto, y el que llega se parece a los que ya estaban. Es
+    // una simplificación y se nota —una migración de verdad lleva su cultura y
+    // su oficio a cuestas— pero mantiene en pie lo único que no puede fallar:
+    // que la suma de los grupos sea la gente que hay. De eso cuelgan el reparto
+    // social, el consumo y la voz de los estamentos, y calcularlos sobre un
+    // total que no existe es peor que no calcularlos.
+    e.provincias = mv.provincias.map((p) => {
+      const antes = antesDeMudar.get(p.id);
+      if (!p.pops || !p.pops.length || !antes || !(p.poblacion > 0)) return p;
+      const k = p.poblacion / antes;
+      if (!Number.isFinite(k) || Math.abs(k - 1) < 0.002) return p;
+      const pops = p.pops.map((q) => ({ ...q, n: +(q.n * k).toFixed(3) }));
+      return { ...p, pops, soc: resumenPops(pops), consumo: consumoDe(pops) || p.consumo };
+    });
     e.poblacion = Math.round(poblacionTotal(e.provincias));
+    if (e.pops) e.pops = sociedadDelReino(e.provincias, n.anio, (n.gobierno || {}).forma);
   }
   if (ef.prov && ef.prov.length) {
     e.provincias = e.provincias.map((p) => {
@@ -11015,7 +11094,7 @@ export default function PaxMundi() {
         estabilidad: clamp(init.stats.estabilidad), diplomacia: clamp(init.stats.diplomacia),
         tecnologia: clamp(init.stats.tecnologia), prestigio: clamp(init.stats.prestigio),
       };
-      const pobIni = Math.round(demografiaDe(cienciaIni).techo * 0.88);
+      const pobIni = Math.round(demografiaDe(cienciaIni).techo * ARRANQUE_POB);
       // La gente del primer día: repartida por lo que aguanta cada tierra, y
       // con su reparto social hecho. Sin esto el mapa arranca en blanco y el
       // jugador decide su primer turno sin saber a quién gobierna.
@@ -11700,7 +11779,7 @@ export default function PaxMundi() {
       const dem = demografiaDe(cienciaPrevia);
       let provs = (state.provincias && state.provincias.length
         ? state.provincias : generarProvincias(cienciaPrevia, state.nacion.nombre, state.region)).map((p) => ({ ...p }));
-      const pobPrev = poblacionTotal(provs) || state.poblacion || Math.round(dem.techo * 0.88);
+      const pobPrev = poblacionTotal(provs) || state.poblacion || Math.round(dem.techo * ARRANQUE_POB);
       const entradasPob = [];
       let reservaNueva = state.reservaGrano || 0;
 
@@ -11711,11 +11790,28 @@ export default function PaxMundi() {
         p.poblacion = Math.max(20, p.poblacion + crecimientoAnual(p.poblacion, nuevosStats, { techo: techoP, salud: dem.salud }) * esc);
       }
 
-      // 2 · la cosecha del año: una sola para todo el reino, pero cada tierra da lo suyo
-      const cos = esc >= 0.25 ? tirarCosecha(cienciaPrevia) : { f: 1, t: "normal", am: 0 };
+      // 2 · la cosecha del año: una sola para todo el reino, pero cada tierra da
+      //     lo suyo. Y es la que el mundo ya tiró al resolver el turno, no otra:
+      //     se tiraban dos, una acá y otra allá, así que el año podía ser bueno
+      //     para las familias y malo para el granero del reino. Un año es un
+      //     año. Si el mundo no la trae —una partida vieja, un turno de una
+      //     semana— se tira acá como antes.
+      const delMundo = new Map(((r.efectos && r.efectos.vivo && r.efectos.vivo.provincias) || [])
+        .filter((p) => p.cosecha != null).map((p) => [p.id, p.cosecha]));
+      const cos = esc >= 0.25
+        ? (delMundo.size
+            ? (() => {                              // el año del reino es el promedio de sus tierras
+                let t = 0; for (const v of delMundo.values()) t += v;
+                const f = t / delMundo.size;
+                return { f, t: f < 0.93 ? "mala" : f > 1.05 ? "buena" : "normal", am: amortiguacionCosecha(cienciaPrevia) };
+              })()
+            : tirarCosecha(cienciaPrevia))
+        : { f: 1, t: "normal", am: 0 };
       let faltaTotal = 0, sobraTotal = 0;
       for (const p of provs) {
-        const cp = esc >= 0.25 ? cosechaProvincia(p, cos.f, cienciaPrevia) : 1;
+        const cp = esc < 0.25 ? 1
+          : delMundo.has(p.id) ? delMundo.get(p.id)
+          : cosechaProvincia(p, cos.f, cienciaPrevia);
         p._cos = cp;
         const techoReal = techoProvincia(p, provs, cienciaPrevia) * cp;
         p._falta = Math.max(0, p.poblacion - techoReal);
