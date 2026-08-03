@@ -1582,17 +1582,29 @@ function evolucionarMundo(s, dias, rnd, empuje) {
   // respira. La población de la provincia deja de ser el número que había y
   // pasa a ser la suma de sus grupos; el número se conserva porque los grupos
   // salen de él, pero ahora se sabe de quién es cada parte.
+  // La cosecha del año se tira acá y no en otra parte. Estaba calculada más
+  // adelante, cuando ya se había resuelto la gente, así que a los grupos les
+  // llegaba siempre un año normal: el hambre existía en el reino y no existía
+  // en ninguna familia. Se tira una vez, se guarda en la provincia, y quien la
+  // necesite después la lee de ahí en vez de tirarla de nuevo.
+  const cosNacional = tirarCosecha(s.ciencia, rnd);
   const conGente = conAguas.map((q) => {
-    const r = evolucionarPops(q, { ...s, provincias: conAguas }, dias, rnd);
+    const cos = cosechaProvincia(q, cosNacional.f, s.ciencia, rnd);
+    const r = evolucionarPops(q, { ...s, provincias: conAguas }, dias, rnd, cos);
     for (const h of r.hechos) hechos.push(h);
-    const vivos = animarPops(r.pops, q, s, q.cosecha);
-    // el total lo sigue mandando la demografía del reino, que ya cuadra con el
-    // techo y con el hambre: los grupos se reparten ese total, no lo inventan
+    const vivos = animarPops(r.pops, q, s, cos);
+    // El total lo sigue mandando la demografía del reino, que ya cuadra con el
+    // techo y con el granero: los grupos se reparten ese total, no lo inventan.
+    // Pero el reparto no es inocente: como la escala es la misma para todos,
+    // el grupo al que el año le mató más gente sale del reescalado siendo una
+    // parte más chica del pueblo. El reino decide cuántos son; el hambre, en
+    // qué casas faltó alguien.
     const suma = poblacionPops(vivos);
     const escala = suma > 0 && q.poblacion > 0 ? q.poblacion / suma : 1;
     const pops = Math.abs(escala - 1) < 0.002 ? vivos
       : vivos.map((x) => ({ ...x, n: +(x.n * escala).toFixed(3) }));
-    return { ...q, pops, soc: resumenPops(pops) };
+    return { ...q, pops, cosecha: +cos.toFixed(3), soc: resumenPops(pops),
+             consumo: consumoDe(pops) };
   });
 
   // Al final de todo: el ambiente de hoy, con el clima ya derivado, el bosque
@@ -1773,6 +1785,24 @@ function bonoUrbano(provs) {
   if (!pob) return 1;
   const urb = (provs || []).reduce((a, p) => a + ((p.ciudad && p.ciudad.pob) || 0), 0);
   return 1 + acotar(urb / pob, 0, 0.7) * 0.55;
+}
+// Y lo que el estado puede gravar de verdad no es lo que la gente produce sino
+// lo que la gente compra. Un pueblo que gasta todo su jornal en pan no deja
+// nada al paso: el grano se come en casa, no cruza una aduana, no pasa por un
+// mercado y no lo ve un recaudador. En cuanto a esa misma gente le sobra algo
+// después de comer, aparecen el tendero, el arriero y el fielato, y con ellos
+// aparece la hacienda. Por eso los estados modernos son ricos y los antiguos
+// no, aun gobernando la misma tierra: no cambió lo que se produce, cambió
+// cuánto de eso pasa por el mercado.
+function bonoConsumo(provs) {
+  let suma = 0, n = 0;
+  for (const p of provs || []) {
+    if (!p.consumo) continue;
+    suma += p.consumo.holgura * (p.poblacion || 1);
+    n += p.poblacion || 1;
+  }
+  if (!n) return 1;
+  return 1 + acotar(suma / n, 0, 1) * 0.85;
 }
 
 // ═══ DESASTRES ═══════════════════════════════════════════════
@@ -3195,21 +3225,21 @@ function ciudadEnPunto(cs, x, y, tol) {
 // del reino dejan de ser cinco números sueltos y pasan a ser lo que opina la
 // gente que hay.
 const CLASES = {
-  esclavo:    { n: "esclavos",    hasta: 1888, prod: 0.55, letras: 0.01, caudal: 0.05, hijos: 0.85, urb: 0.25, fac: "pueblo" },
-  siervo:     { n: "siervos",     hasta: 1861, prod: 0.70, letras: 0.02, caudal: 0.20, hijos: 1.05, urb: 0.02, fac: "pueblo" },
-  campesino:  { n: "campesinos",              prod: 0.85, letras: 0.06, caudal: 0.40, hijos: 1.15, urb: 0.03, fac: "pueblo" },
-  pastor:     { n: "pastores",                prod: 0.70, letras: 0.04, caudal: 0.35, hijos: 1.10, urb: 0.02, fac: "pueblo" },
-  pescador:   { n: "pescadores",              prod: 0.90, letras: 0.10, caudal: 0.45, hijos: 1.05, urb: 0.45, fac: "pueblo" },
-  minero:     { n: "mineros",                 prod: 1.15, letras: 0.12, caudal: 0.45, hijos: 1.10, urb: 0.35, fac: "pueblo" },
-  artesano:   { n: "artesanos",   hasta: 1920, prod: 1.20, letras: 0.30, caudal: 0.75, hijos: 0.95, urb: 0.90, fac: "mercaderes" , tope: 0.16, baja: "campesino"},
-  obrero:     { n: "obreros",     desde: 1780, prod: 1.45, letras: 0.45, caudal: 0.55, hijos: 1.05, urb: 0.95, fac: "pueblo" },
-  tecnico:    { n: "técnicos",    desde: 1860, prod: 2.10, letras: 0.92, caudal: 1.10, hijos: 0.80, urb: 0.95, fac: "mercaderes" , tope: 0.3, baja: "obrero"},
-  mercader:   { n: "mercaderes",              prod: 1.70, letras: 0.55, caudal: 1.60, hijos: 0.85, urb: 0.95, fac: "mercaderes" , tope: 0.18, baja: "artesano"},
-  burgues:    { n: "propietarios", desde: 1500, prod: 2.40, letras: 0.80, caudal: 3.00, hijos: 0.75, urb: 0.90, fac: "mercaderes" , tope: 0.07, baja: "mercader"},
-  letrado:    { n: "letrados",    desde: -500, prod: 1.30, letras: 1.00, caudal: 0.90, hijos: 0.70, urb: 0.88, fac: "clero" , tope: 0.05, baja: "mercader"},
-  clero:      { n: "clero",                   prod: 0.60, letras: 0.85, caudal: 0.95, hijos: 0.10, urb: 0.55, fac: "clero" , tope: 0.055, baja: "campesino"},
-  soldado:    { n: "soldados",                prod: 0.30, letras: 0.18, caudal: 0.50, hijos: 0.80, urb: 0.50, fac: "ejercito" , tope: 0.07, baja: "campesino"},
-  noble:      { n: "nobleza",     hasta: 1960, prod: 0.45, letras: 0.70, caudal: 4.00, hijos: 0.90, urb: 0.60, fac: "nobleza" , tope: 0.025, baja: "burgues"},
+  esclavo:    { n: "esclavos",    hasta: 1888, prod: 0.55, letras: 0.01, caudal: 0.05, renta: 0, hijos: 0.85, urb: 0.25, fac: "pueblo" },
+  siervo:     { n: "siervos",     hasta: 1861, prod: 0.70, letras: 0.02, caudal: 0.20, renta: 0, hijos: 1.05, urb: 0.02, fac: "pueblo" },
+  campesino:  { n: "campesinos",              prod: 0.85, letras: 0.06, caudal: 0.40, renta: 0, hijos: 1.15, urb: 0.03, fac: "pueblo" },
+  pastor:     { n: "pastores",                prod: 0.70, letras: 0.04, caudal: 0.35, renta: 0, hijos: 1.10, urb: 0.02, fac: "pueblo" },
+  pescador:   { n: "pescadores",              prod: 0.90, letras: 0.10, caudal: 0.45, renta: 0, hijos: 1.05, urb: 0.45, fac: "pueblo" },
+  minero:     { n: "mineros",                 prod: 1.15, letras: 0.12, caudal: 0.45, renta: 0, hijos: 1.10, urb: 0.35, fac: "pueblo" },
+  artesano:   { n: "artesanos",   hasta: 1920, prod: 1.20, letras: 0.30, caudal: 0.75, renta: 0.6, hijos: 0.95, urb: 0.90, fac: "mercaderes" , tope: 0.16, baja: "campesino"},
+  obrero:     { n: "obreros",     desde: 1780, prod: 1.45, letras: 0.45, caudal: 0.55, renta: 0, hijos: 1.05, urb: 0.95, fac: "pueblo" },
+  tecnico:    { n: "técnicos",    desde: 1860, prod: 2.10, letras: 0.92, caudal: 1.10, renta: 1.2, hijos: 0.80, urb: 0.95, fac: "mercaderes" , tope: 0.3, baja: "obrero"},
+  mercader:   { n: "mercaderes",              prod: 1.70, letras: 0.55, caudal: 1.60, renta: 7, hijos: 0.85, urb: 0.95, fac: "mercaderes" , tope: 0.18, baja: "artesano"},
+  burgues:    { n: "propietarios", desde: 1500, prod: 2.40, letras: 0.80, caudal: 3.00, renta: 26, hijos: 0.75, urb: 0.90, fac: "mercaderes" , tope: 0.07, baja: "mercader"},
+  letrado:    { n: "letrados",    desde: -500, prod: 1.30, letras: 1.00, caudal: 0.90, renta: 3.5, hijos: 0.70, urb: 0.88, fac: "clero" , tope: 0.05, baja: "mercader"},
+  clero:      { n: "clero",                   prod: 0.60, letras: 0.85, caudal: 0.95, renta: 13, hijos: 0.10, urb: 0.55, fac: "clero" , tope: 0.055, baja: "campesino"},
+  soldado:    { n: "soldados",                prod: 0.30, letras: 0.18, caudal: 0.50, renta: 4.0, hijos: 0.80, urb: 0.50, fac: "ejercito" , tope: 0.07, baja: "campesino"},
+  noble:      { n: "nobleza",     hasta: 1960, prod: 0.45, letras: 0.70, caudal: 4.00, renta: 44, hijos: 0.90, urb: 0.60, fac: "nobleza" , tope: 0.025, baja: "burgues"},
 };
 const CLASE_IDS = Object.keys(CLASES);
 const claseViva = (id, anio) => {
@@ -3586,7 +3616,7 @@ function vozDePops(pops, anio, forma) {
 // es: un campesino tiene más hijos que un burgués y se le mueren más; un
 // obrero aprende a leer porque su oficio lo obliga y un siervo no; y el hijo
 // del campesino se hace obrero cuando hay fábrica donde hacerse obrero.
-function evolucionarPops(p, s, dias, rnd) {
+function evolucionarPops(p, s, dias, rnd, cosecha) {
   let pops = p.pops && p.pops.length ? p.pops : sembrarPops(p, s);
   if (!pops.length) return { pops, hechos: [] };
   const anios = dias / 365;
@@ -3599,11 +3629,19 @@ function evolucionarPops(p, s, dias, rnd) {
   const gente = poblacionPops(pops);
   const holgura = acotar(1 - gente / techo, -0.6, 1);
 
+  // ——— antes que nada, las cuentas de la casa ———
+  // Va primero porque de acá sale todo lo demás: quién come, quién manda al
+  // hijo a la escuela y quién puede permitirse cambiar de oficio. Un año se le
+  // hace largo o corto a una familia según cómo le salgan estas cuentas.
+  const eco = economiaDeProvincia(pops, p, s, cosecha);
+  pops = eco.pops;
+
   // ——— nacer y morir ———
   const salud = 1 + dem.salud;
   pops = pops.map((q) => {
     const C = CLASES[q.clase] || CLASES.campesino;
     const R = RELIGIONES[q.religion] || RELIGIONES.animismo;
+    const E = q.eco || { hambre: 0, cubre: {}, decencia: 1 };
     // la natalidad es de la clase y de lo que se reza; la mortalidad, de la
     // salud del siglo y de lo que se come
     // El rico tuvo algo más de hijos que le sobrevivieran, no el doble; y en el
@@ -3611,13 +3649,24 @@ function evolucionarPops(p, s, dias, rnd) {
     // ser el cuarenta por ciento del reino, que es de lo más absurdo que puede
     // pasarle a un modelo de población.
     const nace = 0.040 * C.hijos * R.nat * (0.90 + Math.min(1.2, q.caudal) * 0.09);
-    const muere = 0.031 / salud * (1 + Math.max(0, -holgura) * 1.6) * (q.animo < 35 ? 1.18 : 1);
+    // Y el hambre mata a quien pasa hambre, no al reino en general. Hasta acá
+    // la mortalidad subía con la presión sobre el techo de la provincia, que es
+    // un promedio: en el mismo pueblo se morían los jornaleros y no se moría el
+    // cura, y el promedio no sabe la diferencia. Ahora la sabe.
+    const carestia = 1 + acotar(E.hambre, 0, 1.2) * 2.6;
+    const muere = 0.031 / salud * (1 + Math.max(0, -holgura) * 0.9) * carestia
+      * (q.animo < 35 ? 1.18 : 1) * (1 - (E.cubre.medico || 0) * 0.22);
     const n = Math.max(0.005, q.n * (1 + (nace - muere) * anios * (0.5 + holgura * 0.6)));
     // aprender a leer: cada clase tiende a su techo y el siglo mueve el techo
     // El techo de la época es un suelo para todos, no un multiplicador del que
     // ya sabía. Multiplicando, el campesino de 1950 leía el 11 %: la
     // alfabetización universal no premió al que leía, levantó al que no.
-    const meta = acotar(techoLetras + (1 - techoLetras) * C.letras, 0, 1);
+    // Pero un suelo tampoco basta: la escuela cuesta, y una familia que no llega
+    // a fin de año manda al chico a trabajar por mucha escuela que haya. Desde
+    // que la escuela existe como gasto, lo que la familia puede pagarla decide
+    // la mitad del camino entre lo que sabe y lo que podría saber.
+    const paga = necesidadViva(NECESIDAD_IDX.escuela, anio) ? acotar(E.cubre.escuela || 0, 0, 1) : 1;
+    const meta = acotar(techoLetras * (0.45 + paga * 0.55) + (1 - techoLetras) * C.letras, 0, 1);
     const letras = +(q.letras + (meta - q.letras) * Math.min(0.85, 0.045 * anios)).toFixed(4);
     return { ...q, n: +n.toFixed(3), letras };
   });
@@ -3681,7 +3730,13 @@ function evolucionarPops(p, s, dias, rnd) {
       // hace falta saber leer para subir a ciertos oficios: es el motivo por
       // el que la escuela cambió una sociedad y el decreto no
       const puerta = pideLetras == null ? 1 : acotar((q.letras - pideLetras) / 0.4, 0, 1);
-      const van = q.n * Math.min(0.5, tasa * anios) * puerta;
+      // y hace falta algo guardado. Poner un puesto, comprar una herramienta o
+      // mudarse a la ciudad cuesta, y la familia que no llega a fin de año no
+      // sube aunque sepa leer y aunque haya sitio: se queda donde está. Bajar
+      // no cuesta nada, así que solo se pide para los oficios de más arriba.
+      const sube = (CLASES[a] || {}).renta > (CLASES[de] || {}).renta;
+      const bolsa = sube ? acotar(0.25 + (q.caudal || 0) * 1.4, 0, 1) : 1;
+      const van = q.n * Math.min(0.5, tasa * anios) * puerta * bolsa;
       if (van > 0.004) mudanza.push({ q, a, van });
     }
   }
@@ -3776,12 +3831,22 @@ function animarPops(pops, p, s, cosecha) {
   const gobiernoDe = (s.pops || {}).credo || null;
   return (pops || []).map((q) => {
     const C = CLASES[q.clase] || CLASES.campesino;
+    const E = q.eco;
     let meta = 58;
-    meta += (cosecha != null ? (cosecha - 1) * 45 : 0);
+    // Lo que se piensa del año se piensa desde la mesa de casa. Antes esto era
+    // la cosecha del reino aplicada por igual a todos, que es como decir que
+    // al obispo y al jornalero un mal año les sienta lo mismo. Ahora cada
+    // familia opina de sus propias cuentas: no llegar a comer pesa mucho más
+    // que cualquier otra cosa que pueda pasar en un reino.
+    if (E) {
+      meta -= acotar(E.hambre, 0, 1.2) * 62;
+      meta += (acotar(E.decencia, 0, 1) - 0.75) * 22;
+      meta += acotar(E.gusto, 0, 1) * 11;
+    } else if (cosecha != null) meta += (cosecha - 1) * 45;
     meta -= ((p.humo || {}).aire || 0) * 22 * (C.urb > 0.5 ? 1.3 : 0.6);
     meta -= s.guerra ? 9 : 0;
     meta -= p.ocupada ? 26 : 0;
-    meta += (q.caudal - 0.6) * 5;
+    meta += (Math.min(3, q.caudal) - 0.6) * 5;
     meta += (q.letras - 0.4) * 6;
     if (gobiernoDe && q.religion !== gobiernoDe)
       meta -= (1 - (RELIGIONES[gobiernoDe] || { tolera: 0.6 }).tolera) * 40;
@@ -3806,6 +3871,247 @@ function resumenPops(pops) {
     animo: gente ? Math.round(pops.reduce((a, q) => a + q.n * q.animo, 0) / gente) : 60 };
 }
 
+// ═══ LA ECONOMÍA DE UNA FAMILIA ══════════════════════════════
+// Hasta acá cada grupo tenía un «caudal»: un número fijo de su clase que no se
+// movía nunca. El noble nacía con cuatro y moría con cuatro, y el año de la
+// mala cosecha le iba exactamente igual que el bueno. Eso no es tener dinero,
+// es tener una etiqueta.
+//
+// Una familia gana algo y tiene que gastar algo, y la diferencia entre las dos
+// cosas es casi toda la historia social. Acá se cuenta en RACIONES: lo que come
+// una persona en un año. Sirve para 1200 y para 1950 sin cambiar de moneda, y
+// deja leer de un vistazo si una familia llega o no llega.
+//
+// Dos mecanismos hacen casi todo el trabajo, y los dos son de manual:
+//
+// 1. EL PRECIO DEL PAN. Gregory King lo midió en 1696: una cosecha un décimo
+//    más corta no sube el pan un décimo, lo sube un tercio, porque nadie deja
+//    de comer por caro que esté. De ahí sale que un mal año arruine al de la
+//    ciudad —que compra el pan— y no tanto al que tiene tierra, que vende menos
+//    grano pero más caro. Los motines del pan fueron urbanos por eso y no por
+//    casualidad.
+//
+// 2. LA RENTA. El noble no vive de lo que produce —produce poco— sino de lo que
+//    produce el campesino. Una parte del producto de la provincia no se la
+//    queda quien lo hizo: la reclaman los que tienen tierra, cargo o capital.
+//    Cuando esa parte baja —y bajó, mucho, entre 1789 y 1950— el reparto entero
+//    se da vuelta sin que nadie produzca un grano más.
+
+// Lo que una familia necesita para vivir, en raciones por cabeza y por año, y
+// desde cuándo es siquiera pensable. El orden es el de pago: primero se come.
+// `sube` es lo que cada partida se encarece cuando el mundo se enriquece, y es
+// la pieza que evita el disparate de una sociedad sin pobres. Un pan es un pan
+// en 1200 y en 1950: se come lo mismo, y por eso el hambre es la única medida
+// que no se mueve. Todo lo demás sí se mueve, porque lo que una familia
+// considera vivir con decencia sube con el país entero: un cuarto sin ventana
+// era una casa normal en 1400 y es una cueva en 1950, y quien no puede pagar
+// más que eso es pobre aunque coma. Sin esto, el ingreso se multiplicaba por
+// veinte contra unas necesidades clavadas y a partir de 1441 no había en el
+// reino una sola familia que pasara estrecheces.
+const NECESIDADES = [
+  { id: "pan",     n: "pan",             tipo: "vital",    base: 1.00, sube: 0    },
+  { id: "abrigo",  n: "abrigo y lumbre", tipo: "vital",    base: 0.20, sube: 0.35 },
+  { id: "techo",   n: "techo",           tipo: "decencia", base: 0.16, sube: 1.15, urbano: 2.2 },
+  { id: "sal",     n: "sal y hierro",    tipo: "decencia", base: 0.10, sube: 0.50 },
+  { id: "gusto",   n: "azúcar y tabaco", tipo: "gusto",    base: 0.15, sube: 1.25, desde: 1600 },
+  { id: "escuela", n: "escuela",         tipo: "gusto",    base: 0.13, sube: 0.95, desde: 1750 },
+  { id: "medico",  n: "médico",          tipo: "gusto",    base: 0.15, sube: 1.50, desde: 1870 },
+  { id: "casa",    n: "luz y agua",      tipo: "gusto",    base: 0.28, sube: 1.35, desde: 1900 },
+];
+const NECESIDAD_IDX = Object.fromEntries(NECESIDADES.map((x) => [x.id, x]));
+const necesidadViva = (x, anio) => x.desde == null || anio >= x.desde;
+
+// Y cada estamento vive según lo que es, no según lo que necesita. Un noble
+// come el pan de una persona como cualquiera —el estómago no tiene rango— pero
+// no puede vivir en la casa de un campesino sin dejar de ser noble: tiene que
+// sostener casa, séquito, capilla y caballos, y eso no es capricho sino el
+// precio de seguir mandando. Sin esto, el noble ganaba treinta y ocho raciones,
+// gastaba una y media y guardaba el resto, y en tres generaciones la nobleza
+// tenía más oro que el reino. Arruinarse manteniendo el tren de vida fue una
+// forma muy común de dejar de ser noble, y así queda dicho.
+const nivelDeClase = (C) => 0.72 + (C.caudal == null ? 0.4 : C.caudal) * 2.6;
+
+// El precio del pan de este año, en veces lo normal. La ley de King: la demanda
+// de comida no cede, así que el precio se mueve mucho más que la cosecha. Con
+// tope, porque pasado cierto punto la gente deja de comprar pan —come otra
+// cosa, o se muere— y el precio deja de subir.
+const precioPan = (cosecha) => acotar(Math.pow(1 / acotar(cosecha || 1, 0.4, 1.6), 1.7), 0.72, 3.4);
+
+// Cuánto del producto de una provincia no se lo queda quien lo hizo. Es la
+// medida de una sociedad: un tercio largo en el señorío medieval, un décimo en
+// un estado moderno. No baja sola —baja cuando deja de haber quien la reclame—
+// y por eso el reparto cambia cuando la nobleza deja de contar, no cuando la
+// tierra empieza a rendir.
+function tasaDeRenta(anio, forma) {
+  const siglo = acotar(((anio == null ? 1200 : anio) - 1750) / 200, 0, 1);
+  const g = forma === "República" || forma === "Democracia" ? 0.05 : 0;
+  return acotar(0.34 - siglo * 0.20 - g, 0.10, 0.36);
+}
+
+// El multiplicador de la técnica sobre lo que rinde un año de trabajo. Entre
+// 1200 y 2000 el ingreso real por cabeza se multiplicó por diez largo, y casi
+// todo eso pasó después de 1800: la curva tiene que ser plana y después
+// empinada, no una recta.
+const rindeDelSiglo = (tec) => 1 + Math.pow(acotar((tec || 20) / 100, 0, 1), 2.4) * 4.2;
+
+// Lo que saca en un año una familia campesina de las de siempre, antes de que
+// nadie le quite nada. Está calibrado para que en 1200, después de pagar renta
+// y diezmo, le quede para el pan y la lumbre y no siempre para el resto: pobre
+// pero viva, que es como estuvo la mayor parte de la humanidad la mayor parte
+// del tiempo. Si este número baja, se muere media Europa en el primer siglo.
+const BASE_RACION = 2.62;
+
+// ——— lo que gana y lo que gasta cada grupo ———
+// Se resuelve la provincia entera de una vez, porque la renta es un reparto: lo
+// que uno cobra de más lo paga otro de menos, y eso no se puede calcular grupo
+// a grupo por separado.
+function economiaDeProvincia(pops, p, s, cosecha) {
+  const anio = (s || {}).anio || 1200;
+  const tec = ((s || {}).stats || {}).tecnologia || 20;
+  const gente = poblacionPops(pops);
+  if (!gente) return { pops: pops || [], producto: 0, pan: 1, renta: 0 };
+  const pan = precioPan(cosecha);
+  const tasa = tasaDeRenta(anio, ((s || {}).gobierno || {}).forma);
+  const a = ambDe(p) || {};
+  // Lo que da la tierra de esta provincia. La horquilla es estrecha a propósito:
+  // que una comarca sea mala ya lo paga en cuánta gente cabe en ella —de eso se
+  // ocupa el techo— y cobrárselo otra vez en lo que gana cada uno es cobrarlo
+  // dos veces. Con la horquilla ancha, las provincias de montaña salían con el
+  // ochenta por ciento de su gente sin comer todos los años, y una comarca así
+  // no existe: se vacía en una generación o come de otra cosa. Los Pirineos son
+  // pobres, no son una hambruna permanente.
+  const suelo = acotar(0.72 + (a.habitabilidad != null ? a.habitabilidad : 50) / 160, 0.72, 1.35);
+  const siglo = rindeDelSiglo(tec);
+  const cos = acotar(cosecha == null ? 1 : cosecha, 0.45, 1.5);
+
+  // 1 · lo que produce cada familia, antes de que nadie le quite nada
+  const gana = (q, C) => BASE_RACION * suelo * siglo * C.prod
+    * (0.72 + q.letras * 0.55) * (C.urb < 0.5 ? cos : 1)
+    // el que tiene grano lo vende al precio del año, y el mal año lo compensa
+    * (C.urb < 0.5 && C.prod > 0.6 ? 0.58 + 0.42 * pan : 1);
+
+  // 2 · cuánto de eso se le puede sacar. Y acá está la pieza que faltaba: al
+  //     señor le convenía el tercio, pero no podía cobrarlo si con eso el
+  //     campesino no llegaba a la primavera, porque el año siguiente no habría
+  //     quien arara. La renta se cobra del sobrante y no del bruto; donde no
+  //     hay sobrante, hay atrasos, condonaciones y fugas, que es lo que pasó
+  //     todos los años malos de la historia. Cobrándola del bruto, un reino
+  //     entero con la técnica de 1200 salía por debajo del pan y se moría de
+  //     hambre el primer turno.
+  let bolsa = 0, pesoRenta = 0, bruto = 0;
+  const pagan = new Map();
+  for (const q of pops) {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    const suyo = gana(q, C);
+    bruto += q.n * C.prod * (0.72 + q.letras * 0.55) * (C.urb < 0.5 ? cos : 1);
+    pesoRenta += q.n * (C.renta || 0);
+    // lo que cuesta no morirse: el pan y la lumbre de esa familia
+    const vital = (1.00 * pan + 0.20 * (1 + (siglo - 1) * 0.35) * nivelDeClase(C));
+    const puede = Math.max(0, suyo - vital * 0.96);
+    const paga = Math.min(suyo * tasa, puede);
+    pagan.set(q, paga);
+    bolsa += q.n * paga;
+  }
+  const producto = BASE_RACION * suelo * siglo * (bruto / gente);
+  const hayRenta = pesoRenta > 0;
+  if (!hayRenta) bolsa = 0;
+
+  // 3 · y de ahí, lo que le queda a cada familia
+  const fuera = [];
+  for (const q of pops) {
+    const C = CLASES[q.clase] || CLASES.campesino;
+    const delCampo = C.urb < 0.5;
+    const suyo = gana(q, C);
+    const deRenta = hayRenta && C.renta ? (bolsa * (C.renta / pesoRenta)) : 0;
+    let ingreso = suyo - (hayRenta ? (pagan.get(q) || 0) : 0) + deRenta;
+    // el esclavo y el siervo no cobran lo que producen: cobran lo que les dejan
+    if (q.clase === "esclavo") ingreso = Math.min(ingreso, 1.05 * pan);
+    else if (q.clase === "siervo") ingreso = Math.min(ingreso, suyo * 0.72);
+
+    // 3 · lo que hay que pagar, en orden, hasta que se acaba. Los ahorros se
+    //     pueden echar mano —para eso están, y es lo que separa a una familia
+    //     con algo guardado de una que en el primer mal año pasa hambre— pero
+    //     lo que se saca del arcón sale del arcón: contar lo no gastado como
+    //     ahorro nuevo era fabricar dinero, y en veinte años cualquier campesino
+    //     llegaba al tope de la riqueza sin haber ganado nada.
+    const nivel = nivelDeClase(C);
+    const guardado = Math.max(0, q.caudal || 0);
+    let queda = ingreso + guardado * 0.4, gasto = 0, enPan = 0;
+    const cubre = {};
+    let faltaVital = 0, decencias = 0, decenciaHay = 0, gustos = 0, gustoHay = 0;
+    for (const N of NECESIDADES) {
+      if (!necesidadViva(N, anio)) continue;
+      // el que cosecha el pan se lo come: le llega una parte del vaivén del
+      // precio y no el vaivén entero, y por eso el motín del pan fue siempre de
+      // ciudad. La carestía no es el hambre: es el hambre del que compra.
+      const suPan = delCampo && C.prod > 0.6 ? 1 + (pan - 1) * 0.22 : pan;
+      const cuesta = N.base * (1 + (siglo - 1) * (N.sube || 0))
+        * (N.id === "pan" ? suPan : nivel) * (N.urbano ? 1 + (N.urbano - 1) * C.urb : 1);
+      const paga = Math.min(queda, cuesta);
+      queda -= paga; gasto += paga;
+      if (N.id === "pan") enPan = paga;
+      const f = cuesta > 0 ? paga / cuesta : 1;
+      cubre[N.id] = +f.toFixed(3);
+      if (N.tipo === "vital") faltaVital += (1 - f) * N.base;
+      else if (N.tipo === "decencia") { decencias += f; decenciaHay++; }
+      else { gustos += f; gustoHay++; }
+    }
+    // 4 · y el saldo del año es lo que entró menos lo que salió, ni más ni
+    //     menos. Positivo se guarda; negativo se come lo guardado, y cuando no
+    //     hay guardado, es hambre. Lo ahorrado además se desgasta: la herencia
+    //     se parte entre hermanos, la guerra pasa y el arcón no rinde interés
+    //     en casi ninguno de estos siglos.
+    const sobra = ingreso - gasto;
+    const caudal = +acotar(guardado * 0.93 + sobra, 0, 24).toFixed(3);
+    fuera.push({ ...q, caudal,
+      eco: { ingreso: +ingreso.toFixed(3), gasto: +gasto.toFixed(3), sobra: +sobra.toFixed(3),
+             // lo que se fue en pan y lo que se fue en todo lo demás. La
+             // proporción entre las dos cosas es la ley de Engel, que es la
+             // manera más vieja y más fiable de saber si un pueblo es pobre.
+             pan: +enPan.toFixed(3), otros: +(gasto - enPan).toFixed(3),
+             cubre, hambre: +faltaVital.toFixed(3),
+             decencia: decenciaHay ? +(decencias / decenciaHay).toFixed(3) : 1,
+             gusto: gustoHay ? +(gustos / gustoHay).toFixed(3) : 0 } });
+  }
+  return { pops: fuera, producto: +producto.toFixed(3), pan: +pan.toFixed(3), renta: +tasa.toFixed(3) };
+}
+
+// Lo que consume una comarca, que es lo que le da de comer al comercio. Un
+// pueblo que solo compra pan no sostiene a un mercader; uno donde además se
+// compra azúcar, ropa y escuela, sí. Por eso el comercio interior no crece con
+// la población sino con lo que a la población le sobra después de comer: la
+// parte del gasto que no es pan es la medida clásica de si un pueblo es pobre,
+// y acá es además la que decide si hay algo que gravar.
+function consumoDe(pops) {
+  let gente = 0, pan = 0, resto = 0, sinPan = 0, estrechos = 0;
+  // y lo mismo contando solo a los que viven de su trabajo. La ley de Engel es
+  // una medida de casa, y promediar a un duque con un jornalero no mide nada:
+  // el duque gasta en su casa treinta veces lo que el jornalero y casi nada de
+  // eso es pan, así que basta un puñado de duques para que un reino de pobres
+  // parezca próspero. Lo que el mapa enseña es esto y no lo otro.
+  let pueblo = 0, panPueblo = 0, restoPueblo = 0;
+  for (const q of pops || []) {
+    const e = q.eco; if (!e) continue;
+    gente += q.n;
+    if (!((CLASES[q.clase] || {}).renta)) {
+      pueblo += q.n; panPueblo += (e.pan || 0) * q.n; restoPueblo += (e.otros || 0) * q.n;
+    }
+    // lo que se gastó de verdad, no lo que costaría en la tabla: una casa de
+    // 1950 cuesta cinco veces lo que costaba una de 1400, y medir el consumo
+    // con los precios de la tabla decía que nadie había mejorado nunca.
+    pan += (e.pan || 0) * q.n;
+    resto += (e.otros || 0) * q.n;
+    if (e.hambre > 0.06) sinPan += q.n;
+    if (e.decencia < 0.5) estrechos += q.n;
+  }
+  if (!gente) return null;
+  const hol = (a, b) => +(b / Math.max(0.001, a + b)).toFixed(3);
+  return { gente: +gente.toFixed(1), pan: +(pan / gente).toFixed(3), resto: +(resto / gente).toFixed(3),
+    holgura: pueblo > 0 ? hol(panPueblo, restoPueblo) : hol(pan, resto),
+    holguraTodos: hol(pan, resto),
+    hambrientos: +(sinPan / gente).toFixed(3), estrechez: +(estrechos / gente).toFixed(3) };
+}
+
 // ——— y la sociedad del reino entero ———
 // Las provincias tienen cada una su gente; el reino es la suma. Y esa suma no
 // es un dato de adorno: de ella salen quiénes son los estamentos que le hablan
@@ -3820,6 +4126,7 @@ function sociedadDelReino(provincias, anio, forma) {
   const ap = vozAbierta(anio, forma);
   const r = resumenPops(todos);
   const voz = vozDePops(todos, anio, forma);
+  const consumo = consumoDe(todos);
   // el credo de quien manda: el de los estamentos que mandan, no el de la
   // mayoría. Un reino cristiano con mayoría musulmana existió muchas veces.
   const arriba = {};
@@ -3837,7 +4144,7 @@ function sociedadDelReino(provincias, anio, forma) {
     peso[C.fac] += w; sumaW += w;
   }
   if (sumaW > 0) for (const k of Object.keys(peso)) peso[k] = +(peso[k] / sumaW).toFixed(4);
-  return { ...r, voz, peso, credo: credo ? credo[0] : null, apertura: +ap.toFixed(3) };
+  return { ...r, voz, peso, consumo, credo: credo ? credo[0] : null, apertura: +ap.toFixed(3) };
 }
 
 // ——— la sociedad del primer día ———
@@ -3857,8 +4164,13 @@ function poblarAlEmpezar(provincias, s) {
     : { ...p, poblacion: Math.max(20, Math.round(total * (techos[i] / suma))) }));
   return conPob.map((p) => {
     if (p.pops && p.pops.length) return p;
-    const pops = sembrarPops(p, { ...s, provincias: conPob });
-    return pops.length ? { ...p, pops, soc: resumenPops(pops) } : p;
+    const crudos = sembrarPops(p, { ...s, provincias: conPob });
+    if (!crudos.length) return p;
+    // con las cuentas de la casa ya hechas, que si no el primer día el mapa de
+    // nivel de vida y el de hambre salen en gris y la ficha de una ciudad no
+    // sabe decir cómo le va a su gente
+    const pops = economiaDeProvincia(crudos, p, { ...s, provincias: conPob }, 1).pops;
+    return { ...p, pops, cosecha: 1, soc: resumenPops(pops), consumo: consumoDe(pops) };
   });
 }
 
@@ -3994,6 +4306,26 @@ const VISTAS = [
     pie: "cuánta gente sabe leer" },
   { id: "credos", n: "Religión", ambito: "reino", clases: "credo",
     pie: "qué se reza en cada comarca" },
+  // Y la que resume las cuentas de la casa. No es la riqueza de la provincia
+  // —eso ya lo dice la población— sino lo que a su gente le queda después de
+  // comer, que es la diferencia entre un sitio pobre y uno donde se vive.
+  // En escala propia, y por el mismo motivo que la de población: lo que a la
+  // gente le queda después de comer se multiplica por diez entre 1200 y 1950,
+  // así que cualquier corte fijo pinta el reino entero de un color en un siglo
+  // y de otro en el siguiente. Dentro de un mismo año, en cambio, la horquilla
+  // entre la mejor comarca y la peor es estrecha —de veintitrés a treinta y
+  // siete de cada cien— y ahí es donde el jugador quiere ver la diferencia. La
+  // leyenda sigue diciendo los dos números de verdad, así que no se pierde
+  // nada: se gana poder comparar tus tierras entre sí.
+  { id: "holgura", n: "Nivel de vida", ambito: "reino", rampa: "bueno", relativa: true,
+    fmt: (v) => Math.round(v * 100) + "% del gasto no es pan",
+    mio: (m) => ((m.consumo || {}).holgura != null ? m.consumo.holgura : null),
+    pie: "lo que le queda a la gente después de comer" },
+  { id: "hambre", n: "Hambre", ambito: "reino", rampa: "sucio",
+    cortes: [0.01, 0.05, 0.12, 0.25, 0.45],
+    fmt: (v) => (v < 0.005 ? "nadie pasa hambre" : Math.round(v * 100) + "% pasa hambre"),
+    mio: (m) => ((m.consumo || {}).hambrientos != null ? m.consumo.hambrientos : null),
+    pie: "dónde no se llega a comer este año" },
 ];
 // Un color por estamento, agrupados por lo que son: la tierra en verdes, el
 // taller y la fábrica en ocres, el comercio y la letra en azules, y arriba el
@@ -5427,6 +5759,53 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                 </>
               );
             })()}
+            {/* Y cómo les va el año. Las cuentas de una casa dicen más de una
+                comarca que su población: dos provincias con la misma gente son
+                sitios distintos si en una sobra después de comer y en la otra
+                no. Se cuenta en raciones —lo que come una persona en un año—
+                porque un florín de 1200 y uno de 1900 no son comparables y un
+                pan sí. */}
+            {mia && mia.consumo && (() => {
+              const K = mia.consumo;
+              const fam = (mia.pops || []).filter((q) => q.eco)
+                .sort((a, b) => b.n - a.n)[0];
+              return (
+                <>
+                  <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, color: C.brass,
+                    margin: "8px 0 4px" }}>─ CÓMO LES VA</div>
+                  {fam && (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8,
+                      fontFamily: mono, fontSize: 10.5, color: C.ink }}>
+                      <span style={{ color: C.muted }}>una casa {(CLASES[fam.clase] || {}).n === undefined ? "" : "de " + CLASES[fam.clase].n}</span>
+                      <span>{fam.eco.ingreso.toFixed(1).replace(".", ",")} gana · {fam.eco.gasto.toFixed(1).replace(".", ",")} gasta</span>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8,
+                    fontFamily: mono, fontSize: 10.5, color: C.ink, marginTop: 1 }}>
+                    <span style={{ color: C.muted }}>del gasto, no es pan</span>
+                    <span>{Math.round(K.holgura * 100)}%</span>
+                  </div>
+                  {K.hambrientos > 0.005 && (
+                    <div style={{ fontSize: 10.5, color: "#D9534F", marginTop: 3, lineHeight: 1.4 }}>
+                      {Math.round(K.hambrientos * 100)}% no llega a comer este año
+                    </div>
+                  )}
+                  {K.hambrientos <= 0.005 && K.estrechez > 0.08 && (
+                    <div style={{ fontSize: 10.5, color: C.muted, opacity: 0.8, marginTop: 3, lineHeight: 1.4 }}>
+                      {Math.round(K.estrechez * 100)}% vive con lo justo
+                    </div>
+                  )}
+                  {mia.cosecha != null && Math.abs(mia.cosecha - 1) > 0.08 && (
+                    <div style={{ fontSize: 10.5, color: mia.cosecha < 1 ? "#D9534F" : "#57B26B",
+                      marginTop: 2, lineHeight: 1.4 }}>
+                      {mia.cosecha < 1 ? "mala cosecha" : "buena cosecha"}: el pan
+                      {" "}{precioPan(mia.cosecha) > 1 ? "sube" : "baja"} un
+                      {" "}{Math.round(Math.abs(precioPan(mia.cosecha) - 1) * 100)}%
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
               {x.a ? BIOMAS[x.a.bioma].n.toLowerCase() : ""}
               {x.mar ? ` · ${x.mar.n.toLowerCase()}` : ""}
@@ -5753,7 +6132,12 @@ function amortiguacionCosecha(ciencia) {
 }
 // La cosecha nacional marca el año, pero cada provincia tiene su propia suerte:
 // llueve en el delta y se seca la meseta. De ahí sale el hambre local.
-function cosechaProvincia(p, cosNacional, ciencia) {
+// El `rnd` es opcional y no es un adorno: cuando la cosecha se tira dentro del
+// bucle del mundo tiene que salir del dado del turno, porque si sale de
+// Math.random el mismo turno con la misma semilla deja de dar el mismo
+// resultado, y con él se va la posibilidad de reproducir una partida.
+function cosechaProvincia(p, cosNacional, ciencia, rnd) {
+  const az = rnd || Math.random;
   const am = amortiguacionCosecha(ciencia);
   const a = ambDe(p);
   // Dónde se juega el año no es lo mismo en todas partes. Donde llueve poco,
@@ -5761,20 +6145,21 @@ function cosechaProvincia(p, cosNacional, ciencia) {
   // diferencia entre comer y no comer, y esa diferencia la decide el cielo.
   // Donde llueve de sobra, un mal año es un año mediocre y nada más.
   const riesgo = a ? acotar(1.5 - a.lluvia / 600, 0.35, 1.6) : 1;
-  const local = 1 + (Math.random() - 0.5) * 0.76 * riesgo;
+  const local = 1 + (az() - 0.5) * 0.76 * riesgo;
   const bruto = 1 + (cosNacional - 1) * 0.55 + (local - 1) * 0.62;
   // el regadío y el río protegen contra el mal año; la estepa y la meseta lo sufren
   const t = TERRENOS[p.terreno] || TERRENOS.llanura;
   const abrigo = (p.rio ? 0.14 : 0) + (t.fert > 1.2 ? 0.08 : 0) - (p.terreno === "estepa" || p.terreno === "meseta" ? 0.10 : 0);
   return Math.max(0.35, 1 + (bruto - 1) * (1 - am) * (1 - abrigo));
 }
-function tirarCosecha(ciencia) {
+function tirarCosecha(ciencia, rnd) {
+  const az = rnd || Math.random;
   const am = amortiguacionCosecha(ciencia);
-  const r = Math.random();
+  const r = az();
   let f, t;
-  if (r < 0.13) { f = 0.70 + Math.random() * 0.16; t = "mala"; }
-  else if (r > 0.88) { f = 1.07 + Math.random() * 0.11; t = "buena"; }
-  else { f = 0.98 + Math.random() * 0.10; t = "normal"; }
+  if (r < 0.13) { f = 0.70 + az() * 0.16; t = "mala"; }
+  else if (r > 0.88) { f = 1.07 + az() * 0.11; t = "buena"; }
+  else { f = 0.98 + az() * 0.10; t = "normal"; }
   return { f: 1 + (f - 1) * (1 - am), t, am };
 }
 function crecimientoAnual(pob, stats, dem) {
@@ -5864,7 +6249,7 @@ function ingresoAnualDe(stats, gobierno, ciencia, poblacion, vecinos, factorias,
   // Dos cosas que antes no entraban en la cuenta: que la gente viva en ciudad
   // —lo urbano se grava y lo rural se esconde— y que las provincias estén
   // enlazadas, porque sin camino no hay comercio interior que gravar.
-  const red = provincias ? bonoRed(provincias) * bonoUrbano(provincias) : 1;
+  const red = provincias ? bonoRed(provincias) * bonoUrbano(provincias) * bonoConsumo(provincias) : 1;
   return Math.round((base * cap.fiscal + cap.renta) * red + ext);
 }
 
