@@ -13872,6 +13872,329 @@ function buscarEnElMundo(consulta, s, tope) {
   return out;
 }
 
+// ═══ LOS ASESORES ═══════════════════════════════════════════
+// Cada ministerio tiene quien le mire los números y le diga lo que ve. No
+// deciden nada: explican. Y explican siempre lo mismo, en el mismo orden, que
+// es lo que convierte un aviso en algo con lo que se puede trabajar:
+//
+//   qué pasa · por qué pasa · en qué acaba · qué se puede hacer · qué se gana
+//
+// Las tres primeras son las que casi ningún juego da. Un panel que dice
+// «estabilidad 24» no informa de nada: informa el que dice que está en 24
+// porque hay dos comarcas sin pan, que si sigue así se levantan, y que
+// repartir grano cuesta tanto y compra tanto. La diferencia entre las dos
+// cosas es la diferencia entre un tablero y un gobierno.
+//
+// Ninguna de estas fichas trae un botón que haga nada. El documento lo pide y
+// además es lo correcto: un asesor que ejecuta no es un asesor, es un
+// jugador automático. Lo más que hacen es llevarte a donde se decide.
+const ASESORES = {
+  eco:      { n: "el contador mayor",     ico: "⚜", de: "la hacienda" },
+  prov:     { n: "el veedor de tierras",  ico: "◈", de: "las comarcas" },
+  ciencia:  { n: "el prefecto de estudios", ico: "⚗", de: "el saber" },
+  edu:      { n: "el maestro mayor",      ico: "🎓", de: "las escuelas" },
+  ejercito: { n: "el maestre de campo",   ico: "⚔", de: "la tropa" },
+  gob:      { n: "el canciller",          ico: "👑", de: "el gobierno" },
+  proy:     { n: "el maestro de obras",   ico: "🏗", de: "las obras" },
+  sedes:    { n: "el rector",             ico: "🏛", de: "los estudios" },
+};
+
+// Redondeos que se leen. Un asesor que dice «faltan 37,4183 al año» no está
+// informando, está luciéndose.
+const casi = (n) => (Math.abs(n) >= 100 ? Math.round(n / 10) * 10 : Math.round(n));
+const enAnios = (n) => (n <= 1 ? "en menos de un año" : n < 4 ? `en unos ${Math.round(n)} años`
+  : n < 14 ? `en ${Math.round(n / 2) * 2} años` : "a la larga");
+
+// Cada regla mira una cosa y devuelve las cinco casillas, o nada. Lo que
+// devuelve sale siempre de números del reino: no hay una sola frase que no
+// pueda señalar de dónde salió.
+const REGLAS = [
+  // ——— la hacienda ———
+  { id: "deficit", mando: "eco", mira: (s, x) => {
+      if (x.neto >= 0) return null;
+      const falta = -x.neto;
+      const caja = (s.edu || {}).oro || 0;
+      const dura = falta > 0 ? caja / falta : 99;
+      const porTropa = x.mant > 0 ? mantenimientoEjercito(s.ejercito) / x.mant : 0;
+      return { nivel: caja < falta * 3 ? "grave" : "mal",
+        problema: `Se gastan ${casi(falta)} más de los que entran cada año.`,
+        causa: porTropa > 0.5
+          ? `La mitad larga del gasto es la tropa: ${casi(mantenimientoEjercito(s.ejercito))} al año de sostén.`
+          : (s.deuda || 0) > 0
+          ? `De lo que se gasta, ${casi(x.servicio)} son intereses de una deuda de ${casi(s.deuda)}.`
+          : `El sostén de lo levantado —${casi(x.mant)} al año— ya no cabe en lo que rinde el reino.`,
+        consecuencia: `Al ritmo de hoy el tesoro se vacía ${enAnios(dura)}, y sin tesoro no se paga a nadie.`,
+        remedio: porTropa > 0.5 ? "Licenciar lo que no está en campaña, o subir la contribución."
+          : "Subir la contribución, o rebajar las partidas que menos rindan.",
+        impacto: `Cada punto de contribución trae del orden de ${casi(x.bruto * 0.02)} al año; licenciar una unidad ahorra su sostén entero.` };
+    } },
+  { id: "deuda", mando: "eco", mira: (s, x) => {
+      const d = s.deuda || 0;
+      if (d < x.bruto * 1.2) return null;
+      return { nivel: d > x.bruto * 2.5 ? "mal" : "ojo",
+        problema: `La deuda son ${casi(d)}, ${(d / Math.max(1, x.bruto)).toFixed(1)} veces lo que entra en un año.`,
+        causa: `Se pidió prestado y el principal no baja: solo el interés se lleva ${casi(x.servicio)} al año.`,
+        consecuencia: "Cada año que pasa, una parte mayor de lo que entra se va antes de llegar a ninguna parte.",
+        remedio: "Amortizar mientras haya con qué; y no volver a pedir hasta que el saldo del año sea positivo.",
+        impacto: `Cada ${casi(x.bruto * 0.2)} amortizados liberan cerca de ${casi(x.bruto * 0.2 * 0.06)} al año, para siempre.` };
+    } },
+  { id: "ocioso", mando: "eco", mira: (s, x) => {
+      const caja = (s.edu || {}).oro || 0;
+      if (caja < x.bruto * 3 || x.neto < 0) return null;
+      if ((x.proyActivos || 0) > 0) return null;
+      return { nivel: "chance",
+        problema: `Hay ${casi(caja)} parados en el tesoro y ninguna obra en marcha.`,
+        causa: "Entra más de lo que sale y no se está poniendo a trabajar la diferencia.",
+        consecuencia: "El oro guardado no rinde: lo que no se invierte hoy se paga más caro dentro de una generación.",
+        remedio: "Abrir una obra, fundar una casa de estudios o llamar a un sabio.",
+        impacto: "Una obra devuelve en mejoras permanentes lo que cuesta una vez.", ir: "proy" };
+    } },
+
+  // ——— las tierras ———
+  { id: "hambre", mando: "prov", mira: (s) => {
+      const con = (s.provincias || []).filter((p) => ((p.consumo || {}).hambrientos || 0) > 0.08);
+      if (!con.length) return null;
+      const peor = con.reduce((a, b) => (b.consumo.hambrientos > a.consumo.hambrientos ? b : a));
+      const mala = con.filter((p) => (p.cosecha != null && p.cosecha < 0.92)).length;
+      return { nivel: peor.consumo.hambrientos > 0.25 ? "grave" : "mal",
+        problema: `En ${con.length === 1 ? peor.nombre : con.length + " comarcas"} no se llega a comer; en ${peor.nombre}, uno de cada ${Math.max(2, Math.round(1 / peor.consumo.hambrientos))}.`,
+        causa: mala > con.length / 2
+          ? `La cosecha vino corta en ${mala} de ellas y el pan se ha puesto por las nubes.`
+          : "Hay más gente de la que la tierra alimenta a este nivel de labranza.",
+        consecuencia: "El hambre mata, vacía comarcas y deja rencor apuntado para tres generaciones.",
+        remedio: mala > con.length / 2
+          ? "Repartir grano de la reserva ahora; abrir camino a esas comarcas para que el socorro llegue."
+          : "Buscar avances agrarios: sin ellos el techo no sube y esto se repite cada mala cosecha.",
+        impacto: "Repartir grano corta las muertes de este año; el arado nuevo levanta el techo para siempre.",
+        ir: "prov", vista: "hambre" };
+    } },
+  { id: "desleal", mando: "prov", mira: (s) => {
+      const mal = (s.provincias || []).filter((p) => (p.lealtad == null ? 60 : p.lealtad) < 32);
+      if (!mal.length) return null;
+      const peor = mal.reduce((a, b) => ((b.lealtad || 0) < (a.lealtad || 0) ? b : a));
+      const furia = Math.round(furiaProvincia(peor));
+      return { nivel: (peor.lealtad || 0) < 20 ? "grave" : "mal",
+        problema: `${mal.length === 1 ? peor.nombre + " no obedece" : mal.length + " comarcas no obedecen"}: la lealtad de ${peor.nombre} está en ${Math.round(peor.lealtad || 0)}.`,
+        causa: furia > 40 ? `Allí la gente está furiosa —${furia} de descontento— y la corona pide sin dar nada a cambio.`
+          : peor.ocupada ? "Está en manos ajenas: manda otro."
+          : "La corte queda lejos y lo que se decide aquí llega allí deformado o no llega.",
+        consecuencia: "De una comarca así no salen ni impuestos ni reclutas, y es de donde arranca cualquier revuelta.",
+        remedio: furia > 40 ? "Aliviar la carga o repartir grano antes que mandar tropa: el escarmiento se recuerda un siglo."
+          : "Abrir caminos hacia allí, o darle algo que la ate al reino.",
+        impacto: "La lealtad sube despacio y baja rápido: cuenta con una década para recuperar lo perdido en un año.",
+        ir: "prov", vista: "furia" };
+    } },
+  { id: "techo", mando: "prov", mira: (s, x) => {
+      if ((x.techoOcupado || 0) < 0.93) return null;
+      return { nivel: x.techoOcupado > 1 ? "grave" : "ojo",
+        problema: `La gente ocupa el ${Math.round(x.techoOcupado * 100)}% de lo que la tierra da de sí.`,
+        causa: "El techo lo pone la labranza que se sabe hacer, y hace tiempo que no sube.",
+        consecuencia: "A partir de aquí cada mala cosecha se cobra vidas, y la gente empieza a irse.",
+        remedio: "Buscar avances agrarios: rotación, arado, abono, lo que la época permita.",
+        impacto: "Un avance agrario levanta el techo de golpe y para siempre; nada más lo hace.",
+        ir: "ciencia" };
+    } },
+  { id: "trasmano", mando: "prov", mira: (s) => {
+      const ps = s.provincias || [];
+      if (ps.length < 4) return null;
+      const lejos = ps.filter((p) => aislamientoDe(p, ps) > 0.62 && !(p.via > 0));
+      if (lejos.length < 2) return null;
+      return { nivel: "ojo",
+        problema: `${lejos.length} comarcas quedan a trasmano y sin camino abierto.`,
+        causa: "Están detrás de la sierra o lejos de la corte, y nunca se abrió camino hasta ellas.",
+        consecuencia: "Allí la orden llega tarde, el socorro no llega, el habla se aparta y la lealtad se enfría sola.",
+        remedio: "Abrir caminos. Es lo más aburrido que puede hacer un rey y lo que más cambia un reino.",
+        impacto: "Un camino acerca la comarca a todas las demás a la vez: mejora socorro, lealtad y comercio de una sola vez.",
+        ir: "proy", vista: "logistica" };
+    } },
+  { id: "suciedad", mando: "prov", mira: (s) => {
+      const sucias = (s.provincias || []).filter((p) => ((p.humo || {}).agua || 0) > 0.45);
+      if (sucias.length < 2) return null;
+      return { nivel: "mal",
+        problema: `El agua está mala en ${sucias.length} comarcas.`,
+        causa: "Se bebe donde se tira, y todavía no se sabe limpiarla.",
+        consecuencia: "Mata callando: baja la esperanza de vida y con ella lo que rinde cada jornal.",
+        remedio: "Saneamiento: cloaca, agua traída, lo que la época sepa hacer.",
+        impacto: "Es de las inversiones que más años de vida devuelven por moneda gastada.",
+        ir: "ciencia", vista: "humo" };
+    } },
+
+  // ——— el saber ———
+  { id: "sinfoco", mando: "ciencia", mira: (s, x) => {
+      if ((s.ciencia || {}).foco) return null;
+      if ((x.piT || 0) < 2) return null;
+      return { nivel: "ojo",
+        problema: "Nadie ha dicho a los sabios qué buscar.",
+        causa: `Se producen ${Math.round(x.piT)} de saber al año y se reparten solos entre todos los frentes abiertos.`,
+        consecuencia: "Se avanza en todo un poco y no se termina nada: los hallazgos llegan cuando ya no hacían falta.",
+        remedio: "Poner foco en una rama. La que resuelva el problema que más aprieta hoy.",
+        impacto: "Con foco, esa rama avanza cerca del doble; las demás, algo menos.", ir: "ciencia" };
+    } },
+  { id: "pocosaber", mando: "ciencia", mira: (s, x) => {
+      if ((x.piT || 0) >= 6) return null;
+      const sedes = ((s.edu || {}).sedes || []).length;
+      const sabios = ((s.edu || {}).sabios || []).length;
+      return { nivel: (x.piT || 0) < 2 ? "mal" : "ojo",
+        problema: `El reino produce ${Math.round(x.piT || 0)} de saber al año, que es muy poco.`,
+        causa: sedes === 0 ? "No hay ni una casa de estudios donde se investigue."
+          : sabios === 0 ? `Hay ${sedes} sede(s) y ningún sabio que las dirija.`
+          : "La partida del presupuesto que va al saber es corta.",
+        consecuencia: "Sin saber no sube el techo de la tierra, ni la salud, ni lo que rinde una jornada. Todo lo demás depende de esto.",
+        remedio: sedes === 0 ? "Fundar una casa de estudios." : sabios === 0 ? "Llamar a un sabio." : "Subir la partida de saber.",
+        impacto: "Es lo único del juego que mejora todo lo demás a la vez.", ir: sedes === 0 ? "sedes" : "edu" };
+    } },
+
+  // ——— las escuelas ———
+  { id: "analfabeta", mando: "edu", mira: (s) => {
+      const P = s.pops || {};
+      const lee = P.letras;
+      if (lee == null || lee > 0.28) return null;
+      return { nivel: lee < 0.1 ? "ojo" : "chance",
+        problema: `Leen ${Math.round(lee * 100)} de cada 100.`,
+        causa: "No hay escuela que llegue al que no puede pagarla.",
+        consecuencia: "Un pueblo que no lee rinde menos, inventa menos y tarda generaciones en enterarse de lo que ya se sabe.",
+        remedio: "Escuelas, y de las que enseñan a todos. La imprenta sin lectores no sirve de nada.",
+        impacto: "Cada punto de alfabetización sube lo que rinde cada jornal y acelera todo lo que se investigue.",
+        ir: "edu", vista: "letras" };
+    } },
+
+  // ——— la tropa ———
+  { id: "frente", mando: "ejercito", mira: (s) => {
+      if (!s.guerra) return null;
+      const f = s.guerra.frente || 0;
+      if (f > -8) return null;
+      return { nivel: f < -35 ? "grave" : "mal",
+        problema: `El frente contra ${s.guerra.vecino} va en contra.`,
+        causa: "El enemigo pesa más de lo que se le puede oponer en campaña.",
+        consecuencia: "Si sigue cediendo se pierden comarcas, y una comarca ocupada tarda generaciones en volver a ser tuya.",
+        remedio: "Replegarse y fortificar, buscar la paz, o levantar tropa si queda con qué pagarla.",
+        impacto: "Replegarse frena la sangría; la paz cuesta prestigio y lo devuelve en años.", ir: "ejercito" };
+    } },
+  { id: "sinbrazos", mando: "ejercito", mira: (s, x) => {
+      if (x.libres == null || x.libres > 0) return null;
+      const b = (s.provincias || []).some((p) => (p.pops || []).length) ? brazosDelReino(s) : null;
+      return { nivel: "ojo",
+        problema: "No queda un hombre libre que llamar a filas.",
+        causa: b ? `Con ${b.reg.n} solo se puede llamar a ${fmtPob(b.total)}, y ya están todos sirviendo.`
+          : "Todo el que puede servir ya sirve.",
+        consecuencia: "No se puede levantar una unidad más aunque sobre el oro y aunque haga falta mañana.",
+        remedio: b && b.reg.pideNacion && b.leg < 0.5
+          ? "La conscripción está decretada pero el país no la siente suya: abrir el voto y aliviar la carga llenaría las filas antes que cualquier decreto."
+          : "Licenciar lo que no sirve, o esperar a que la época permita una leva más ancha.",
+        impacto: b && b.reg.pideNacion ? `Cada punto de legitimidad vale del orden de ${fmtPob(Math.round(b.aptos * 0.008))} hombres.`
+          : "Licenciar devuelve brazos al campo y al taller, que es de donde salieron.",
+        ir: "ejercito", vista: "militar" };
+    } },
+  { id: "levavieja", mando: "ejercito", mira: (s) => {
+      if (!(s.provincias || []).some((p) => (p.pops || []).length)) return null;
+      const reg = regimenDeLeva(s);
+      if (!reg.mejora) return null;
+      const sab = new Set(((s.ciencia || {}).sabidos) || []);
+      if (sab.has(reg.mejora)) return null;
+      return { nivel: "chance",
+        problema: `Se recluta por ${reg.n} sin saber organizarla del todo.`,
+        causa: `Falta «${(MED_IDX[reg.mejora] || {}).nombre || reg.mejora}», que es lo que le saca a este régimen todo lo que da.`,
+        consecuencia: "Se levanta una tercera parte menos de tropa que un vecino que sí lo sepa, con la misma gente.",
+        remedio: "Buscar ese saber.",
+        impacto: "Un tercio más de hombres con la misma población y el mismo decreto.", ir: "ciencia" };
+    } },
+
+  // ——— el gobierno ———
+  { id: "orden", mando: "gob", mira: (s) => {
+      const e = (s.stats || {}).estabilidad || 0;
+      if (e >= 32) return null;
+      const alzadas = (s.provincias || []).filter((p) => p.alzada && (s.anio || 0) - p.alzada.anio <= 2).length;
+      return { nivel: e < 20 ? "grave" : "mal",
+        problema: `La estabilidad está en ${Math.round(e)}.`,
+        causa: alzadas ? `Ha habido ${alzadas} alzamiento(s) en los últimos años.`
+          : "Se ha pedido mucho y se ha dado poco, y los estamentos han tomado nota.",
+        consecuencia: "Con la estabilidad así, cualquier decisión sale más cara y una crisis cualquiera se convierte en una revuelta.",
+        remedio: "Contentar al estamento más hostil, aliviar la carga o dar fiestas. Reprimir apaga el fuego y deja la brasa un siglo.",
+        impacto: "El orden se recupera despacio; el escarmiento lo compra hoy y lo cobra en 1789.", ir: "gob" };
+    } },
+  { id: "hostil", mando: "gob", mira: (s) => {
+      const fs = Object.entries(s.facciones || {});
+      if (!fs.length) return null;
+      const [id, v] = fs.reduce((a, b) => (b[1] < a[1] ? b : a));
+      if (v >= 28) return null;
+      const F = FACCIONES.find((f) => f.id === id) || { n: id, ico: "" };
+      return { nivel: v < 15 ? "mal" : "ojo",
+        problema: `${F.ico} ${F.n}: su humor está en ${Math.round(v)}.`,
+        causa: "Lo que se ha decidido últimamente les ha ido en contra, y lo llevan contando.",
+        consecuencia: "Un estamento así conspira, retiene lo que debe y arrima el hombro al primero que prometa otra cosa.",
+        remedio: "Darles algo que les importe. Un privilegio, un cargo, o dejar de pedirles.",
+        impacto: "Vuelve despacio y se va rápido; empezar antes de que baje de veinte cuesta la mitad.", ir: "gob" };
+    } },
+  { id: "vozcerrada", mando: "gob", mira: (s) => {
+      const P = s.pops || {};
+      if (!P.gente) return null;
+      const ideas = ideasDelSiglo(s.anio || 1200);
+      if (ideas < 0.45 || (P.apertura || 0) > 0.35 || hayElecciones(s)) return null;
+      const letras = P.letras || 0;
+      if (letras < 0.3) return null;
+      return { nivel: "ojo",
+        problema: "Hay un pueblo que lee y no tiene dónde decir nada.",
+        causa: `Leen ${Math.round(letras * 100)} de cada 100 y el gobierno sigue cerrado a los de siempre.`,
+        consecuencia: "La rabia que no encuentra urna encuentra barricada. Es la diferencia entre los países que abrieron el voto a tiempo y los que no.",
+        remedio: "Abrir el gobierno. No hace falta llegar al sufragio universal: basta con que no se les diga que se callen.",
+        impacto: "Poder votar calma más que cualquier reparto de grano, y no cuesta un solo grano.", ir: "gob" };
+    } },
+  { id: "amenaza", mando: "gob", mira: (s) => {
+      if (s.guerra) return null;
+      const malos = (s.vecinos || []).filter((v) => (v.relacion || 0) < -25);
+      if (!malos.length) return null;
+      const peor = malos.reduce((a, b) => ((b.relacion || 0) < (a.relacion || 0) ? b : a));
+      const mio = poderMilitar(s.stats, s.ciencia, poblacionTotal(s.provincias) || s.poblacion,
+        s.presupuesto, s.ejercito, s.generales, s.anio).total;
+      const suyo = poderVecino(peor, s.anio);
+      if (suyo < mio * 0.9) return null;
+      return { nivel: suyo > mio * 1.4 ? "mal" : "ojo",
+        problema: `${peor.nombre} no disimula su hostilidad y pesa más que nosotros en campaña.`,
+        causa: `Su fuerza se estima en ${Math.round(suyo)} contra los ${Math.round(mio)} que podemos poner.`,
+        consecuencia: "Si ataca, se pierden comarcas antes de poder responder.",
+        remedio: "Comprar tiempo con diplomacia, buscar un aliado, o levantar tropa antes de que decidan ellos.",
+        impacto: "Un tratado cuesta prestigio; una guerra perdida cuesta comarcas y memoria para un siglo.", ir: "gob" };
+    } },
+
+  // ——— las obras y los estudios ———
+  { id: "obraparada", mando: "proy", mira: (s, x) => {
+      const act = (s.proyectos || []).filter((p) => p.estado === "activo");
+      if (!act.length) return null;
+      if (x.neto >= 0 && ((s.edu || {}).oro || 0) > 80) return null;
+      return { nivel: "ojo",
+        problema: `Hay ${act.length} obra(s) en marcha y el tesoro no da para sostenerlas.`,
+        causa: "Una obra come presupuesto todos los años hasta que se termina.",
+        consecuencia: "Sin dinero se arrastran, y una obra arrastrada cuesta más y llega tarde.",
+        remedio: "Subir la partida de obras, o dejar una sola en marcha y terminarla.",
+        impacto: "Terminar una vale más que empezar tres: lo que rinde solo empieza a contar cuando se inaugura.", ir: "eco" };
+    } },
+  { id: "sedeociosa", mando: "sedes", mira: (s) => {
+      const sedes = ((s.edu || {}).sedes) || [];
+      const sin = sedes.filter((x) => !x.inv || x.inv.estado !== "activa");
+      if (!sin.length) return null;
+      return { nivel: "chance",
+        problema: `${sin.length} de ${sedes.length} casa(s) de estudios no están investigando nada.`,
+        causa: "Se fundaron y no se les puso trabajo, o el que tenían ya lo terminaron.",
+        consecuencia: "Cuestan su sostén igual y no devuelven nada.",
+        remedio: "Abrirles una investigación, y a poder ser en lo que el reino necesita.",
+        impacto: "Una sede investigando devuelve saber todos los años; parada, solo gasta.", ir: "sedes" };
+    } },
+];
+
+// Lo que tiene que decir el asesor de un ministerio, de lo más urgente a lo
+// menos. Si no tiene nada que decir, no dice nada: un asesor que habla todos
+// los turnos deja de leerse al tercero.
+function consejosDe(mando, s, x) {
+  const out = [];
+  for (const r of REGLAS) {
+    if (r.mando !== mando) continue;
+    let c = null;
+    try { c = r.mira(s || {}, x || {}); } catch (e) { c = null; }
+    if (c) out.push({ ...c, id: r.id, mando });
+  }
+  return out.sort((a, b) => NIVELES.indexOf(a.nivel) - NIVELES.indexOf(b.nivel));
+}
+
 // ——— la columna de la izquierda ———
 // Todo lo que reclama atención aparece acá y en ningún otro sitio. Nada
 // interrumpe la partida con una ventana encima: el que gobierna decide qué
@@ -13990,6 +14313,7 @@ export default function PaxMundi() {
   const [busca, setBusca] = useState("");
   const [buscaSel, setBuscaSel] = useState(0);
   const [mira, setMira] = useState(null);
+  const [consejoAbierto, setConsejoAbierto] = useState(null);
   const [vistaPedida, setVistaPedida] = useState(null);
   const buscaRef = useRef(null);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
@@ -15526,6 +15850,11 @@ export default function PaxMundi() {
   const avisos = avisosDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
     piT, libres: reservaHombres(s.poblacion, s.ejercito, s.bajasRecientes, s).libres });
 
+  // ——— lo que tiene que decir el asesor de este ministerio ———
+  const consejos = tab ? consejosDe(tab, s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
+    neto: netoPres, piT, techoOcupado, proyActivos,
+    libres: reservaHombres(s.poblacion, s.ejercito, s.bajasRecientes, s).libres }) : [];
+
   // ——— la búsqueda ———
   const hallazgosBusca = busca.trim().length >= 2 ? buscarEnElMundo(busca, s, 14) : [];
   // Ir a lo que se buscó. Cada cosa se alcanza como se tiene que alcanzar: una
@@ -15686,6 +16015,75 @@ export default function PaxMundi() {
               fontFamily: mono, fontSize: 12 }}>✕</button>
         </div>
         <div style={{ padding: 0 }}>
+        {/* ── EL ASESOR ─────────────────────────────────────────────────
+            Va antes que los números porque es lo que hace falta leer antes:
+            qué pasa, por qué, en qué acaba, qué se puede hacer y qué se gana.
+            No trae un solo botón que haga nada: un asesor que ejecuta no es un
+            asesor, es un jugador automático. Lo más que hace es llevarte a
+            donde se decide. */}
+        {ASESORES[tab] && consejos.length > 0 && (
+          <div style={{ padding: "10px 12px 2px" }}>
+            <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass,
+              marginBottom: 6 }}>
+              {ASESORES[tab].ico} DICE {ASESORES[tab].n.toUpperCase()}
+            </div>
+            {consejos.map((c) => {
+              const abierto = consejoAbierto === c.id;
+              const col = colorNivel(c.nivel);
+              return (
+                <div key={c.id} style={{ marginBottom: 7, borderRadius: 8, overflow: "hidden",
+                  background: "rgba(0,0,0,0.22)", border: `1px solid ${col}44`,
+                  borderLeft: `3px solid ${col}` }}>
+                  <button onClick={() => setConsejoAbierto(abierto ? null : c.id)}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
+                      cursor: "pointer", background: "transparent", border: "none", color: C.ink,
+                      fontFamily: serif, fontSize: 13, lineHeight: 1.35 }}>
+                    <span style={{ color: col, fontFamily: mono, fontSize: 9, letterSpacing: 1 }}>
+                      {DICE[c.nivel]}
+                    </span>
+                    <span style={{ float: "right", color: C.muted, fontFamily: mono, fontSize: 10 }}>
+                      {abierto ? "▾" : "▸ por qué"}
+                    </span>
+                    <div style={{ marginTop: 3 }}>{c.problema}</div>
+                  </button>
+                  {abierto && (
+                    <div style={{ padding: "0 10px 10px", fontSize: 12, lineHeight: 1.5 }}>
+                      {[["por qué", c.causa], ["en qué acaba", c.consecuencia],
+                        ["qué se puede hacer", c.remedio], ["qué se gana", c.impacto]].map(([et, txt]) => (
+                        <div key={et} style={{ marginTop: 6 }}>
+                          <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.1,
+                            textTransform: "uppercase", opacity: 0.85,
+                            color: et === "qué se puede hacer" ? C.brass : C.muted }}>{et}</div>
+                          <div style={{ color: et === "qué se puede hacer" ? C.ink : C.muted }}>{txt}</div>
+                        </div>
+                      ))}
+                      {(c.vista || (c.ir && c.ir !== tab)) && (
+                        <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+                          {c.vista && VISTA_IDX[c.vista] && (
+                            <button onClick={() => setVistaPedida({ id: c.vista, k: Date.now() })}
+                              style={{ padding: "4px 9px", borderRadius: 6, cursor: "pointer",
+                                background: "transparent", border: `1px solid ${C.line}`,
+                                color: C.muted, fontFamily: mono, fontSize: 10 }}>
+                              ▤ verlo en el mapa
+                            </button>
+                          )}
+                          {c.ir && c.ir !== tab && MANDO_IDX[c.ir] && (
+                            <button onClick={() => setTab(c.ir)}
+                              style={{ padding: "4px 9px", borderRadius: 6, cursor: "pointer",
+                                background: "transparent", border: `1px solid ${C.line}`,
+                                color: C.muted, fontFamily: mono, fontSize: 10 }}>
+                              → {MANDO_IDX[c.ir].n}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
             {tab === "cronica" && s.dilema && (
               <div className="pm-fade" style={{ margin: "13px 14px 0", padding: "13px 14px", borderRadius: 10,
