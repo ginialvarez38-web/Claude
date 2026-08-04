@@ -6289,7 +6289,136 @@ const VISTAS = [
       : v < 0.46 ? "cuesta entenderlos" : v < 0.70 ? "hablan lo suyo" : "ya es otra lengua"),
     mio: (m) => (m.habla ? m.habla.dist : null),
     pie: "cuánto se ha apartado el habla de cada comarca" },
+
+  // ═══ DE QUÉ VIVE CADA COMARCA ═══════════════════════════════
+  // Las capas que faltaban. Cada una sale de algo que la partida ya calcula: no
+  // hay ninguna que pinte un número inventado para llenar el hueco de una
+  // lista. La del tendido eléctrico no está porque en este juego no hay
+  // electricidad; ponerla en gris habría sido peor que no ponerla.
+
+  // Lo que rinde cada cabeza. No es lo que tiene la comarca —eso es el nivel de
+  // vida— sino lo que produce, que es otra cosa: hay comarcas que producen
+  // mucho y se lo lleva otro.
+  { id: "economia", n: "Lo que produce", ambito: "reino", rampa: "bueno", relativa: true,
+    cortes: [0.9, 1.1, 1.4, 1.9, 2.6],
+    fmt: (v) => "×" + v.toFixed(2) + " por cabeza",
+    mio: (m) => ((m.soc || {}).rinde != null ? m.soc.rinde : null),
+    pie: "cuánto produce cada cabeza" },
+
+  // Cuánta gente vive de la fábrica, la mina y el taller. Es el mapa que
+  // convierte un reino agrario en otro sin que cambie una frontera.
+  { id: "industria", n: "Industria", ambito: "reino", rampa: "sucio",
+    cortes: [0.03, 0.09, 0.18, 0.32, 0.5],
+    fmt: (v) => (v < 0.02 ? "no hay taller que valga" : Math.round(v * 100) + "% vive del taller"),
+    mio: (m) => parteDeClases(m, ["obrero", "tecnico", "artesano", "minero"]),
+    pie: "quién vive de la fábrica y del taller" },
+
+  // Y cuánta de la tierra. Al empezar es casi todo el mapa; si el reino se
+  // industrializa, se vacía, y verlo vaciarse es ver el siglo XIX de un
+  // vistazo.
+  { id: "agro", n: "Campo", ambito: "reino", rampa: "monte",
+    cortes: [0.2, 0.4, 0.58, 0.74, 0.88],
+    fmt: (v) => Math.round(v * 100) + "% vive de la tierra",
+    mio: (m) => parteDeClases(m, ["campesino", "pastor", "pescador", "siervo", "esclavo"]),
+    pie: "quién vive de la tierra" },
+
+  // De dónde salen los soldados. No es dónde están: es de dónde se los saca, y
+  // por eso una comarca vaciada por la leva se apaga en este mapa.
+  { id: "militar", n: "De dónde sale la tropa", ambito: "reino", rampa: "sucio", relativa: true,
+    cortes: [0.02, 0.04, 0.06, 0.09, 0.13],
+    fmt: (v) => Math.round(v * 1000) / 10 + "% en edad de servir",
+    mio: (m) => {
+      const pops = m.pops || []; if (!pops.length) return null;
+      let g = 0, a = 0;
+      for (const q of pops) {
+        g += q.n;
+        const sano = q.salud == null ? 1 : acotar(0.45 + q.salud / 90, 0.4, 1.15);
+        a += q.n * (SIRVE[q.clase] == null ? 0.7 : SIRVE[q.clase]) * sano;
+      }
+      return g > 0 ? (a / g) * 0.09 : null;
+    },
+    pie: "de dónde salen los soldados" },
+
+  // Cuánto tarda en llegar una orden. Es el reverso del aislamiento que decide
+  // las lenguas: lo mismo que parte un habla es lo que impide gobernar.
+  { id: "logistica", n: "Lo lejos que queda", ambito: "reino", rampa: "bueno",
+    cortes: [0.28, 0.42, 0.56, 0.7, 0.84],
+    fmt: (v) => (v > 0.8 ? "aquí manda la corte" : v > 0.55 ? "se llega bien"
+      : v > 0.4 ? "queda a trasmano" : "aquí no llega nadie"),
+    mio: (m, provs) => 1 - aislamientoDe(m, provs || []),
+    pie: "cuánto cuesta que llegue una orden" },
+
+  // Por dónde pasa el hierro. Antes del ferrocarril este mapa está vacío, y eso
+  // también es información: enseña de un vistazo el siglo en que se está.
+  { id: "ferrocarril", n: "Ferrocarril", ambito: "reino", rampa: "gente",
+    cortes: [0.5, 1.5, 2.5, 2.9, 3.5],
+    fmt: (v) => (v >= 3 ? "pasa el ferrocarril" : v >= 2 ? "hay carretera"
+      : v >= 1 ? "hay calzada" : v > 0 ? "hay senda" : "no llega camino"),
+    mio: (m) => (m.via || 0),
+    pie: "por dónde pasa el hierro" },
+
+  // Por dónde entra y sale la mercancía: el puerto, el río navegable, el camino
+  // y el mercado de la ciudad. Un reino sin salida al mar se ve enseguida.
+  { id: "comercio", n: "Comercio", ambito: "reino", rampa: "gente", relativa: true,
+    cortes: [0.12, 0.25, 0.4, 0.6, 0.8],
+    fmt: (v) => (v > 0.7 ? "por aquí entra y sale todo" : v > 0.45 ? "hay trato"
+      : v > 0.2 ? "algo se mueve" : "aquí no llega el trato"),
+    mio: (m) => {
+      let v = 0;
+      v += (m.costera ? 0.32 : 0) + (m.rioNav ? 0.2 : m.rio ? 0.08 : 0);
+      v += acotar((m.via || 0) / 3, 0, 1) * 0.28;
+      const urb = m.ciudad && m.poblacion ? acotar(m.ciudad.pob / m.poblacion, 0, 1) : 0;
+      v += urb * 0.3;
+      return acotar(v, 0, 1);
+    },
+    pie: "por dónde entra y sale la mercancía" },
+
+  // Adónde llega de verdad lo que el reino sabe. La imprenta no reparte el
+  // saber por igual: llega antes a la ciudad, al camino y a quien lee.
+  { id: "adelanto", n: "Adónde llega el saber", ambito: "reino", rampa: "bueno", relativa: true,
+    cortes: [0.08, 0.18, 0.32, 0.5, 0.7],
+    fmt: (v) => (v > 0.6 ? "aquí llega todo lo nuevo" : v > 0.3 ? "llega con retraso"
+      : v > 0.12 ? "llega poco" : "aquí no llega nada"),
+    mio: (m) => {
+      const lee = ((m.soc || {}).letras) || 0;
+      const urb = m.ciudad && m.poblacion ? acotar(m.ciudad.pob / m.poblacion, 0, 1) : 0;
+      return acotar(lee * (0.55 + urb * 0.6 + acotar((m.via || 0) / 3, 0, 1) * 0.35), 0, 1);
+    },
+    pie: "adónde llega lo que el reino sabe" },
+
+  // Qué cultura manda en cada comarca. Va aparte del credo y de la lengua
+  // porque las tres fronteras casi nunca coinciden, y ver dónde no coinciden es
+  // ver de qué está hecho un país.
+  { id: "cultura", n: "Culturas", ambito: "reino", clases: "cultura",
+    pie: "qué cultura manda en cada comarca" },
+
+  // Y lo que se saca de cada tierra, de lo que se ha llegado a reconocer: el
+  // mapa no enseña lo que hay, enseña lo que se sabe que hay.
+  { id: "recursos", n: "Lo que da la tierra", ambito: "reino", clases: "recurso",
+    pie: "lo que se sabe que hay bajo cada comarca" },
 ];
+// Qué parte de una comarca vive de unos oficios. Sale del recuento de gente que
+// ya trae la provincia, así que no cuesta nada y no puede desfasarse.
+function parteDeClases(m, cuales) {
+  const soc = m.soc || {};
+  const g = soc.gente || 0;
+  if (!(g > 0) || !soc.clases) return null;
+  let n = 0;
+  for (const k of cuales) n += soc.clases[k] || 0;
+  return +(n / g).toFixed(4);
+}
+// El yacimiento que le da nombre a una comarca: el más valioso de los que se
+// han encontrado allí.
+function recursoMayor(m, anio) {
+  const ys = yacimientosConocidos(m, anio || 1500);
+  if (!ys || !ys.length) return null;
+  return ys.slice().sort((a, b) => (RECURSOS[b.id] || {}).ley - (RECURSOS[a.id] || {}).ley)[0].id;
+}
+const RECURSO_COL = {
+  hierro: "#8E7F72", cobre: "#B5764A", oro: "#E3B341", plata: "#C8CBD0",
+  sal: "#DCD6C4", carbon: "#4A4A52", petroleo: "#3B3242", gas: "#7FA8C0",
+  uranio: "#7FBF6A", litio: "#C48FC0", raras: "#8E7FC0",
+};
 // Un color por estamento, agrupados por lo que son: la tierra en verdes, el
 // taller y la fábrica en ocres, el comercio y la letra en azules, y arriba el
 // oro y el púrpura. Así un vistazo al mapa dice de qué vive el reino.
@@ -6334,7 +6463,7 @@ function colorDeVista(V, k) {
 // veintisiete del mismo color y la grande sola en la punta.
 function cortesRelativos(V, marcas) {
   const vs = [];
-  for (const m of marcas || []) { const v = valorMio(V, m); if (v != null && Number.isFinite(v)) vs.push(v); }
+  for (const m of marcas || []) { const v = valorMio(V, m, marcas); if (v != null && Number.isFinite(v)) vs.push(v); }
   if (!vs.length) return [1, 2, 3, 4, 5];
   vs.sort((a, b) => a - b);
   const lo = vs[0], hi = vs[vs.length - 1];
@@ -6350,7 +6479,7 @@ const cortesDe = (V, marcas) => (V && V.relativa ? cortesRelativos(V, marcas) : 
 // El color de una provincia tuya. En las vistas del mundo se pinta con la
 // misma escala que el resto del planeta —así se compara tu tierra con la de
 // enfrente—, y en las del reino con la suya, porque no hay con qué comparar.
-function colorMio(V, m, cortes) {
+function colorMio(V, m, cortes, provs, anio) {
   if (!V || V.id === "politica") return m.col;
   const a = ambDe(m);
   if (V.clases === "bioma") return a && BIOMAS[a.bioma] ? BIOMAS[a.bioma].col : APAGADO;
@@ -6359,7 +6488,9 @@ function colorMio(V, m, cortes) {
   if (V.clases === "credo") return CREDO_COL[(m.soc || {}).credoMayor] || APAGADO;
   if (V.clases === "partido") { const x = PARTIDO_IDX[(m.urna || {}).gana]; return x ? x.col : APAGADO; }
   if (V.clases === "lengua") return m.habla ? colorDeLengua(m.habla.id) : APAGADO;
-  const t = tramoDe(valorMio(V, m), cortes || V.cortes);
+  if (V.clases === "cultura") { const c = (m.soc || {}).culturaMayor; return c ? colorDeLengua("cul:" + c) : APAGADO; }
+  if (V.clases === "recurso") { const r = recursoMayor(m, anio); return r ? (RECURSO_COL[r] || APAGADO) : APAGADO; }
+  const t = tramoDe(valorMio(V, m, provs), cortes || V.cortes);
   return t < 0 ? APAGADO : RAMPAS[V.rampa][t];
 }
 // Las lenguas no caben en una tabla de colores: nacen durante la partida y no
@@ -6377,9 +6508,9 @@ function colorDeLengua(id) {
 // Lo que la vista mide en esa provincia. Las del mundo se leen del ambiente
 // vivo —el de hoy, con el clima ya derivado— y no del estático: si el mapa de
 // temperaturas no se moviera en trescientos años no serviría de nada.
-function valorMio(V, m) {
+function valorMio(V, m, provs) {
   if (!V || !m) return null;
-  if (V.mio) return V.mio(m);
+  if (V.mio) return V.mio(m, provs);
   if (V.prov) return m.idx != null ? V.prov(m.idx, m) : null;
   const a = ambDe(m);
   return a && V.val ? V.val(a) : null;
@@ -6528,7 +6659,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -7205,7 +7336,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const rangoMio = useMemo(() => {
     if (!temat || V.clases) return null;
     const vs = [];
-    for (const m of mias) { const v = valorMio(V, m); if (v != null && Number.isFinite(v)) vs.push({ v, m }); }
+    for (const m of mias) { const v = valorMio(V, m, mias); if (v != null && Number.isFinite(v)) vs.push({ v, m }); }
     if (!vs.length) return null;
     vs.sort((a, b) => a.v - b.v);
     return { min: vs[0], max: vs[vs.length - 1] };
@@ -7256,7 +7387,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       return x ? `${x.corto}, ${Math.round((mio.urna.parte || 0) * 100)}%` : "todavía no se vota aquí"; }
     if (V.clases === "lengua") { const h = (mio || {}).habla;
       return h ? h.n + (h.dist > 0.16 ? ", muy cerrado" : "") : null; }
-    const v = mio ? valorMio(V, mio) : amb && V.val ? V.val(amb) : null;
+    if (V.clases === "cultura") return ((mio || {}).soc || {}).culturaMayor || null;
+    if (V.clases === "recurso") { const q = mio ? recursoMayor(mio, anio) : null;
+      return q ? (RECURSOS[q] || { n: q }).n : "nada que se sepa"; }
+    const v = mio ? valorMio(V, mio, mias) : amb && V.val ? V.val(amb) : null;
     return v == null || !Number.isFinite(v) ? null : V.fmt(v);
   };
   const rVecino = px * 13;
@@ -7352,7 +7486,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <path d={trazoReino} fill="#222B1A" stroke="none" />
           {conTrazo.map((m) => (
             <path key={"rf" + m.id} d={m.poly}
-              fill={m.ocupada ? `url(#${uid}Ocupada)` : (colorMio(V, m, cortesVista) || "#6E7A48")}
+              fill={m.ocupada ? `url(#${uid}Ocupada)` : (colorMio(V, m, cortesVista, mias, anio) || "#6E7A48")}
               /* En una vista temática el relleno va opaco. Con el 0,88 de
                  siempre, el mismo valor salía un punto más oscuro dentro de tu
                  frontera que fuera, y entonces el color deja de significar lo
@@ -7915,7 +8049,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       </div>
 
       {/* rosa de los vientos y lectura de posición */}
-      <div style={{ position: "absolute", right: 10, top: 10, display: "flex", alignItems: "center",
+      <div style={{ position: "absolute", right: 10, top: 10 + (margenSup || 0), display: "flex", alignItems: "center",
         gap: 7, pointerEvents: "none" }}>
         <div style={{ fontFamily: mono, fontSize: 9.5, color: "rgba(232,222,198,0.92)", textAlign: "right",
           padding: "3px 7px", borderRadius: 6, background: "rgba(10,16,22,0.72)",
@@ -7939,7 +8073,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             volarA({ x: ((e.clientX - r.left) / r.width) * 360 - v.w / 2,
               y: ((e.clientY - r.top) / r.height) * 180 - v.h / 2, w: v.w, h: 0 }, 420);
           }}
-          style={{ position: "absolute", right: 10, top: 44, width: 108, height: 54, cursor: "pointer",
+          style={{ position: "absolute", right: 10, top: 44 + (margenSup || 0), width: 108, height: 54, cursor: "pointer",
             borderRadius: 5, overflow: "hidden", border: "1px solid rgba(200,180,140,0.3)",
             boxShadow: "0 3px 12px rgba(0,0,0,0.5)" }}>
           {MINI_MUNDO}
@@ -7951,7 +8085,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       )}
 
       {/* barra de escala */}
-      <div style={{ position: "absolute", left: 10, bottom: 10 + (margenInfIzq || 0), pointerEvents: "none",
+      <div style={{ position: "absolute", left: 10, bottom: 10 + (margenInfIzq || margenInf || 0), pointerEvents: "none",
         fontFamily: mono, fontSize: 9.5, color: "rgba(230,220,195,0.78)", textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>
         <div style={{ width: 64, height: 5, borderLeft: "1px solid rgba(230,220,195,0.78)",
           borderRight: "1px solid rgba(230,220,195,0.78)", borderBottom: "1px solid rgba(230,220,195,0.78)" }} />
@@ -7970,9 +8104,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
 
       {/* leyenda y capas */}
       {panel && (
-        <div className="pm-fade pm-scroll" style={{ position: "absolute", right: 46, bottom: 8, width: 178, zIndex: 3,
-          padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.95)", border: `1px solid ${C.line}`,
-          boxShadow: "0 6px 20px rgba(0,0,0,0.55)", maxHeight: "82%", overflowY: "auto" }}>
+        <div className="pm-fade pm-scroll" style={{ position: "absolute", right: 46, bottom: 8 + (margenInf || 0),
+          width: 196, zIndex: 3, padding: "9px 11px", borderRadius: 9, background: "rgba(12,18,26,0.96)",
+          border: `1px solid ${C.line}`, boxShadow: "0 6px 20px rgba(0,0,0,0.55)",
+          maxHeight: `calc(100% - ${18 + (margenInf || 0) + (margenSup || 0)}px)`, overflowY: "auto" }}>
           {/* ——— qué cuenta el mapa ——— */}
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, marginBottom: 5 }}>─ QUÉ CUENTA EL MAPA</div>
           {VISTAS.map((v) => {
@@ -8090,6 +8225,34 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               })()}
             </div>
           )}
+          {(V.clases === "cultura" || V.clases === "recurso") && (
+            <div style={{ margin: "5px 0 2px" }}>
+              {(() => {
+                const esCul = V.clases === "cultura";
+                const cuenta = new Map();
+                for (const m of mias) {
+                  const k = esCul ? (m.soc || {}).culturaMayor : recursoMayor(m, anio);
+                  if (k) cuenta.set(k, (cuenta.get(k) || 0) + 1);
+                }
+                if (!cuenta.size) return (
+                  <div style={{ fontSize: 10, color: C.muted, opacity: 0.75 }}>
+                    {esCul ? "todavía no hay gente contada; pasá un turno"
+                           : "no se ha reconocido nada todavía"}
+                  </div>
+                );
+                return [...cuenta.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => (
+                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11,
+                    color: C.muted, padding: "1px 0" }}>
+                    <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                      background: esCul ? colorDeLengua("cul:" + k) : (RECURSO_COL[k] || APAGADO),
+                      border: "1px solid rgba(0,0,0,0.5)" }} />
+                    {esCul ? k : (RECURSOS[k] || { n: k }).n}
+                    <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>{n}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
           {(V.clases === "clase" || V.clases === "credo") && (
             <div style={{ margin: "5px 0 2px" }}>
               {(() => {
@@ -8180,7 +8343,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         </div>
       )}
 
-      <div style={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 4 }}>
+      {/* Los mandos del mapa se apoyan por encima de la barra de ministerios.
+          Con el borde inferior a ocho píxeles quedaban debajo de ella: el botón
+          de capas —que es justamente el que hay que pulsar para cambiar lo que
+          el mapa cuenta— estaba tapado por la franja de abajo y no había manera
+          de darle. */}
+      <div style={{ position: "absolute", right: 8, bottom: 8 + (margenInf || 0), display: "flex", flexDirection: "column", gap: 4, zIndex: 4 }}>
         {BOTONES_MAPA.map(([t, tit], i) => (
           <button key={t} title={tit} aria-label={tit}
             onClick={[() => zoom(0.72), () => zoom(1.38), alReino, alMundo, () => setPanel((v) => !v)][i]}
@@ -15397,7 +15565,8 @@ export default function PaxMundi() {
           onSeleccion={(id) => setProvSel(id)}
           mira={mira}
           vistaPedida={vistaPedida}
-          margenInfIzq={ALTO_PIE + 14}
+          margenSup={ALTO_CAB}
+          margenInf={ALTO_PIE}
           alto="100%" />
       </div>
 
@@ -15409,11 +15578,13 @@ export default function PaxMundi() {
         display: "flex", alignItems: "center", gap: 14, padding: "0 12px",
         background: "linear-gradient(180deg, rgba(8,13,19,0.97), rgba(8,13,19,0.86))",
         borderBottom: `1px solid ${C.line}`, backdropFilter: "blur(3px)" }}>
-        <div style={{ minWidth: 96, flex: "0 1 auto" }}>
-          <div style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden",
-            textOverflow: "ellipsis",
-            background: `linear-gradient(90deg, ${C.ink}, ${C.gold})`,
-            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{s.nacion.nombre}</div>
+        {/* El nombre del reino no se recorta. Con el degradado recortado a la
+            caja del texto y la caja encogida por el buscador, «Francia» salía
+            como «F»: un truco de pintura no puede costarle al jugador saber qué
+            país está gobernando. */}
+        <div style={{ flex: "0 0 auto", maxWidth: 220 }}>
+          <div style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: "nowrap", color: C.gold }}>
+            {s.nacion.nombre}</div>
           <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1 }}>
             {fmtMesAnio(s.anio, s.dia).toUpperCase()} · TURNO {s.turno}
           </div>
