@@ -6528,7 +6528,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -6849,6 +6849,29 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     const w = c ? Math.max((c[2] - c[0]) * 3.4, (c[3] - c[1]) * 3.4 * a, 3) : 11;
     volarA({ x: m.x - w / 2, y: m.y - w / a / 2, w, h: 0 });
   }, [seleccion]);
+
+  // ——— y volar adonde diga el buscador ———
+  // La cámara obedece a una mira: un punto y un ancho. Lleva su propio número
+  // de orden porque buscar dos veces el mismo sitio tiene que volver a llevar
+  // allí, y comparando solo las coordenadas la segunda vez no pasaba nada.
+  // Y ponerse la capa que se haya pedido desde fuera: el buscador encuentra
+  // «hambre» y lo que hace no es explicar dónde está esa capa, es ponerla.
+  const capaPrev = useRef();
+  useEffect(() => {
+    if (!vistaPedida || capaPrev.current === vistaPedida.k) return;
+    capaPrev.current = vistaPedida.k;
+    if (VISTA_IDX[vistaPedida.id]) { setVista(vistaPedida.id); setPanel(true); }
+  }, [vistaPedida && vistaPedida.k]);
+
+  const miraPrev = useRef();
+  useEffect(() => {
+    if (!mira || miraPrev.current === mira.k) return;
+    miraPrev.current = mira.k;
+    if (mira.x == null || mira.y == null) return;
+    const a = aspRef.current || 1.62;
+    const w = acotar(mira.w || 9, 1, 300);
+    volarA({ x: mira.x - w / 2, y: mira.y - w / a / 2, w, h: 0 }, 780);
+  }, [mira && mira.k]);
 
   // ——— capas ———
   // El ancho solo cambia al acercar o alejar; al arrastrar cambian x e y. Por
@@ -13471,6 +13494,216 @@ function mandoDelReino(s, x) {
 }
 const fmtNum = (n) => String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
+// ——— el buscador ———
+// Un solo sitio donde escribir el nombre de cualquier cosa. Es la respuesta al
+// problema que tiene todo juego de estrategia grande: no que la información no
+// esté, sino que esté en algún sitio y haya que acordarse de cuál. Acá se
+// escribe «Aveyron», «imprenta», «hambre» o «ejército» y se llega, sea una
+// comarca, un saber, una capa del mapa o un ministerio.
+//
+// Y busca también lo que no es un objeto del mundo —las capas y los
+// ministerios—, que es donde de verdad se pierde el tiempo. Un buscador que
+// encuentra ciudades pero no encuentra «dónde se ve el hambre» resuelve la
+// mitad más fácil del problema.
+
+// El índice de las comarcas del mundo entero. Se arma una sola vez y a la
+// primera búsqueda, no al arrancar: son cuatro mil quinientas y calcular su
+// geometría cuesta, y la mayoría de las partidas no lo van a necesitar.
+let _indiceMundo = null;
+function indiceDelMundo() {
+  if (_indiceMundo) return _indiceMundo;
+  _indiceMundo = [];
+  for (let i = 0; i < PROV_MUNDO.length; i++) {
+    const g = geomProvincia(i);
+    if (!g || !g.d || (g.area || 0) < 0.05) continue;
+    _indiceMundo.push({ n: PROV_MUNDO[i][0], pais: g.pais, x: g.x, y: g.y, area: g.area });
+  }
+  return _indiceMundo;
+}
+
+// Cuánto se parece lo escrito a un nombre. Cuatro grados y ninguno más: es
+// igual, empieza igual, alguna de sus palabras empieza igual, o lo contiene.
+// Sin la tercera, buscar «Loira» no encontraba «Valle del Loira»; sin la
+// cuarta, escribir media palabra no encontraba nada y el buscador solo servía
+// si uno ya sabía cómo se escribía lo que buscaba.
+// Para buscar, el guion y la barra son un espacio. Sin esto, «ile de france»
+// no encontraba «Île-de-France» y «loir et cher» no encontraba «Loir-et-Cher»:
+// el jugador escribe separando con espacios porque es como se dice, no como
+// está guardado.
+const norma = (t) => SIN_TILDE(t).replace(/[-–_/.]+/g, " ").replace(/\s+/g, " ").trim();
+
+function pegaNorm(n, q) {
+  if (!n) return 0;
+  if (n === q) return 3;
+  if (n.startsWith(q)) return 2.2;
+  const i = n.indexOf(q);
+  if (i < 0) return 0;
+  // ¿empieza alguna de sus palabras por lo escrito? Basta con mirar el
+  // carácter de antes: partir el nombre en palabras en cada tecla era la mitad
+  // del coste del buscador.
+  return /[\s,()]/.test(n[i - 1] || "") ? 1.5 : 1;
+}
+const pegaCon = (nombre, q) => pegaNorm(norma(nombre), q);
+
+// ——— el catálogo de lo que no cambia ———
+// Las ciudades, los saberes, las comarcas del mundo, los países, las capas y
+// los ministerios son siempre los mismos, y son trece mil nombres. Normalizarlos
+// en cada tecla costaba diecisiete milisegundos por pulsación, que es
+// exactamente la clase de cosa que hace que una interfaz se sienta pesada aunque
+// funcione. Se normalizan una vez, la primera que se busca algo.
+let _catalogo = null;
+function catalogoDelMundo(anio) {
+  if (_catalogo && _catalogo.anio === anio) return _catalogo.filas;
+  const filas = [];
+  const mete = (tipo, n, pie, ir, extra, alias) => filas.push({ tipo, n, pie, ir,
+    extra: extra || 1, nn: norma(n), an: (alias || []).map(norma) });
+  for (const m of MANDOS) mete("mando", m.n, "ministerio", { mando: m.id }, 1, [m.id]);
+  for (const v of VISTAS) mete("vista", v.n, "capa del mapa", { vista: v.id }, 1, [v.id]);
+  for (const [id, r] of Object.entries(RECURSOS))
+    mete("recurso", r.n || id, "recurso · se ve en la capa de reconocimiento",
+      { vista: "exploracion" }, 1, [id]);
+  for (const nodo of MED) mete("saber", nodo.nombre, null, { mando: "ciencia", nodo: nodo.id });
+  for (const c of CIUDADES) {
+    const pob = poblacionCiudad(c, anio);
+    mete("ciudad", c.n, `${enCristiano(c.pais)} · ${fmtPob(pob)}`,
+      { xy: { x: c.x, y: c.y }, w: 9 }, 0.7 + acotar(pob / 900, 0, 0.85));
+  }
+  for (const g of indiceDelMundo())
+    mete("ajena", g.n, enCristiano(g.pais),
+      { xy: { x: g.x, y: g.y }, w: acotar(Math.sqrt(g.area) * 3.2, 3, 26) });
+  for (const pais of Object.keys(PAIS_PROV)) {
+    const c = centroPais(pais);
+    if (c) mete("pais", enCristiano(pais), `${PAIS_PROV[pais].length} comarcas`,
+      { xy: c, w: 60 }, 1, [pais]);
+  }
+  _catalogo = { anio, filas };
+  return filas;
+}
+
+// Los países tienen su nombre en el mapa —que viene en inglés, porque el mapa
+// viene de donde viene— y el que usa el que juega. Buscar «Francia» y no
+// encontrar nada porque el dato dice «France» es exactamente el fallo que un
+// buscador universal no puede tener: el jugador no sabe ni tiene por qué saber
+// en qué idioma está guardado.
+const PAIS_ES = {
+  Spain: "España", Portugal: "Portugal", France: "Francia", Italy: "Italia",
+  Germany: "Alemania", "United Kingdom": "Reino Unido", Ireland: "Irlanda",
+  Netherlands: "Países Bajos", Belgium: "Bélgica", Switzerland: "Suiza",
+  Austria: "Austria", Denmark: "Dinamarca", Norway: "Noruega", Sweden: "Suecia",
+  Finland: "Finlandia", Iceland: "Islandia", Poland: "Polonia", "Czech Republic": "Chequia",
+  Slovakia: "Eslovaquia", Hungary: "Hungría", Romania: "Rumanía", Bulgaria: "Bulgaria",
+  Greece: "Grecia", Turkey: "Turquía", Russia: "Rusia", Ukraine: "Ucrania",
+  Belarus: "Bielorrusia", Estonia: "Estonia", Latvia: "Letonia", Lithuania: "Lituania",
+  Serbia: "Serbia", Croatia: "Croacia", Slovenia: "Eslovenia", Albania: "Albania",
+  Morocco: "Marruecos", Algeria: "Argelia", Tunisia: "Túnez", Libya: "Libia",
+  Egypt: "Egipto", "Saudi Arabia": "Arabia Saudí", Iraq: "Irak", Syria: "Siria",
+  Israel: "Israel", Yemen: "Yemen", Iran: "Irán", Afghanistan: "Afganistán",
+  Pakistan: "Pakistán", India: "India", Bangladesh: "Bangladés", Nepal: "Nepal",
+  "Sri Lanka": "Sri Lanka", China: "China", Taiwan: "Taiwán", Japan: "Japón",
+  "South Korea": "Corea del Sur", "North Korea": "Corea del Norte", Mongolia: "Mongolia",
+  Vietnam: "Vietnam", Thailand: "Tailandia", Myanmar: "Birmania", Cambodia: "Camboya",
+  Laos: "Laos", Indonesia: "Indonesia", Malaysia: "Malasia", Philippines: "Filipinas",
+  Kazakhstan: "Kazajistán", Uzbekistan: "Uzbekistán", Turkmenistan: "Turkmenistán",
+  Azerbaijan: "Azerbaiyán", Georgia: "Georgia", Armenia: "Armenia", Ethiopia: "Etiopía",
+  Somalia: "Somalia", Kenya: "Kenia", Tanzania: "Tanzania", Nigeria: "Nigeria",
+  Ghana: "Ghana", Mali: "Malí", Senegal: "Senegal", "South Africa": "Sudáfrica",
+  Angola: "Angola", "Congo (Kinshasa)": "Congo", Sudan: "Sudán", Mexico: "México",
+  Guatemala: "Guatemala", Peru: "Perú", Bolivia: "Bolivia", Ecuador: "Ecuador",
+  Colombia: "Colombia", Venezuela: "Venezuela", Brazil: "Brasil", Argentina: "Argentina",
+  Chile: "Chile", Paraguay: "Paraguay", Uruguay: "Uruguay", Cuba: "Cuba",
+  "United States of America": "Estados Unidos", Canada: "Canadá", Australia: "Australia",
+  "New Zealand": "Nueva Zelanda", "Papua New Guinea": "Papúa Nueva Guinea",
+};
+const enCristiano = (pais) => PAIS_ES[pais] || pais;
+
+const PESO_TIPO = { reino: 1.6, mando: 1.5, vista: 1.4, comarca: 1.5, persona: 1.25, recurso: 1.2,
+  pais: 1.1, obra: 1.1, sede: 1.1, taller: 1.1, tropa: 1.05, trato: 1.05, lengua: 1.0,
+  ciudad: 1.0, saber: 0.95, gente: 0.95, ajena: 0.6 };
+
+function buscarEnElMundo(consulta, s, tope) {
+  const q = norma(String(consulta || ""));
+  if (q.length < 2) return [];
+  const S = s || {};
+  const R = [];
+  const pon = (tipo, n, pie, ir, extra, otros) => {
+    let p = pegaCon(n, q);
+    for (const alias of otros || []) p = Math.max(p, pegaCon(alias, q) * 0.98);
+    if (!p) return;
+    R.push({ tipo, n, pie, ir, peso: p * (PESO_TIPO[tipo] || 1) * (extra || 1) });
+  };
+
+  // ——— lo que no cambia nunca: ya está normalizado ———
+  // Las comarcas del mundo y los países entran solo a partir de tres letras:
+  // con dos, cualquier cosa encaja con todo y la lista sale llena de sitios que
+  // nadie estaba buscando.
+  const largo = q.length >= 3;
+  // Una comarca del reino y la misma comarca del atlas son el mismo sitio: se
+  // enseña la del reino, que es la que trae su gente y su cuenta.
+  const mias = new Set((S.provincias || []).map((p) => norma(p.nombre)));
+  for (const f of catalogoDelMundo(S.anio || 1500)) {
+    if (!largo && (f.tipo === "ajena" || f.tipo === "pais" || f.tipo === "saber")) continue;
+    if (f.tipo === "ajena" && mias.has(f.nn)) continue;
+    if (f.tipo === "pais" && f.ir.xy && S.region && enCristiano(S.region) === f.n) continue;
+    let p = pegaNorm(f.nn, q);
+    for (const a of f.an) p = Math.max(p, pegaNorm(a, q) * 0.98);
+    if (!p) continue;
+    R.push({ tipo: f.tipo, n: f.n, ir: f.ir, peso: p * (PESO_TIPO[f.tipo] || 1) * f.extra,
+      pie: f.pie != null ? f.pie
+        : (((S.ciencia || {}).sabidos || []).includes(f.ir.nodo) ? "ya se sabe" : "aún no se sabe") });
+  }
+
+  // ——— y lo que sí cambia: lo del reino, que son cuatro docenas ———
+  if ((S.nacion || {}).nombre) pon("reino", S.nacion.nombre, "tu reino",
+    { xy: centroPais(S.region) || null, w: 55 }, 1.1, [S.region]);
+  for (const p of S.provincias || []) {
+    const soc = p.soc || {};
+    const pie = [fmtPob(p.poblacion || 0), soc.claseMayor ? (CLASES[soc.claseMayor] || {}).n : null,
+      p.ocupada ? "en manos ajenas" : null].filter(Boolean).join(" · ");
+    pon("comarca", p.nombre, pie || "comarca del reino", { prov: p.id });
+  }
+  const sob = S.soberano;
+  if (sob) pon("persona", sob.nombre, "quien reina", { mando: "gob" });
+  for (const m of ((S.gobierno || {}).miembros) || [])
+    pon("persona", m.nombre, m.cargo || "en el consejo", { mando: "gob" });
+  for (const x of ((S.edu || {}).sabios) || []) pon("persona", x.nombre, x.campo || "sabio", { mando: "edu" });
+  for (const g of S.generales || []) pon("persona", g.nombre, g.rasgo || "general", { mando: "ejercito" });
+  for (const p of S.proyectos || [])
+    pon("obra", p.nombre, p.estado === "completado" ? "obra terminada" : `obra al ${Math.round(p.progreso || 0)}%`,
+      { mando: "proy" });
+  for (const x of ((S.edu || {}).sedes) || []) pon("sede", x.nombre, x.provincia || "casa de estudios", { mando: "sedes" });
+  for (const f of S.factorias || []) {
+    const meta = (typeof f === "string" ? { n: f } : f);
+    pon("taller", meta.n || meta.nombre || String(f), "industria del reino", { mando: "eco" });
+  }
+  for (const r of RAMAS_EJERCITO) {
+    const n = (S.ejercito || {})[r.id] || 0;
+    if (n) pon("tropa", r.n, `${n} en pie`, { mando: "ejercito" });
+  }
+  for (const v of S.vecinos || [])
+    pon("trato", v.nombre, `${v.estado || "vecino"} · relación ${Math.round(v.relacion || 0)}`, { mando: "gob" });
+  for (const t of S.tributos || [])
+    pon("trato", t.hacia || t.de || "tributo", "ruta de tributo", { mando: "eco" });
+  for (const [, L] of Object.entries((S.lenguas) || {}))
+    if (!L.muerta) pon("lengua", L.n, "se habla en el reino", { vista: "lenguas" });
+  const soc = S.pops || {};
+  for (const k of Object.keys(soc.culturas || {})) pon("gente", k, "cultura del reino", { vista: "clases" });
+  for (const k of Object.keys(soc.credos || {}))
+    pon("gente", (RELIGIONES[k] || { n: k }).n, "credo del reino", { vista: "credos" });
+
+  // Lo mejor primero, y sin repetir: un nombre que aparece como comarca y como
+  // ciudad se enseña una vez, por lo que sea más útil de las dos.
+  R.sort((a, b) => b.peso - a.peso);
+  const visto = new Set();
+  const out = [];
+  for (const r of R) {
+    const k = r.tipo + "|" + norma(r.n);
+    if (visto.has(k)) continue;
+    visto.add(k); out.push(r);
+    if (out.length >= (tope || 18)) break;
+  }
+  return out;
+}
+
 // ——— la columna de la izquierda ———
 // Todo lo que reclama atención aparece acá y en ningún otro sitio. Nada
 // interrumpe la partida con una ventana encima: el que gobierna decide qué
@@ -13584,6 +13817,13 @@ export default function PaxMundi() {
   const [facAbierta, setFacAbierta] = useState(null);
   const [provSel, setProvSel] = useState(null);
   const [avisosAbiertos, setAvisosAbiertos] = useState(true);
+  // El buscador: lo escrito, cuál está señalado con las flechas, y adónde debe
+  // mirar la cámara.
+  const [busca, setBusca] = useState("");
+  const [buscaSel, setBuscaSel] = useState(0);
+  const [mira, setMira] = useState(null);
+  const [vistaPedida, setVistaPedida] = useState(null);
+  const buscaRef = useRef(null);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
   // vuelo, pero cuesta, tarda y necesita conexión.
   const [usarIA, setUsarIA] = useState(false);
@@ -13606,15 +13846,25 @@ export default function PaxMundi() {
 
   // ——— el teclado ———
   // Toda acción tiene que poder hacerse sin ratón. Esc devuelve al mundo, los
-  // números abren los ministerios por su orden en la barra, y no se pisan con
-  // nada de lo que el jugador esté escribiendo: si está redactando una orden,
-  // el teclado es suyo.
+  // números abren los ministerios por su orden en la barra, la barra inclinada
+  // y Ctrl+K abren el buscador, y nada de esto se pisa con lo que el jugador
+  // esté escribiendo: si está redactando una orden, el teclado es suyo.
   useEffect(() => {
     const oye = (ev) => {
       const foco = document.activeElement;
       const escribiendo = foco && (foco.tagName === "INPUT" || foco.tagName === "TEXTAREA"
         || foco.isContentEditable);
+      if ((ev.key === "k" || ev.key === "K") && (ev.ctrlKey || ev.metaKey)) {
+        ev.preventDefault();
+        if (buscaRef.current) buscaRef.current.focus();
+        return;
+      }
       if (ev.key === "Escape") { if (!escribiendo) { setTab(null); setProvSel(null); } return; }
+      if (!escribiendo && ev.key === "/") {
+        ev.preventDefault();
+        if (buscaRef.current) buscaRef.current.focus();
+        return;
+      }
       if (escribiendo || ev.ctrlKey || ev.metaKey || ev.altKey) return;
       if (/^[1-9]$/.test(ev.key)) {
         const m = MANDOS[Number(ev.key) - 1];
@@ -15108,6 +15358,24 @@ export default function PaxMundi() {
   const avisos = avisosDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
     piT, libres: reservaHombres(s.poblacion, s.ejercito, s.bajasRecientes, s).libres });
 
+  // ——— la búsqueda ———
+  const hallazgosBusca = busca.trim().length >= 2 ? buscarEnElMundo(busca, s, 14) : [];
+  // Ir a lo que se buscó. Cada cosa se alcanza como se tiene que alcanzar: una
+  // comarca propia se selecciona —y el mapa vuela solo—, un sitio del mundo se
+  // mira, una capa se pone, un ministerio se abre. El buscador no enseña
+  // resultados: lleva.
+  function irA(r) {
+    if (!r || !r.ir) return;
+    const d = r.ir;
+    if (d.prov) { setProvSel(d.prov); setTab(null); }
+    if (d.xy) setMira({ x: d.xy.x, y: d.xy.y, w: d.w || 9, k: (mira ? mira.k : 0) + 1 });
+    if (d.vista) { setVistaPedida({ id: d.vista, k: (mira ? mira.k : 0) + 1 }); setTab(null); }
+    if (d.mando) setTab(d.mando);
+    if (d.nodo) setNodoAbierto(d.nodo);
+    setBusca(""); setBuscaSel(0);
+    if (buscaRef.current) buscaRef.current.blur();
+  }
+
   return (
     <div style={{ ...FONDO, fontFamily: serif, position: "fixed", inset: 0, overflow: "hidden" }}>
       <GlobalStyle />
@@ -15127,6 +15395,8 @@ export default function PaxMundi() {
           paisPropio={s.region}
           seleccion={provSel}
           onSeleccion={(id) => setProvSel(id)}
+          mira={mira}
+          vistaPedida={vistaPedida}
           margenInfIzq={ALTO_PIE + 14}
           alto="100%" />
       </div>
@@ -15139,7 +15409,7 @@ export default function PaxMundi() {
         display: "flex", alignItems: "center", gap: 14, padding: "0 12px",
         background: "linear-gradient(180deg, rgba(8,13,19,0.97), rgba(8,13,19,0.86))",
         borderBottom: `1px solid ${C.line}`, backdropFilter: "blur(3px)" }}>
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 96, flex: "0 1 auto" }}>
           <div style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden",
             textOverflow: "ellipsis",
             background: `linear-gradient(90deg, ${C.ink}, ${C.gold})`,
@@ -15147,6 +15417,52 @@ export default function PaxMundi() {
           <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1 }}>
             {fmtMesAnio(s.anio, s.dia).toUpperCase()} · TURNO {s.turno}
           </div>
+        </div>
+
+        {/* ── el buscador ──────────────────────────────────────────────
+            Un solo sitio donde escribir el nombre de cualquier cosa. Encuentra
+            comarcas, ciudades, gente, obras, saberes, y también las capas del
+            mapa y los ministerios, que es donde de verdad se pierde el tiempo:
+            un buscador que encuentra ciudades pero no encuentra «dónde se ve el
+            hambre» resuelve la mitad más fácil del problema. */}
+        <div style={{ position: "relative", flex: "0 1 250px", minWidth: 128 }}>
+          <input ref={buscaRef} value={busca}
+            onChange={(ev) => { setBusca(ev.target.value); setBuscaSel(0); }}
+            onKeyDown={(ev) => {
+              if (ev.key === "Escape") { setBusca(""); ev.currentTarget.blur(); return; }
+              if (!hallazgosBusca.length) return;
+              if (ev.key === "ArrowDown") { ev.preventDefault(); setBuscaSel((i) => (i + 1) % hallazgosBusca.length); }
+              else if (ev.key === "ArrowUp") { ev.preventDefault(); setBuscaSel((i) => (i - 1 + hallazgosBusca.length) % hallazgosBusca.length); }
+              else if (ev.key === "Enter") { ev.preventDefault(); irA(hallazgosBusca[buscaSel] || hallazgosBusca[0]); }
+            }}
+            placeholder="buscar en el mundo…   /"
+            style={{ width: "100%", padding: "6px 9px", borderRadius: 7, outline: "none",
+              background: "rgba(0,0,0,0.30)", color: C.ink, fontFamily: serif, fontSize: 12.5,
+              border: `1px solid ${busca.trim() ? C.brass : C.line}` }} />
+          {hallazgosBusca.length > 0 && (
+            <div className="pm-fade" style={{ position: "absolute", top: "calc(100% + 5px)", left: 0,
+              width: "max(330px, 100%)", maxHeight: "70vh", overflowY: "auto", zIndex: 9,
+              background: "rgba(10,16,23,0.985)", border: `1px solid ${C.line}`, borderRadius: 9,
+              boxShadow: "0 14px 34px rgba(0,0,0,0.6)" }}>
+              {hallazgosBusca.map((r, i) => (
+                <button key={r.tipo + r.n + i} onMouseDown={(ev) => { ev.preventDefault(); irA(r); }}
+                  onMouseEnter={() => setBuscaSel(i)}
+                  style={{ display: "flex", alignItems: "baseline", gap: 8, width: "100%",
+                    textAlign: "left", padding: "7px 10px", cursor: "pointer", border: "none",
+                    borderBottom: `1px solid ${C.line}`,
+                    background: i === buscaSel ? "rgba(212,175,55,0.13)" : "transparent",
+                    color: C.ink, fontFamily: serif, fontSize: 13 }}>
+                  <span style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1,
+                    textTransform: "uppercase", color: C.brass, flex: "0 0 58px" }}>{r.tipo}</span>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+                    whiteSpace: "nowrap" }}>{r.n}</span>
+                  <span style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, flex: "0 1 auto",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    maxWidth: 150 }}>{r.pie}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* la velocidad del tiempo: cuánto abarca el turno que viene */}
