@@ -1621,7 +1621,9 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     // lo mismo estar mal que estar dispuesto
     const bravos = radicalizarPops(pops, q, s);
     // y los de fuera van dejando de serlo, despacio y por generaciones
-    const asentados = asimilarPops(bravos, anios);
+    // y con la escuela y el periódico empujando, que es lo que hizo que el
+    // siglo XIX asimilara en dos generaciones lo que antes no se movía en cinco
+    const asentados = asimilarPops(bravos, anios, cohesionDe(q, s));
     return { ...q, pops: asentados, cosecha: +cos.toFixed(3), soc: resumenPops(asentados),
              consumo: consumoDe(asentados) };
   });
@@ -1726,7 +1728,16 @@ function evolucionarMundo(s, dias, rnd, empuje) {
   // se apunta lo que se va a recordar y se olvida lo que ya no pesa.
   const conMemoria = recordar(conAmbiente, s, memAntes);
 
-  return { provincias: conMemoria, reservas: { ...(s.reservas || {}), ...gasto },
+  // ——— y cómo se habla ———
+  // Después de la memoria porque necesita la sociedad del año hecha: quién
+  // sabe leer en cada comarca es la mitad de si el habla se aparta o vuelve.
+  const lengua = (s.lenguas && Object.keys(s.lenguas).length)
+    ? evolucionarLenguas(conMemoria, s, anios, rnd)
+    : (() => { const x = sembrarLenguas(conMemoria, s); return { ...x, hechos: [] }; })();
+  for (const h of lengua.hechos) hechos.push(h);
+
+  return { provincias: lengua.provincias, reservas: { ...(s.reservas || {}), ...gasto },
+           lenguas: lengua.lenguas,
            urnas,
            // De qué población partió cada provincia. Hace falta porque el mundo
            // y el reino resuelven el mismo turno por separado —el terremoto por
@@ -2209,8 +2220,13 @@ function ganasDeIrse(q, p, s) {
 // Cuánto tira un destino de un grupo concreto. Lo general lo dice el atractivo
 // de la provincia; lo particular, si hay de los suyos. Nadie elige un punto en
 // un mapa: se va donde escribió un primo.
-function tiraDe(destino, q, atrac) {
+function tiraDe(destino, q, atrac, origen, reg) {
   let t = atrac;
+  // Y adonde a uno lo entienden. Pesa antes que el jornal: el andaluz se fue a
+  // Cataluña y no a Francia, aunque en Francia se pagara más, y el siciliano a
+  // Milán antes que a Múnich. Se emigra adonde se puede pedir trabajo hablando.
+  if (origen && origen.habla && destino.habla)
+    t *= 0.45 + seEntienden(origen.habla, destino.habla, reg) * 1.15;
   const soc = destino.soc || null;
   if (soc) {
     const gente = soc.gente || 0;
@@ -2278,6 +2294,7 @@ function mudarPops(provs, saldos, s, rnd, dias) {
   });
   if (!salen.length) return conMenos;
 
+  const porId = new Map(provs.map((p) => [p.id, p]));
   const atrac = provs.map(atractivoDe);
   // A cuántos sitios va cada grupo: a pocos. La migración real es a puñados —se
   // va donde escribió un primo— y repartir a cada grupo entre las veintiocho
@@ -2291,7 +2308,8 @@ function mudarPops(provs, saldos, s, rnd, dias) {
       if (provs[i].id === q.de) continue;
       // el tirón general, el de los suyos, y el hueco que hay
       const hueco = 1 + acotar((saldos[i] || 0) / Math.max(1, poblacionPops(provs[i].pops || []) * 0.05), -0.8, 2);
-      pesos.push({ i, w: tiraDe(conMenos[i], q, atrac[i]) * Math.max(0.05, hueco) });
+      pesos.push({ i, w: tiraDe(conMenos[i], q, atrac[i], porId.get(q.de), s.lenguas)
+        * Math.max(0.05, hueco) });
     }
     if (!pesos.length) continue;
     pesos.sort((a, b) => b.w - a.w);
@@ -2309,7 +2327,6 @@ function mudarPops(provs, saldos, s, rnd, dias) {
     }
   }
 
-  const porId = new Map(provs.map((p) => [p.id, p]));
   const anio = s.anio || 1200;
   return conMenos.map((p) => {
     const l = llegan.get(p.id);
@@ -2353,7 +2370,7 @@ function mudarPops(provs, saldos, s, rnd, dias) {
 // parte pequeña cada año, y menos cuanto más numerosos son los suyos: una
 // comunidad grande no necesita asimilarse porque se basta sola, y por eso los
 // barrios duran generaciones y el que llega solo se pierde en una.
-function asimilarPops(pops, anios) {
+function asimilarPops(pops, anios, escuela) {
   if (!pops || pops.length < 2) return pops;
   const gente = poblacionPops(pops);
   if (!gente) return pops;
@@ -2380,7 +2397,14 @@ function asimilarPops(pops, anios) {
     // nunca la religión: se cambia de lengua mucho antes que de santo, y por
     // eso el mapa de credos guarda memoria de migraciones que el de culturas ya
     // olvidó.
-    const tasa = acotar(0.014 * (1 - Math.sqrt(acotar(suyos, 0, 1)) * 0.82), 0.0015, 0.014) * Math.min(3, anios);
+    // Y lo que la escuela y el periódico aceleran, que es de lo que más se
+    // habla y menos se mide: un chico que va a la escuela del estado se
+    // asimila en una generación, y su abuelo no se asimiló en cincuenta años.
+    // Antes de la escuela pública nadie cambiaba de lengua por decreto; después
+    // cambiaron comarcas enteras en dos generaciones.
+    const empuje = 1 + acotar(escuela == null ? 0 : escuela, 0, 1.4) * 2.2;
+    const tasa = acotar(0.014 * (1 - Math.sqrt(acotar(suyos, 0, 1)) * 0.82), 0.0015, 0.014)
+      * empuje * Math.min(3, anios);
     const van = q.n * tasa;
     if (van > 0.004) mueve.push({ q, van });
   }
@@ -2648,6 +2672,318 @@ function memoriaQueViaja(destino, origen, llegan, habia, anio) {
     if (trae > NADA || yaEsta.has(x.i)) m = marcar(m, x.i, anio, trae);
   }
   return m;
+}
+
+// ═══ LENGUAS Y DIALECTOS ════════════════════════════════════
+// Una lengua no es una etiqueta de la provincia: es lo que pasa cuando mucha
+// gente habla parecido durante mucho tiempo, y deja de pasar en cuanto dejan
+// de oírse. Por eso acá las lenguas no están en una tabla: nacen, se parten y
+// se mueren durante la partida.
+//
+// El arco que tiene que salir solo es este, y es el de la historia real:
+// · HASTA LA IMPRENTA, TODO SE PARTE. Un valle sin camino que no oye a nadie
+//   más que a sí mismo cambia de habla en dos o tres siglos, y así Europa
+//   llegó a 1400 con centenares de hablas donde había habido tres lenguas. No
+//   hace falta ninguna regla que diga «aparezca un dialecto»: basta con que el
+//   aislamiento empuje y no haya nada que tire para el otro lado.
+// · DESPUÉS, TODO SE APLANA. La imprenta fija una ortografía, la escuela la
+//   enseña, el periódico la repite todos los días, el ferrocarril mezcla a la
+//   gente y la conscripción mete a todos los muchachos del país en el mismo
+//   cuartel durante tres años. Ninguna de esas cosas se inventó para matar
+//   dialectos y todas los mataron. Entre 1800 y 1950 se perdieron más hablas
+//   en Europa que en los mil años anteriores.
+// · Y LA LENGUA QUE PIERDE NO SE VA SOLA: se la lleva la que tiene la escuela,
+//   el juzgado y el mercado. Un hablante no cambia de lengua porque quiera:
+//   cambia porque a sus hijos les conviene.
+//
+// Lo que se guarda es mínimo a propósito: un registro de lenguas en el reino y,
+// en cada comarca, qué habla y cuánto se ha ido apartando. Meter la lengua
+// dentro del POP habría multiplicado los grupos por tres sin decir nada nuevo:
+// el habla es de la comarca, no del oficio.
+
+// Cuánto se oye una comarca con las demás. Lo contrario es lo que hace los
+// dialectos: la montaña, la distancia y la falta de camino.
+function aislamientoDe(p, provs) {
+  const a = ambDe(p) || {};
+  let x = 0.30;
+  x += acotar((a.altura || 0) / 2200, 0, 1) * 0.30;        // el valle alto oye poco
+  x += acotar((a.pendiente || 0), 0, 1) * 0.22;            // y el que está detrás de una sierra, menos
+  x -= (p.via || 0) > 0 ? 0.10 + (p.via || 0) * 0.07 : 0;  // el camino trae gente que habla
+  x -= p.rio ? 0.10 : 0;                                    // el río, más todavía
+  x -= p.costera ? 0.08 : 0;
+  x -= p.capital ? 0.22 : 0;                                // en la corte se habla como en la corte
+  // y la distancia al centro del reino, que es donde está el que manda
+  const cap = (provs || []).find((q) => q.capital) || (provs || [])[0];
+  if (cap && cap !== p && cap.lat != null && p.lat != null) {
+    const d = Math.hypot((p.lat - cap.lat) * 111, (p.lon - cap.lon) * 85);
+    x += acotar(d / 1400, 0, 1) * 0.26;
+  }
+  return acotar(x, 0.02, 1);
+}
+
+// Y lo que tira para el otro lado: todo lo que hace que mucha gente oiga lo
+// mismo. Los pesos no son de adorno —la imprenta pesa más que la calzada y la
+// escuela obligatoria más que la imprenta— porque así fue.
+const JUNTA_SABER = {
+  "sociales.comunicacion.escritura_alfabetica":   0.06,
+  "sociales.comunicacion.papel":                  0.05,
+  "sociales.comunicacion.imprenta":               0.30,
+  "sociales.comunicacion.prensa_periodica":       0.22,
+  "sociales.comunicacion.alfabetizacion_masiva":  0.30,
+  "sociales.comunicacion.medios_masivos":         0.34,
+  "sociales.linguistica.gramatica_descriptiva":   0.14,
+  "sociales.linguistica.alfabeto_fonetico":       0.08,
+  "sociales.pedagogia.escuela_publica":           0.26,
+  "sociales.pedagogia.educacion_obligatoria":     0.34,
+  "sociales.pedagogia.libro_texto":               0.16,
+  "sociales.pedagogia.curriculo":                 0.12,
+  "ingenierias.transporte.ferrocarril":           0.22,
+  "ingenierias.telecom.telegrafo":                0.10,
+  "ingenierias.telecom.radio":                    0.30,
+  "organizacion.militar_org.conscripcion":        0.18,
+};
+function cohesionDe(p, s) {
+  const sab = new Set(((s || {}).ciencia || {}).sabidos || []);
+  let x = 0;
+  for (const [id, v] of Object.entries(JUNTA_SABER)) if (sab.has(id)) x += v;
+  // Pero de nada sirve la imprenta donde nadie lee. Es la mitad del asunto: la
+  // ortografía se fija en 1500 y las hablas no se aplanan hasta que la gente
+  // va a la escuela, trescientos años después.
+  const lee = acotar(((p.soc || {}).letras) || 0, 0, 1);
+  x *= 0.22 + lee * 1.15;
+  // y la ciudad, que junta a gente de todas partes y les hace hablar igual
+  const urb = p.ciudad && p.poblacion ? acotar(p.ciudad.pob / p.poblacion, 0, 1) : 0;
+  x += urb * 0.10;
+  x += (p.via || 0) * 0.02;
+  return acotar(x, 0, 1.4);
+}
+
+// El habla de una comarca se aparta un poco cada año, o vuelve. Nada más.
+const DERIVA = 0.0042, VUELVE = 0.0075;
+function derivarHabla(p, provs, s, anios) {
+  const h = p.habla; if (!h) return null;
+  const empuja = aislamientoDe(p, provs) * DERIVA;
+  const tira = cohesionDe(p, s) * VUELVE;
+  const d = acotar(h.dist + (empuja - tira) * anios, 0, 1);
+  return Math.abs(d - h.dist) < 0.0004 ? h : { ...h, dist: +d.toFixed(4) };
+}
+
+// ——— cuándo una manera de hablar deja de ser la misma lengua ———
+// No hay una raya: hay dos convenciones, y son las de siempre. A partir de
+// cierta distancia se dice que es un dialecto —se entiende con esfuerzo—; y
+// bastante más allá, y sobre todo con el tiempo suficiente para que nadie
+// recuerde lo otro, se dice que es otra lengua.
+// Y cuajar en lengua aparte es raro: la inmensa mayoría de las hablas que han
+// existido vivieron y murieron siendo dialectos de algo. Con la raya en 0,82 y
+// ciento veinte años, más de la mitad de los dialectos de un reino aislado
+// terminaban siendo lenguas propias, y entonces «lengua propia» no quiere
+// decir nada.
+const ES_DIALECTO = 0.46, ES_LENGUA = 0.92, TARDA = 220;
+
+// Nombrar lo que nace. Una habla nueva se llama por el sitio donde se habla,
+// que es como se llamaron todas: el gascón por Gascuña y el napolitano por
+// Nápoles.
+const SIN_TILDE = (t) => String(t || "").toLowerCase()
+  .replace(/[áàäâ]/g, "a").replace(/[éèëê]/g, "e").replace(/[íìïî]/g, "i")
+  .replace(/[óòöô]/g, "o").replace(/[úùüû]/g, "u").replace(/ç/g, "c");
+const VACIAS = new Set(["el", "la", "los", "las", "de", "del", "y", "et", "valle",
+  "tierra", "reino", "isla", "islas", "alto", "baja", "bajo", "alta", "norte", "sur",
+  "este", "oeste", "nueva", "nuevo", "san", "santa", "saint"]);
+function trozosDe(nombre) {
+  const t = SIN_TILDE(nombre).split(/[\s,()\-–]+/)
+    .filter((x) => x.length >= 3 && !VACIAS.has(x))
+    .sort((a, b) => b.length - a.length);
+  return t.length ? t : [SIN_TILDE(nombre).replace(/[^a-z]/g, "")];
+}
+// De un nombre de comarca, el que la habla. Y si ese nombre ya está tomado por
+// una lengua viva, se prueba con la otra palabra del nombre: «Indre» y
+// «Indre-et-Loire» no pueden dar las dos el indrés.
+function gentilicio(nombre, tomados) {
+  const ts = trozosDe(nombre);
+  for (const t of ts) { const g = terminar(t); if (!tomados || !tomados.has(g)) return g; }
+  return terminar(ts[0]) + " viejo";
+}
+function terminar(n) {
+  if (!n) return "local";
+  if (/aña$/.test(n)) return n.slice(0, -3) + "ón";           // Bretaña → bretón
+  if (/[eoiu]ña$/.test(n)) return n.slice(0, -1) + "és";      // Borgoña → borgoñés
+  if (/ona$/.test(n)) return n.slice(0, -1) + "és";           // Barcelona → barcelonés
+  if (/um$/.test(n)) return n.slice(0, -2).replace(/i$/, "") + "ino";   // Latium → latino
+  if (/[nr]ia$/.test(n)) return n.slice(0, -2) + "o";         // Aquitania → aquitano
+  if (/ia$/.test(n)) return n.slice(0, -1) + "ano";           // Sicilia → siciliano
+  if (/a$/.test(n)) return n.slice(0, -1) + "o";              // Toscana → toscano
+  if (/e$/.test(n)) return n.slice(0, -1) + "és";             // France → francés
+  if (/o$/.test(n)) return n.slice(0, -1) + "ense";           // Ebro → ebrense
+  if (/[nlrsdz]$/.test(n)) return n + "és";                   // Aragón → aragonés
+  return n + "ense";
+}
+const idLengua = (raiz, anio) => `${raiz}-${anio}`;
+
+// El registro del reino: qué lenguas hay, de cuál viene cada una y cuál ya no
+// la habla nadie. Una lengua muerta no se borra —se sabe que existió, y eso
+// es media lingüística histórica.
+function lenguaMadre(reg, id) {
+  let x = reg[id], salto = 0;
+  while (x && x.madre && !x.propia && salto++ < 8) x = reg[x.madre];
+  return x || reg[id] || null;
+}
+// Cuánto se entienden dos comarcas. Es lo que de verdad importa: no cuántas
+// lenguas hay, sino si el de acá entiende al de allá.
+function seEntienden(a, b, reg) {
+  if (!a || !b) return 1;
+  const R = reg || {};
+  if (a.id === b.id) return acotar(1 - Math.abs(a.dist - b.dist) * 0.8, 0.25, 1);
+  const A = R[a.id] || {}, B = R[b.id] || {};
+  // una hija con su madre, o dos hermanas
+  const parientes = A.madre === b.id || B.madre === a.id ? 0.55
+    : A.madre && A.madre === B.madre ? 0.42
+    : (A.familia && A.familia === B.familia) ? 0.14 : 0.02;
+  return acotar(parientes - (a.dist + b.dist) * 0.12, 0.02, 1);
+}
+// Y la del reino entero, pesada por gente: la probabilidad de que dos súbditos
+// tomados al azar se entiendan. Es el número que decide si un reino es un país
+// o una colección de comarcas.
+function seEntiendeElReino(provs, reg) {
+  const ps = (provs || []).filter((p) => p.habla && p.poblacion > 0);
+  if (ps.length < 2) return 1;
+  let suma = 0, peso = 0;
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const w = ps[i].poblacion * ps[j].poblacion;
+    suma += seEntienden(ps[i].habla, ps[j].habla, reg) * w; peso += w;
+  }
+  return peso > 0 ? +(suma / peso).toFixed(4) : 1;
+}
+
+// ——— el año lingüístico ———
+// Se deriva, se parte lo que ya no se entiende, y se apunta lo que muere.
+function evolucionarLenguas(provs, s, anios, rnd) {
+  const anio = s.anio || 1200;
+  const reg = { ...((s.lenguas) || {}) };
+  const hechos = [];
+  let toco = false;
+  let out = (provs || []).map((p) => {
+    if (!p.habla) return p;
+    const h = derivarHabla(p, provs, s, anios);
+    if (h === p.habla) return p;
+    toco = true;
+    return { ...p, habla: h };
+  });
+
+  // ——— lo que se parte ———
+  // Se parte de a una por año como mucho: una lengua no se rompe en cinco
+  // pedazos el mismo martes, y así además la crónica tiene una noticia y no
+  // una lista. Y una comarca que ya tiene habla propia no se parte de sí misma
+  // una y otra vez: lo que hace un dialecto viejo no es tener hijos, es dejar
+  // de ser dialecto. Sin esta distinción salía una cadena absurda de lenguas
+  // con el mismo nombre, cada una hija de la anterior, todas de la misma
+  // comarca y ninguna hablada por nadie más.
+  const candidatas = out
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p.habla && p.habla.dist >= ES_DIALECTO)
+    .sort((a, b) => b.p.habla.dist - a.p.habla.dist);
+  // Se recorre la lista hasta que una pueda: la que más se ha apartado no
+  // siempre es la que tiene algo que hacer —puede ser una que ya cuajó en
+  // lengua propia—, y si se mira solo la primera, un reino entero se queda sin
+  // partirse nunca porque la de arriba no se mueve.
+  //
+  // Y el azar de esto sale de su propia bolsa y no de la del turno. Sacándolo
+  // de la del turno, cada año se gastaba un número aunque no pasara nada con
+  // ninguna lengua, y eso corría el resto del sorteo del mundo: la crónica de
+  // la suciedad de un reino industrial cambiaba por haber añadido una capa que
+  // en ese reino no hacía nada. Una capa nueva no puede mover lo que ya estaba.
+  const suerte = candidatas.length ? dado("habla|" + anio + "|" + candidatas.length)() : 1;
+  for (const { p, i } of (suerte < 0.55 ? candidatas : [])) {
+    const vieja = reg[p.habla.id] || {};
+    const suya = vieja.cuna === p.nombre;
+    if (suya) {
+      // El dialecto de siempre, ya tan apartado y tan viejo que nadie de fuera
+      // lo entiende: deja de ser una manera de hablar la lengua del reino y
+      // pasa a ser una lengua. No nace nada nuevo; lo que había cambia de rango.
+      if (!vieja.propia && p.habla.dist >= ES_LENGUA && anio - (vieja.nacio || anio) > TARDA) {
+        reg[p.habla.id] = { ...vieja, propia: true, cuajo: anio };
+        out = out.map((q, k) => (k === i ? { ...q, habla: { ...q.habla, dist: 0.14 } } : q));
+        toco = true;
+        hechos.push({ t: "lengua_nueva", lengua: vieja.n, prov: p.nombre,
+                      madre: ((reg[vieja.madre] || {}).n) || "la lengua del reino" });
+        break;
+      }
+    } else {
+      const tomados = new Set(Object.entries(reg).filter(([, L]) => !L.muerta).map(([, L]) => L.n));
+      const raiz = gentilicio(p.nombre, tomados);
+      const id = idLengua(raiz, anio);
+      if (!reg[id]) {
+        reg[id] = { n: raiz, familia: vieja.familia || "local", madre: p.habla.id,
+                    nacio: anio, cuna: p.nombre, propia: false };
+        // La hija arranca cerca de la madre: la distancia que traía era con la
+        // madre, y ahora la madre es esta. Lo que se apartó no se pierde, se
+        // convierte en el nombre nuevo.
+        out = out.map((q, k) => (k === i ? { ...q, habla: { id, dist: 0.20, n: raiz } } : q));
+        toco = true;
+        hechos.push({ t: "dialecto", lengua: raiz, prov: p.nombre,
+                      madre: (vieja.n || "la lengua del reino") });
+        break;
+      }
+    }
+  }
+
+  // ——— y lo que se junta otra vez ———
+  // El otro medio siglo de la historia, el que casi nunca se cuenta: la mayor
+  // parte de las hablas que existieron no se convirtieron en lenguas, se
+  // deshicieron. Un dialecto cuya comarca vuelve a oír todos los días la lengua
+  // de la escuela y del periódico deja de apartarse, se va acercando y un día
+  // ya no es nada: sus nietos hablan lo de la capital con acento. Eso no es una
+  // lengua que evoluciona, es una lengua que se muere, y de ahí salen casi
+  // todas las lenguas muertas de los últimos dos siglos.
+  out = out.map((p) => {
+    const L = p.habla && reg[p.habla.id];
+    if (!L || L.propia || !L.madre) return p;
+    const M = reg[L.madre];
+    if (!M || M.muerta) return p;
+    if (p.habla.dist > 0.05) return p;
+    return { ...p, habla: { id: L.madre, dist: acotar(0.10 + p.habla.dist, 0, 1), n: M.n } };
+  });
+
+  // Y las que ya no habla nadie. No se borran del registro: se les pone la
+  // fecha, que es lo que hace un cementerio de lenguas.
+  //
+  // «Nadie» quiere decir ninguna comarca, y no ninguna comarca de más de
+  // veinte almas. Con el suelo de población puesto pasaba esto: una comarca
+  // que se vaciaba un año enterraba su lengua, volvía a llenarse al siguiente y
+  // seguía hablándola, y quedaba una lengua muerta con hablantes. Un cementerio
+  // así no sirve para nada.
+  const vivas = new Set(out.filter((p) => p.habla).map((p) => p.habla.id));
+  for (const [id, L] of Object.entries(reg)) {
+    if (vivas.has(id)) { if (L.muerta) reg[id] = { ...L, muerta: undefined }; continue; }
+    if (L.muerta) continue;
+    // no se declara muerta la que acaba de nacer ni la del primer año
+    if (anio - (L.nacio || anio) < 2) continue;
+    reg[id] = { ...L, muerta: anio };
+    hechos.push({ t: "lengua_muerta", lengua: L.n, prov: L.cuna || null,
+                  vivio: anio - (L.nacio || anio) });
+  }
+  return { provincias: toco ? out : provs, lenguas: reg, hechos };
+}
+
+// ——— quién habla qué al empezar ———
+// Cada comarca habla la lengua de su gente. No hay dialectos todavía: los que
+// haya, saldrán de jugar.
+function sembrarLenguas(provs, s) {
+  const reg = {};
+  const out = (provs || []).map((p) => {
+    const cul = (p.soc || {}).culturaMayor || culturaDe(p.pais || s.region).n;
+    const fam = ((p.pops || []).find((q) => q.cultura === cul) || {}).familia
+      || culturaDe(p.pais || s.region).familia;
+    const id = cul;
+    // La lengua con la que se empieza no tiene cuna: no nació en una comarca,
+    // se hablaba ya en todas. Ponerle una —la primera de la lista— hacía que
+    // esa comarca no pudiera partirse nunca, y como era además la que más se
+    // apartaba, tapaba a todas las demás: en cuatro siglos no nacía un solo
+    // dialecto después del primer puñado.
+    if (!reg[id]) reg[id] = { n: cul, familia: fam, madre: null, nacio: s.anio || 1200,
+                              cuna: null, propia: true };
+    return { ...p, habla: { id, dist: 0, n: cul } };
+  });
+  return { provincias: out, lenguas: reg };
 }
 
 // El reparto del turno: primero se crece donde hay sitio, después se mudan los
@@ -4479,6 +4815,16 @@ function legitimidad(s) {
   const credo = P.credo, credos = P.credos || {};
   const gente = P.gente || 0;
   if (credo && gente > 0) v += acotar((credos[credo] || 0) / gente - 0.6, -0.25, 0.15);
+  // Y que uno entienda al de la comarca de al lado. Es la pieza que explica por
+  // qué la conscripción francesa funcionó y la austríaca no: un país donde dos
+  // súbditos cualesquiera se entienden puede pedirle a un labrador que muera
+  // por gente que no ha visto nunca, y uno donde no se entienden solo puede
+  // pedírselo a los de su valle. La nación no es la lengua, pero se hizo con
+  // ella, y por eso los estados del XIX se pusieron a fabricarla en la escuela.
+  if ((s.provincias || []).some((p) => p.habla)) {
+    const uno = seEntiendeElReino(s.provincias, s.lenguas);
+    v += (uno - 0.72) * 0.42;
+  }
   return acotar(v, 0.05, 1);
 }
 
@@ -5696,6 +6042,12 @@ function poblarAlEmpezar(provincias, s) {
       soc: resumenPops(pops), consumo: consumoDe(pops) };
   });
 }
+// Lo mismo, pero además con lo que se habla en cada sitio. Va aparte porque la
+// lengua necesita saber ya quién vive dónde, y devuelve dos cosas: las
+// provincias y el registro de lenguas del reino.
+function poblarYHablar(provincias, s) {
+  return sembrarLenguas(poblarAlEmpezar(provincias, s), s);
+}
 
 // ═══ VISTAS DEL MAPA ═════════════════════════════════════════
 // Un mapa político dice una sola cosa: quién manda dónde. Todo lo demás que la
@@ -5897,6 +6249,21 @@ const VISTAS = [
       : v <= 0.18 ? "sin cuentas pendientes" : v < 0.55 ? "arrastra algo" : "no perdona"),
     mio: (m) => { const x = m.mem; return x && x.hay > 0.02 ? +(x.rencor - x.arraigo).toFixed(3) : 0; },
     pie: "lo que cada comarca arrastra de su historia" },
+  // Y el mapa de lo que se habla. Es el único categórico que no sale de una
+  // tabla: las hablas nacen y se mueren durante la partida, así que el color
+  // sale del nombre. Lo que enseña no es cuántas lenguas hay sino dónde están
+  // las fronteras, que casi nunca coinciden con las del reino.
+  { id: "lenguas", n: "Lo que se habla", ambito: "reino", clases: "lengua",
+    pie: "qué se habla en cada comarca" },
+  // Y cuánto se ha apartado cada comarca de la lengua con la que empezó. Es el
+  // mapa que se adelanta al otro: enseña dónde va a haber una lengua nueva
+  // antes de que la haya.
+  { id: "deriva", n: "Cuánto se apartó el habla", ambito: "reino", rampa: "gente",
+    cortes: [0.06, 0.16, 0.30, 0.46, 0.70],
+    fmt: (v) => (v < 0.06 ? "se habla como en la corte" : v < 0.30 ? "tiene su acento"
+      : v < 0.46 ? "cuesta entenderlos" : v < 0.70 ? "hablan lo suyo" : "ya es otra lengua"),
+    mio: (m) => (m.habla ? m.habla.dist : null),
+    pie: "cuánto se ha apartado el habla de cada comarca" },
 ];
 // Un color por estamento, agrupados por lo que son: la tierra en verdes, el
 // taller y la fábrica en ocres, el comercio y la letra en azules, y arriba el
@@ -5966,8 +6333,21 @@ function colorMio(V, m, cortes) {
   if (V.clases === "clase") return CLASE_COL[(m.soc || {}).claseMayor] || APAGADO;
   if (V.clases === "credo") return CREDO_COL[(m.soc || {}).credoMayor] || APAGADO;
   if (V.clases === "partido") { const x = PARTIDO_IDX[(m.urna || {}).gana]; return x ? x.col : APAGADO; }
+  if (V.clases === "lengua") return m.habla ? colorDeLengua(m.habla.id) : APAGADO;
   const t = tramoDe(valorMio(V, m), cortes || V.cortes);
   return t < 0 ? APAGADO : RAMPAS[V.rampa][t];
+}
+// Las lenguas no caben en una tabla de colores: nacen durante la partida y no
+// se sabe cuántas van a ser. El color sale del nombre, así que el aquitano es
+// del mismo color en todas las partidas y dos hablas distintas casi nunca
+// coinciden. Se les da mucho tono y poca variación de brillo: lo que el mapa
+// tiene que enseñar es dónde está la frontera.
+function colorDeLengua(id) {
+  const h = Math.abs(hash(String(id || "")));
+  const tono = h % 360;
+  const sat = 42 + (h >> 9) % 26;
+  const luz = 46 + (h >> 17) % 16;
+  return `hsl(${tono} ${sat}% ${luz}%)`;
 }
 // Lo que la vista mide en esa provincia. Las del mundo se leen del ambiente
 // vivo —el de hoy, con el clima ya derivado— y no del estático: si el mapa de
@@ -6826,6 +7206,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       return c ? c.n : null; }
     if (V.clases === "partido") { const x = PARTIDO_IDX[((mio || {}).urna || {}).gana];
       return x ? `${x.corto}, ${Math.round((mio.urna.parte || 0) * 100)}%` : "todavía no se vota aquí"; }
+    if (V.clases === "lengua") { const h = (mio || {}).habla;
+      return h ? h.n + (h.dist > 0.16 ? ", muy cerrado" : "") : null; }
     const v = mio ? valorMio(V, mio) : amb && V.val ? V.val(amb) : null;
     return v == null || !Number.isFinite(v) ? null : V.fmt(v);
   };
@@ -7330,6 +7712,23 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     leen {Math.round((mia.soc.letras || 0) * 100)} de cada 100
                     {credo ? ` · ${credo.n}` : ""}
                   </div>
+                  {/* Lo que se habla acá. No es un adorno: en una comarca que
+                      lleva tres siglos sin oír a nadie, el recaudador necesita
+                      intérprete y el recluta no entiende la orden. */}
+                  {mia.habla && (
+                    <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.4 }}>
+                      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2,
+                        marginRight: 5, background: colorDeLengua(mia.habla.id) }} />
+                      se habla {mia.habla.n}
+                      {mia.habla.dist > 0.06 && (
+                        <span style={{ color: mia.habla.dist > 0.46 ? "#D9534F" : C.muted }}>
+                          {mia.habla.dist > 0.70 ? ", y ya no se parece a lo de la capital"
+                            : mia.habla.dist > 0.46 ? ", tan cerrado que cuesta entenderlos"
+                            : mia.habla.dist > 0.16 ? ", con acento muy suyo" : ", con su acento"}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {/* y si hay gente de fuera, decirlo: es lo que convierte una
                       comarca en otra sin que cambie de tamaño */}
                   {(mia.soc.forasteros || 0) > 0.02 && (() => {
@@ -7614,6 +8013,32 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     </div>
                   );
                 });
+              })()}
+            </div>
+          )}
+          {V.clases === "lengua" && (
+            <div style={{ margin: "5px 0 2px" }}>
+              {(() => {
+                const cuenta = new Map();
+                for (const m of mias) if (m.habla) {
+                  const y = cuenta.get(m.habla.id) || { n: 0, nom: m.habla.n, lejos: 0 };
+                  y.n++; y.lejos = Math.max(y.lejos, m.habla.dist || 0);
+                  cuenta.set(m.habla.id, y);
+                }
+                if (!cuenta.size) return (
+                  <div style={{ fontSize: 10, color: C.muted, opacity: 0.75 }}>
+                    todavía no hay gente contada; pasá un turno
+                  </div>
+                );
+                return [...cuenta.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 10).map(([k, y]) => (
+                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11,
+                    color: C.muted, padding: "1px 0" }}>
+                    <span style={{ width: 12, height: 12, flex: "0 0 12px", borderRadius: 3,
+                      background: colorDeLengua(k), border: "1px solid rgba(0,0,0,0.5)" }} />
+                    {y.nom}
+                    <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 9.5 }}>{y.n}</span>
+                  </div>
+                ));
               })()}
             </div>
           )}
@@ -10821,6 +11246,7 @@ function aplicarEfectos(n, ef, rnd) {
     });
     e.reservas = ef.vivo.reservas;
     e.mundo = ef.vivo.mundo;
+    if (ef.vivo.lenguas) e.lenguas = ef.vivo.lenguas;
     if (ef.vivo.pops) e.pops = sociedadDelReino(e.provincias, n.anio, (n.gobierno || {}).forma);
     // ——— y lo que sale de las urnas ———
     // Un gobierno elegido no es un adorno: manda, y por eso los estamentos que
@@ -12272,6 +12698,34 @@ function aplicarVecinos(vecs, cambios) {
 // arma con los dos o tres que más pesan, así que el texto sigue a la partida
 // en vez de rellenar.
 const INFORMES = [
+  // ——— lo que se habla ———
+  // Nadie escribió nunca la crónica del año en que apareció una lengua, porque
+  // no hay tal año: hay un siglo en que los de allá empezaron a costar de
+  // entender y otro en que ya nadie los entendía. Lo que sí se escribió, y
+  // mucho, es la queja: el obispo que no puede confesar, el juez que necesita
+  // intérprete a cuarenta leguas de la corte. Eso es lo que cuenta el cronista,
+  // porque es lo que se ve.
+  // El peso va medido contra los demás observadores del mundo —un desastre
+  // vale cuarenta— y bajo: una lengua que se parte es noticia el año en que se
+  // nota, no portada, y a nueve le quitaba el sitio al humo y al agua sucia.
+  { id: "habla", peso: (s, c) => (((c.vivo || {}).hechos || [])
+      .some((h) => h.t === "dialecto" || h.t === "lengua_nueva" || h.t === "lengua_muerta") ? 4.5 : 0),
+    huecos: (s, c) => { const h = ((c.vivo || {}).hechos || [])
+        .find((x) => x.t === "dialecto" || x.t === "lengua_nueva" || x.t === "lengua_muerta") || {};
+      return { donde: { nombre: h.prov || "las comarcas de arriba" }, vec: h.lengua || "lo de allá",
+               obra: h.madre || "la lengua del reino", n: h.vivio || 0, cual: h.t }; },
+    porCual: {
+      dialecto: ["En {donde} hablan ya de otra manera: los cobradores vuelven diciendo que no se les entiende, y en la corte lo llaman {vec} para no llamarlo nada peor",
+        "El párroco de {donde} pide que le manden a alguien de allí: dice que confiesa a gente cuya lengua no es la suya[, y que eso no puede ser]",
+        "Se hace constar que en {donde} la gente ha dado en hablar {vec}, que dicen que es {obra} pero (no lo parece|hay que oírlo dos veces|no hay quien lo escriba)"],
+      lengua_nueva: ["Ya nadie discute que el {vec} de {donde} no es {obra}: es otra lengua, y hace generaciones que lo es aunque en los papeles siguiera sin serlo",
+        "Un letrado de la corte escribe que el {vec} tiene sus reglas y no las de {obra}. (Lo dice como quien descubre algo|Se lo discuten, pero no puede desdecirse|En {donde} hace siglos que lo saben)",
+        "Se manda intérprete a {donde}: el {vec} ya no se entiende desde acá[, y desde allá tampoco se entiende lo de acá]"],
+      lengua_muerta: ["Ha muerto el último que hablaba {vec} en {donde}, y con él {n} años de una manera de decir las cosas. (Nadie lo anotó ese día|Sus nietos hablan lo de la capital|Quedan cuatro palabras en los nombres de los campos)",
+        "En {donde} ya no queda quien hable {vec}: los hijos aprendieron en la escuela y los padres se murieron. Duró {n} años",
+        "Se da por perdido el {vec} de {donde}. (No lo mató nadie: dejó de convenir|Los últimos lo hablaban en casa y con vergüenza|Se conserva en un cuaderno que nadie va a leer)"] },
+    fr: ["Algo cambia en la manera de hablar de {donde}"] },
+
   // ——— lo que la comarca no olvida ———
   // El observador que mira hacia atrás. No cuenta lo que pasó este año sino lo
   // que sigue contándose en una comarca desde hace generaciones, y es lo único
@@ -12720,7 +13174,13 @@ function narrarSinOrden(s, c, rnd) {
   // Los observadores que tienen algo que decir, ordenados por urgencia y con
   // algo de azar para que dos años parecidos no den la misma crónica.
   const candidatos = INFORMES
-    .map((i) => ({ i, p: i.peso(s, c) * (0.6 + rnd() * 0.8) }))
+    // El desempate de cada observador sale de su propia bolsa y no de la del
+    // turno. Sacándolo de la del turno pasaba esto: añadir un observador nuevo
+    // a la lista —aunque no tuviera nada que decir ese año— gastaba un número
+    // más y corría todo el sorteo posterior, así que una capa nueva cambiaba la
+    // crónica de la suciedad y la de los hallazgos de partidas que no tenían
+    // nada que ver con ella. Cada uno tira su dado y nadie mueve el de nadie.
+    .map((i) => ({ i, p: i.peso(s, c) * (0.6 + dado("inf|" + i.id + "|" + s.anio + "|" + s.turno)() * 0.8) }))
     .filter((x) => x.p > 0)
     .sort((a, b) => b.p - a.p);
 
@@ -13007,10 +13467,11 @@ export default function PaxMundi() {
       // La gente del primer día: repartida por lo que aguanta cada tierra, y
       // con su reparto social hecho. Sin esto el mapa arranca en blanco y el
       // jugador decide su primer turno sin saber a quién gobierna.
-      const provsIni = poblarAlEmpezar(
+      const arranque = poblarYHablar(
         generarProvincias({ sabidos: semillaEpoca(init.anio).sabidos }, pais || init.nacion?.nombre || era, paisSel),
         { anio: init.anio, poblacion: pobIni, ciencia: cienciaIni, stats: statsIni,
           region: paisSel, gobierno: { forma: formaGob } });
+      const provsIni = arranque.provincias;
       setState({
         era, anio: init.anio, dia: 0, turno: 1, nacion: init.nacion,
         presupuesto: { ...PRESUPUESTO_INICIAL },
@@ -13025,6 +13486,7 @@ export default function PaxMundi() {
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
+        lenguas: arranque.lenguas,
         gobierno: { forma: formaGob, miembros },
         stats: statsIni,
         vecinos: init.vecinos || [],
