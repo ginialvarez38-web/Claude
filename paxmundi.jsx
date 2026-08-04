@@ -18,7 +18,32 @@ const C = {
   cyan: "#45C4B0",
   violet: "#B06FD8",
   gold: "#E3B341",
+  // El naranja del semáforo. Faltaba porque hasta ahora los avisos eran de dos
+  // colores —va bien o va mal— y entre «requiere atención» y «situación
+  // crítica» hay un escalón que el jugador necesita ver antes de que sea tarde.
+  orange: "#E08A3C",
 };
+
+// ═══ EL SEMÁFORO ════════════════════════════════════════════
+// Un solo código de color para todo el juego. Si el verde quiere decir una cosa
+// en la ficha de una provincia y otra en el panel de economía, el jugador tiene
+// que leer cada número dos veces: primero el número y después de qué color es
+// aquí. Con un código único, el color se lee antes que el número y se lee de un
+// vistazo, que es de lo que se trata.
+const NIVELES = ["grave", "mal", "ojo", "chance", "bien"];
+const SEMAFORO = { bien: C.green, chance: C.blue, ojo: C.gold, mal: C.orange, grave: C.red };
+const DICE = { bien: "excelente", chance: "oportunidad", ojo: "requiere atención",
+               mal: "problema importante", grave: "situación crítica" };
+// De un número a un nivel. `cortes` son los cuatro umbrales de peor a mejor;
+// si `alReves`, más alto es peor (deuda, contaminación, descontento).
+function nivelDe(v, cortes, alReves) {
+  if (v == null || !Number.isFinite(v)) return null;
+  const c = alReves ? cortes.slice().reverse() : cortes;
+  let n = 0;
+  for (const x of c) { if (alReves ? v <= x : v >= x) n++; }
+  return NIVELES[acotar(n, 0, 4)];
+}
+const colorNivel = (n) => SEMAFORO[n] || C.muted;
 
 const STAT_META = {
   economia: { label: "Economía", icon: "◆", color: "#E3B341" },
@@ -13372,6 +13397,152 @@ const diaDelMes = (d) => Math.max(0, Math.min(364, d || 0)) - ACUM_MES[mesDe(d)]
 const fmtFecha = (a, d) => `${diaDelMes(d)} de ${MESES[mesDe(d)]} de ${fmtAnio(a)}`;
 const fmtMesAnio = (a, d) => `${MESES[mesDe(d)]} de ${fmtAnio(a)}`;
 
+// ═══ LA PANTALLA ════════════════════════════════════════════
+// El mapa es la interfaz. No hay pantallas separadas para la economía, el
+// ejército o las ciudades: hay un mundo, y encima de él cuatro franjas que
+// nunca lo tapan del todo —arriba el estado del reino, abajo los ministerios,
+// a la izquierda lo que reclama atención y a la derecha lo que se está
+// mirando—. Nada de esto abre una escena nueva ni saca al jugador del mundo.
+
+// Los ministerios de la barra de abajo. Cada uno despliega un panel lateral;
+// ninguno abre una pantalla.
+const MANDOS = [
+  { id: "consejo", n: "Consejo", ico: "⚑", col: "gold" },
+  { id: "cronica", n: "Crónica", ico: "📜", col: "brass" },
+  { id: "gob", n: "Gobierno", ico: "👑", col: "red" },
+  { id: "eco", n: "Economía", ico: "⚜", col: "gold" },
+  { id: "prov", n: "Tierras", ico: "◈", col: "green" },
+  { id: "proy", n: "Obras", ico: "🏗", col: "gold" },
+  { id: "ciencia", n: "Ciencias", ico: "⚗", col: "cyan" },
+  { id: "edu", n: "Educación", ico: "🎓", col: "violet" },
+  { id: "sedes", n: "Sedes", ico: "🏛", col: "blue" },
+  { id: "ejercito", n: "Ejército", ico: "⚔", col: "red" },
+];
+const MANDO_IDX = Object.fromEntries(MANDOS.map((x) => [x.id, x]));
+// Las dos franjas fijas. Todo lo demás se ajusta a ellas, así que el mapa sabe
+// dónde no puede poner su propia botonera y los paneles saben dónde empiezan.
+const ALTO_CAB = 54, ALTO_PIE = 52;
+
+// La marca que lleva cada ministerio en la barra de abajo: un número si hay
+// algo en marcha, un signo si hay algo que mirar. Es lo que evita tener que
+// abrir los diez para saber cuál pide algo.
+const ALERTA_MANDO = {
+  consejo: (s) => (s.dilema ? { nivel: "grave", txt: "!" } : null),
+  eco: (s, x) => (x.netoPres < 0 ? { nivel: "mal", txt: "!" } : null),
+  proy: (s, x) => (x.proyActivos ? { nivel: "chance", txt: String(x.proyActivos) } : null),
+  sedes: (s, x) => (x.invActivas ? { nivel: "chance", txt: String(x.invActivas) } : null),
+  ciencia: (s) => (!(s.ciencia || {}).foco ? { nivel: "ojo", txt: "?" } : null),
+  ejercito: (s) => (s.guerra ? { nivel: "grave", txt: "⚔" } : null),
+  gob: (s) => ((s.stats || {}).estabilidad < 30 ? { nivel: "mal", txt: "!" } : null),
+  prov: (s) => ((s.provincias || []).some((p) => (p.lealtad == null ? 60 : p.lealtad) < 30)
+    ? { nivel: "mal", txt: "!" } : null),
+};
+
+// ——— la barra de arriba ———
+// Lo que hay que poder leer sin buscarlo y sin abrir nada. Cada indicador trae
+// su nivel ya calculado, así que el color sale del semáforo de siempre y no de
+// una regla distinta en cada sitio.
+function mandoDelReino(s, x) {
+  const st = s.stats || {};
+  const gasto = Math.round((x.mant || 0) + (x.servicio || 0));
+  const pob = poblacionTotal(s.provincias) || s.poblacion || 0;
+  const oro = Math.floor((s.edu || {}).oro || 0);
+  const deuda = Math.round(s.deuda || 0);
+  return [
+    { id: "tesoro", n: "tesoro", ico: "⚜", v: fmtNum(oro),
+      nivel: nivelDe(oro - deuda * 0.5, [-40, 0, 120, 400]),
+      pie: deuda > 0 ? `debe ${fmtNum(deuda)}` : "sin deudas" },
+    { id: "ingreso", n: "ingresos", ico: "↑", v: fmtNum(Math.round(x.bruto || 0)),
+      nivel: nivelDe((x.bruto || 0) - gasto, [-30, 0, 25, 80]), pie: "al año" },
+    { id: "gasto", n: "gastos", ico: "↓", v: fmtNum(gasto),
+      nivel: nivelDe(gasto / Math.max(1, x.bruto || 1), [1.05, 0.9, 0.7, 0.5], true), pie: "al año" },
+    { id: "pueblo", n: "población", ico: "☗", v: fmtPob(pob),
+      nivel: nivelDe(x.pobTecho == null ? 0.5 : x.pobTecho, [1.0, 0.95, 0.85, 0.6], true),
+      pie: x.pobTecho > 0.95 ? "no cabe más gente" : "de lo que da la tierra" },
+    { id: "saber", n: "investigación", ico: "⚗", v: fmtNum(Math.floor((s.ciencia || {}).pi || 0)),
+      nivel: nivelDe(x.piT || 0, [1, 4, 10, 22]), pie: `+${Math.round(x.piT || 0)} al año` },
+    { id: "prestigio", n: "prestigio", ico: "✦", v: Math.round(st.prestigio || 0),
+      nivel: nivelDe(st.prestigio, [20, 40, 60, 78]), pie: "cómo te miran" },
+    { id: "orden", n: "estabilidad", ico: "⚖", v: Math.round(st.estabilidad || 0),
+      nivel: nivelDe(st.estabilidad, [22, 40, 58, 75]), pie: "cómo te obedecen" },
+    { id: "trato", n: "diplomacia", ico: "❋", v: Math.round(st.diplomacia || 0),
+      nivel: nivelDe(st.diplomacia, [20, 38, 56, 74]), pie: "cuánto pesás fuera" },
+  ];
+}
+const fmtNum = (n) => String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+
+// ——— la columna de la izquierda ———
+// Todo lo que reclama atención aparece acá y en ningún otro sitio. Nada
+// interrumpe la partida con una ventana encima: el que gobierna decide qué
+// mira y cuándo, y lo que no mire sigue estando cuando vuelva.
+//
+// Los avisos salen del estado y no de una cola de mensajes, así que no se
+// pierden, no se duplican y no hace falta acordarse de emitirlos: si el reino
+// tiene hambre, el aviso de hambre está; cuando deja de tenerla, se va solo.
+function avisosDelReino(s, x) {
+  const A = [];
+  const anio = s.anio || 0;
+  const provs = s.provincias || [];
+  const pon = (id, nivel, ico, tit, txt, ir) => A.push({ id, nivel, ico, tit, txt, ir });
+
+  if (s.dilema) pon("dilema", "grave", "⚑", s.dilema.titulo,
+    "El consejo aguarda tu decisión. El tiempo no corre hasta que resuelvas.", "consejo");
+  if (s.guerra) pon("guerra", "mal", "⚔", `Guerra con ${s.guerra.vecino}`,
+    `El frente está en ${s.guerra.frente > 10 ? "avance" : s.guerra.frente < -10 ? "retroceso" : "tablas"}.`, "ejercito");
+
+  // el hambre, que es el aviso que no puede tardar
+  const conHambre = provs.filter((p) => ((p.consumo || {}).hambrientos || 0) > 0.08);
+  if (conHambre.length) {
+    const peor = conHambre.reduce((a, b) => (b.consumo.hambrientos > a.consumo.hambrientos ? b : a));
+    pon("hambre", peor.consumo.hambrientos > 0.25 ? "grave" : "mal", "☠",
+      conHambre.length > 1 ? `Hambre en ${conHambre.length} comarcas` : `Hambre en ${peor.nombre}`,
+      `En ${peor.nombre} no llega a comer el ${Math.round(peor.consumo.hambrientos * 100)}%.`, "prov");
+  }
+  // quien se levantó, y quien está a punto
+  const alzadas = provs.filter((p) => p.alzada && anio - p.alzada.anio <= 1);
+  if (alzadas.length) pon("alzada", "grave", "✊",
+    alzadas.length > 1 ? `${alzadas.length} comarcas alzadas` : `${alzadas[0].nombre} se levanta`,
+    `${(REVUELTAS.find((r) => r.id === alzadas[0].alzada.id) || { n: "revuelta" }).n} en ${alzadas[0].nombre}.`, "prov");
+  else {
+    const brasa = provs.filter((p) => furiaProvincia(p) > 46);
+    if (brasa.length) pon("furia", "ojo", "✊", `Malestar en ${brasa.length === 1 ? brasa[0].nombre : brasa.length + " comarcas"}`,
+      "Se junta gente y se habla en voz alta. Todavía no ha pasado nada.", "prov");
+  }
+  const desleales = provs.filter((p) => (p.lealtad == null ? 60 : p.lealtad) < 28);
+  if (desleales.length) pon("lealtad", "mal", "◈",
+    `${desleales.length === 1 ? desleales[0].nombre + " no obedece" : desleales.length + " comarcas no obedecen"}`,
+    "La corona manda y allí se hace lo que se quiere.", "prov");
+
+  // la hacienda
+  const neto = (x.bruto || 0) - (x.mant || 0) - (x.servicio || 0);
+  if (((s.edu || {}).oro || 0) < 25 && neto < 0)
+    pon("quiebra", "grave", "⚜", "El tesoro se vacía",
+      "No hay con qué pagar lo que ya está comprometido.", "eco");
+  else if (neto < 0) pon("deficit", "ojo", "⚜", "Se gasta más de lo que entra",
+    `Faltan ${fmtNum(Math.abs(Math.round(neto)))} al año.`, "eco");
+  if ((s.deuda || 0) > (x.bruto || 1) * 2.5)
+    pon("deuda", "mal", "⚜", "La deuda pesa demasiado", "El servicio se come el presupuesto.", "eco");
+
+  // lo bueno también es noticia: si solo se avisa de lo malo, el panel es una
+  // lista de reproches y el jugador deja de mirarlo
+  if (s.gobierno && s.gobierno.votado === anio)
+    pon("urnas", "chance", "🗳", "Hubo elecciones",
+      `Gobierna ${(PARTIDO_IDX[s.gobierno.partido] || { n: "el que ganó" }).n}.`, "gob");
+  const obras = (s.proyectos || []).filter((p) => p.estado === "completado" && p.fin === anio);
+  if (obras.length) pon("obra", "bien", "🏗",
+    obras.length > 1 ? `${obras.length} obras terminadas` : `${obras[0].nombre}, terminado`,
+    "Ya rinde lo que prometía.", "proy");
+  const sinRumbo = !(s.ciencia || {}).foco && (x.piT || 0) > 2;
+  if (sinRumbo) pon("foco", "ojo", "⚗", "El saber va sin rumbo",
+    "Nadie ha dicho a los sabios qué buscar.", "ciencia");
+  if (x.libres != null && x.libres <= 0 && !s.guerra)
+    pon("brazos", "ojo", "⚔", "No quedan brazos para las armas",
+      "Todo el que puede servir ya sirve.", "ejercito");
+
+  // primero lo que más urge, y a igual urgencia lo que llegó antes
+  return A.sort((a, b) => NIVELES.indexOf(a.nivel) - NIVELES.indexOf(b.nivel));
+}
+
 export default function PaxMundi() {
   const [fase, setFase] = useState("setup");
   const [era, setEra] = useState(null);
@@ -13389,7 +13560,9 @@ export default function PaxMundi() {
   const [error, setError] = useState(null);
   const [pendiente, setPendiente] = useState(null);
   const [fin, setFin] = useState(null);
-  const [tab, setTab] = useState("cronica");
+  // Qué franja está abierta a la derecha. `null` es el estado de reposo: el
+  // mundo entero y nada encima.
+  const [tab, setTab] = useState("consejo");
   // Proyectos
   const [catProy, setCatProy] = useState(null);
   const [descProy, setDescProy] = useState("");
@@ -13410,7 +13583,7 @@ export default function PaxMundi() {
   const [confirmarDev, setConfirmarDev] = useState(false);
   const [facAbierta, setFacAbierta] = useState(null);
   const [provSel, setProvSel] = useState(null);
-  const [mapaAbierto, setMapaAbierto] = useState(false);
+  const [avisosAbiertos, setAvisosAbiertos] = useState(true);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
   // vuelo, pero cuesta, tarda y necesita conexión.
   const [usarIA, setUsarIA] = useState(false);
@@ -13430,6 +13603,30 @@ export default function PaxMundi() {
   useEffect(() => {
     if (cronicaRef.current) cronicaRef.current.scrollTop = cronicaRef.current.scrollHeight;
   }, [state?.cronica?.length, pensando, tab]);
+
+  // ——— el teclado ———
+  // Toda acción tiene que poder hacerse sin ratón. Esc devuelve al mundo, los
+  // números abren los ministerios por su orden en la barra, y no se pisan con
+  // nada de lo que el jugador esté escribiendo: si está redactando una orden,
+  // el teclado es suyo.
+  useEffect(() => {
+    const oye = (ev) => {
+      const foco = document.activeElement;
+      const escribiendo = foco && (foco.tagName === "INPUT" || foco.tagName === "TEXTAREA"
+        || foco.isContentEditable);
+      if (ev.key === "Escape") { if (!escribiendo) { setTab(null); setProvSel(null); } return; }
+      if (escribiendo || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if (/^[1-9]$/.test(ev.key)) {
+        const m = MANDOS[Number(ev.key) - 1];
+        if (m) { ev.preventDefault(); setTab((t) => (t === m.id ? null : m.id)); }
+      } else if (ev.key === "0") {
+        const m = MANDOS[9];
+        if (m) { ev.preventDefault(); setTab((t) => (t === m.id ? null : m.id)); }
+      }
+    };
+    window.addEventListener("keydown", oye);
+    return () => window.removeEventListener("keydown", oye);
+  }, []);
 
   async function iniciar() {
     if (!era || !pais.trim() || !formaGob) return;
@@ -14034,7 +14231,10 @@ export default function PaxMundi() {
           }
           const efectosTxt = Object.entries(p.efectos).map(([k, v]) => `${STAT_META[k]?.label || k} +${v}`).join(", ");
           entradasProy.push({ anio: anioNuevo, dia: diaNuevo, tipo: "proyecto", texto: `¡Proyecto nacional completado: "${p.nombre}"! (${efectosTxt})` });
-          return { ...p, progreso: 100, estado: "completado", bitacora: [...bit, { anio: anioNuevo, dia: diaNuevo, texto: "✦ El proyecto se inaugura ante el júbilo de la nación." }] };
+          // se apunta el año: es lo que permite avisar de la obra terminada sin
+          // llevar una cola de mensajes aparte
+          return { ...p, progreso: 100, estado: "completado", fin: anioNuevo,
+            bitacora: [...bit, { anio: anioNuevo, dia: diaNuevo, texto: "✦ El proyecto se inaugura ante el júbilo de la nación." }] };
         }
         return { ...p, progreso: prog, bitacora: bit };
       });
@@ -14900,10 +15100,24 @@ export default function PaxMundi() {
   // reino a distancia de su poder, pero apoyándolos en tierra de verdad
   const panelStyle = { background: "rgba(17,24,33,0.93)", border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.35)" };
 
+  // ——— lo que la pantalla necesita saber ———
+  const techoOcupado = (() => {
+    const t = demografiaDe(s.ciencia).techo || 1;
+    return acotar((poblacionTotal(s.provincias) || s.poblacion || 0) / t, 0, 2);
+  })();
+  const avisos = avisosDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
+    piT, libres: reservaHombres(s.poblacion, s.ejercito, s.bajasRecientes, s).libres });
+
   return (
-    <div style={{ ...FONDO, fontFamily: serif, padding: "16px 12px 36px" }}>
+    <div style={{ ...FONDO, fontFamily: serif, position: "fixed", inset: 0, overflow: "hidden" }}>
       <GlobalStyle />
-      {/* el mundo, siempre detrás */}
+      {/* ── EL MUNDO ─────────────────────────────────────────────────────
+          Ocupa la pantalla entera y no se aparta nunca. Las franjas de
+          gobierno se apoyan sobre sus bordes; el centro, que es donde uno
+          mira, queda siempre libre. Antes esto era al revés: una columna de
+          paneles tapaba el mapa y había un botón para apartarla, así que
+          gobernar y mirar el mundo eran dos cosas distintas y el jugador
+          pasaba la partida entrando y saliendo. */}
       <div style={{ position: "fixed", inset: 0, zIndex: 0 }}>
         <MapaMundi
           anio={s.anio}
@@ -14912,81 +15126,79 @@ export default function PaxMundi() {
           vecinos={s.vecinos}
           paisPropio={s.region}
           seleccion={provSel}
-          onSeleccion={(id) => { setProvSel(id); if (id) setTab("prov"); }}
-          margenInfIzq={46}
+          onSeleccion={(id) => setProvSel(id)}
+          margenInfIzq={ALTO_PIE + 14}
           alto="100%" />
       </div>
-      {/* velo para que el texto se lea sobre el mapa */}
-      <div style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none",
-        background: mapaAbierto ? "transparent"
-          : "linear-gradient(180deg, rgba(8,14,20,0.90), rgba(8,14,20,0.94))" }} />
 
-      {/* botón para apartar los paneles y mirar el mundo */}
-      <button onClick={() => setMapaAbierto((v) => !v)}
-        style={{ position: "fixed", left: 12, bottom: 12, zIndex: 4, padding: "9px 13px",
-          borderRadius: 9, cursor: "pointer", background: "rgba(10,16,22,0.9)",
-          border: `1px solid ${mapaAbierto ? C.gold : C.line}`, color: mapaAbierto ? C.gold : C.ink,
-          fontFamily: serif, fontSize: 13, boxShadow: "0 4px 14px rgba(0,0,0,0.5)" }}>
-        {mapaAbierto ? "▤ volver al gobierno" : "🌍 ver el mundo"}
-      </button>
-
-      <div style={{ maxWidth: 940, margin: "0 auto", position: "relative", zIndex: 2,
-        display: mapaAbierto ? "none" : "block" }}>
-        {/* Cabecera */}
-        <div className="pm-fade" style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8,
-          padding: "12px 16px", marginBottom: 14, ...panelStyle,
-          borderTop: `2px solid ${C.brass}`,
-          background: `linear-gradient(180deg, rgba(212,175,55,0.08), transparent), ${C.panelFlat}`,
-        }}>
-          <div>
-            <div style={{
-              fontSize: 23, letterSpacing: 0.5,
-              background: `linear-gradient(90deg, ${C.ink}, ${C.gold})`,
-              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-            }}>{s.nacion.nombre}</div>
-            <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic" }}>
-              {s.nacion.lider} · “{s.nacion.lema}”
-            </div>
-          </div>
-          <div style={{ fontFamily: mono, fontSize: 13, textAlign: "right" }}>
-            <div style={{ color: C.brass, letterSpacing: 1 }}>{fmtMesAnio(s.anio, s.dia).toUpperCase()} · TURNO {s.turno}</div>
-            <div style={{ fontSize: 12, marginTop: 3, display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <span style={{ color: C.cyan, textShadow: `0 0 8px ${C.cyan}55` }}>⚗ {Math.floor(s.ciencia.pi)} <span style={{ opacity: 0.7 }}>(+{piT}/año)</span></span>
-              <span style={{ color: C.gold, textShadow: `0 0 8px ${C.gold}55` }}>⚜ {Math.floor(s.edu.oro)} <span style={{ opacity: 0.7, color: oroT < 0 ? C.red : undefined }}>({oroT >= 0 ? "+" : ""}{oroT}/año)</span></span>
-            </div>
+      {/* ── ARRIBA: el estado del reino ───────────────────────────────────
+          Lo que hay que poder leer sin abrir nada y sin buscarlo. Cada
+          indicador se pinta con el semáforo de siempre, así que el color se
+          lee antes que el número. */}
+      <header style={{ position: "fixed", top: 0, left: 0, right: 0, height: ALTO_CAB, zIndex: 6,
+        display: "flex", alignItems: "center", gap: 14, padding: "0 12px",
+        background: "linear-gradient(180deg, rgba(8,13,19,0.97), rgba(8,13,19,0.86))",
+        borderBottom: `1px solid ${C.line}`, backdropFilter: "blur(3px)" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden",
+            textOverflow: "ellipsis",
+            background: `linear-gradient(90deg, ${C.ink}, ${C.gold})`,
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{s.nacion.nombre}</div>
+          <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1 }}>
+            {fmtMesAnio(s.anio, s.dia).toUpperCase()} · TURNO {s.turno}
           </div>
         </div>
 
+        {/* la velocidad del tiempo: cuánto abarca el turno que viene */}
+        <div style={{ display: "flex", gap: 2, flex: "0 0 auto" }}>
+          {PASOS.map((pp) => (
+            <button key={pp.id} onClick={() => setPaso(pp.id)} disabled={pensando}
+              title={`el turno abarcará ${pp.label}`}
+              style={{ padding: "5px 7px", cursor: pensando ? "wait" : "pointer", borderRadius: 5,
+                background: paso === pp.id ? `${C.cyan}26` : "transparent",
+                border: `1px solid ${paso === pp.id ? C.cyan : C.line}`,
+                color: paso === pp.id ? C.cyan : C.muted, fontFamily: mono, fontSize: 9.5 }}>
+              {pp.corto}
+            </button>
+          ))}
+        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-          {/* Pestañas */}
-          <div style={panelStyle}>
-            <div style={{ display: "flex", flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
-              {[
-                ["cronica", "📜 Crónica", C.brass],
-                ["ciencia", `⚗ Ciencias ${completadas.length}/${totalTechs}`, C.cyan],
-                ["edu", "🎓 Educación", C.violet],
-                ["proy", `🏗 Proyectos${proyActivos ? ` (${proyActivos})` : ""}`, C.gold],
-                ["sedes", `🏛 Sedes${invActivas ? ` (${invActivas})` : ""}`, C.blue],
-                ["eco", `⚜ Economía${netoPres < 0 ? " ⚠" : ""}`, C.gold],
-                ["prov", `◈ Tierras${(s.provincias || []).some((p) => (p.lealtad ?? 60) < 30) ? " ⚠" : ""}`, C.green],
-                ["ejercito", `⚔ Ejército${s.guerra ? " ⚠" : ""}`, C.red],
-                ["gob", `👑 Gobierno${s.stats.estabilidad < 30 ? " ⚠" : ""}`, C.red],
-              ].map(([id, label, col]) => (
-                <button key={id} onClick={() => setTab(id)}
-                  style={{
-                    flex: 1, minWidth: "31%", padding: "10px 4px", fontSize: 10.5, letterSpacing: 0.8, textTransform: "uppercase",
-                    fontFamily: mono, cursor: "pointer", border: "none",
-                    background: tab === id ? `linear-gradient(180deg, ${col}1E, transparent)` : "transparent",
-                    color: tab === id ? col : C.muted,
-                    borderBottom: tab === id ? `2px solid ${col}` : "2px solid transparent",
-                    borderRadius: "10px 10px 0 0",
-                  }}>
-                  {label}
-                </button>
-              ))}
+        <div style={{ display: "flex", gap: 3, marginLeft: "auto", overflow: "hidden" }}>
+          {mandoDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
+            piT, pobTecho: techoOcupado }).map((ind) => (
+            <div key={ind.id} title={`${ind.n}: ${ind.pie} · ${DICE[ind.nivel] || ""}`}
+              style={{ padding: "3px 8px", borderRadius: 6, minWidth: 52, textAlign: "right",
+                background: `${colorNivel(ind.nivel)}14`,
+                border: `1px solid ${colorNivel(ind.nivel)}44` }}>
+              <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 0.9, color: C.muted,
+                textTransform: "uppercase", whiteSpace: "nowrap" }}>{ind.ico} {ind.n}</div>
+              <div style={{ fontFamily: mono, fontSize: 12.5, color: colorNivel(ind.nivel),
+                whiteSpace: "nowrap" }}>{ind.v}</div>
             </div>
+          ))}
+        </div>
+      </header>
+
+      {/* ── DERECHA: lo que se está mirando ───────────────────────────────
+          Un ministerio o la comarca seleccionada. No es una pantalla: es una
+          franja apoyada en el borde, y el mundo sigue detrás. */}
+      {tab && MANDO_IDX[tab] && (
+      <aside className="pm-fade" style={{ position: "fixed", top: ALTO_CAB, right: 0, bottom: ALTO_PIE,
+        width: "min(430px, 44vw)", zIndex: 5, overflowY: "auto", overflowX: "hidden",
+        background: "rgba(12,18,26,0.955)", borderLeft: `1px solid ${C.line}`,
+        boxShadow: "-12px 0 30px rgba(0,0,0,0.5)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
+          position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
+          background: "rgba(10,16,23,0.99)" }}>
+          <span style={{ color: C[MANDO_IDX[tab].col] }}>{MANDO_IDX[tab].ico}</span>
+          <span style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: 1.8,
+            textTransform: "uppercase", color: C[MANDO_IDX[tab].col] }}>{MANDO_IDX[tab].n}</span>
+          <button onClick={() => setTab(null)} title="cerrar y ver el mundo (Esc)"
+            style={{ marginLeft: "auto", padding: "2px 8px", borderRadius: 5, cursor: "pointer",
+              background: "transparent", border: `1px solid ${C.line}`, color: C.muted,
+              fontFamily: mono, fontSize: 12 }}>✕</button>
+        </div>
+        <div style={{ padding: 0 }}>
 
             {tab === "cronica" && s.dilema && (
               <div className="pm-fade" style={{ margin: "13px 14px 0", padding: "13px 14px", borderRadius: 10,
@@ -17267,40 +17479,9 @@ export default function PaxMundi() {
               </div>
             )}
 
-          </div>
-
-
-          {/* Órdenes / Fin */}
-          {fase === "fin" ? (
-            <div className="pm-fade" style={{
-              ...panelStyle, padding: 24, textAlign: "center",
-              border: `1px solid ${fin.tipo === "victoria" ? C.green : C.red}`,
-              boxShadow: `0 0 30px ${fin.tipo === "victoria" ? C.green : C.red}33`,
-            }}>
-              <div style={{
-                fontSize: 30, marginBottom: 6,
-                color: fin.tipo === "victoria" ? C.green : C.red,
-                textShadow: `0 0 16px ${fin.tipo === "victoria" ? C.green : C.red}66`,
-              }}>
-                {fin.tipo === "victoria" ? "✪ VICTORIA ✪" : "✝ DERROTA ✝"}
-              </div>
-              <p style={{ fontSize: 15, color: C.ink, margin: "0 0 16px" }}>{fin.razon}</p>
-              <div style={{ fontFamily: mono, fontSize: 12, color: C.muted, marginBottom: 18 }}>
-                {s.turno} turnos · {completadas.length}/{totalTechs} nodos · {s.edu.sabios.length} sabios · {s.proyectos.filter((p) => p.estado === "completado").length} proyectos · de {fmtAnio(s.cronica[0]?.anio)} a {fmtAnio(s.anio)}
-              </div>
-              <button className="pm-cta" onClick={reiniciar} style={{
-                padding: "13px 30px", background: `linear-gradient(180deg, ${C.gold}, ${C.brassDark})`,
-                color: "#14100A", border: "none", borderRadius: 8, fontFamily: mono, fontWeight: 700,
-                letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", fontSize: 13,
-              }}>
-                ⚜ Nueva partida
-              </button>
-            </div>
-          ) : (
-            <div style={{ ...panelStyle, padding: 14 }}>
-              <div style={{ fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.brass, fontFamily: mono, marginBottom: 9 }}>
-                ⚔ Órdenes del consejo
-              </div>
+        {tab === "consejo" && fase !== "fin" && (
+          <div style={{ padding: 12 }}>
+            <div style={{ padding: 0 }}>
 
               {s.dilema && (
                 <div style={{ marginBottom: 11, padding: "9px 11px", borderRadius: 8,
@@ -17424,9 +17605,115 @@ export default function PaxMundi() {
                 </div>
               )}
             </div>
-          )}
+          </div>
+        )}
         </div>
-      </div>
+      </aside>
+      )}
+
+      {/* ── IZQUIERDA: lo que reclama atención ────────────────────────────
+          Todas las alertas viven acá y en ningún otro sitio. Nada interrumpe
+          la partida con una ventana encima: el que gobierna decide qué mira y
+          cuándo, y lo que no mire sigue estando cuando vuelva. */}
+      {avisos.length > 0 && (
+      <aside className="pm-fade" style={{ position: "fixed", left: 0, top: ALTO_CAB,
+        bottom: ALTO_PIE, width: avisosAbiertos ? "min(292px, 25vw)" : 66, zIndex: 4,
+        display: "flex", flexDirection: "column", pointerEvents: "none",
+        // La columna no es un panel: es una pila de tarjetas flotando sobre el
+        // mundo. Con fondo propio se comía una franja entera del mapa aunque
+        // hubiera un solo aviso, que es justo lo que no puede pasar.
+        background: "transparent" }}>
+        <button onClick={() => setAvisosAbiertos((v) => !v)}
+          title={avisosAbiertos ? "plegar los avisos" : "ver los avisos"}
+          style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 6,
+            margin: "8px 0 4px 8px", padding: "4px 9px", borderRadius: 20, pointerEvents: "auto",
+            cursor: "pointer", background: "rgba(10,16,23,0.86)",
+            border: `1px solid ${colorNivel(avisos[0].nivel)}55`, color: C.muted,
+            fontFamily: mono, fontSize: 9.5, letterSpacing: 1.4 }}>
+          <span style={{ color: colorNivel(avisos[0].nivel) }}>●</span>
+          {avisosAbiertos ? `AVISOS · ${avisos.length}` : avisos.length}
+        </button>
+        {avisosAbiertos && (
+          <div style={{ overflowY: "auto", padding: "0 8px 10px", pointerEvents: "auto" }}>
+            {avisos.map((a) => (
+              <button key={a.id} className="pm-card" onClick={() => a.ir && setTab(a.ir)}
+                style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6,
+                  padding: "8px 10px", borderRadius: 8, cursor: a.ir ? "pointer" : "default",
+                  background: "rgba(10,16,23,0.90)",
+                  border: `1px solid ${colorNivel(a.nivel)}44`,
+                  borderLeft: `3px solid ${colorNivel(a.nivel)}`,
+                  boxShadow: "0 3px 12px rgba(0,0,0,0.45)",
+                  color: C.ink, fontFamily: serif }}>
+                <div style={{ fontSize: 12.5, lineHeight: 1.3 }}>
+                  <span style={{ color: colorNivel(a.nivel) }}>{a.ico}</span> {a.tit}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>{a.txt}</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </aside>
+      )}
+
+      {/* ── ABAJO: los ministerios ────────────────────────────────────────
+          Ninguno abre una pantalla: todos despliegan la misma franja de la
+          derecha. Y el que ya está abierto se cierra al volver a pulsarlo, que
+          es como se vuelve al mundo sin buscar ningún botón de salida. */}
+      <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: ALTO_PIE, zIndex: 6,
+        display: "flex", alignItems: "stretch", gap: 2, padding: "5px 8px",
+        background: "linear-gradient(0deg, rgba(8,13,19,0.97), rgba(8,13,19,0.82))",
+        borderTop: `1px solid ${C.line}`, backdropFilter: "blur(3px)", overflowX: "auto" }}>
+        {MANDOS.map((m) => {
+          const col = C[m.col] || C.ink;
+          const abierto = tab === m.id;
+          const nota = ALERTA_MANDO[m.id] ? ALERTA_MANDO[m.id](s, { proyActivos, invActivas, netoPres,
+            completadas, totalTechs, avisos }) : null;
+          return (
+            <button key={m.id} onClick={() => setTab(abierto ? null : m.id)}
+              title={m.n}
+              style={{ flex: 1, minWidth: 62, display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center", gap: 1, cursor: "pointer",
+                borderRadius: 7, position: "relative",
+                background: abierto ? `linear-gradient(0deg, ${col}26, transparent)` : "transparent",
+                border: `1px solid ${abierto ? col : "transparent"}`,
+                color: abierto ? col : C.muted, fontFamily: mono, fontSize: 9 }}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>{m.ico}</span>
+              <span style={{ letterSpacing: 0.7, textTransform: "uppercase" }}>{m.n}</span>
+              {nota && (
+                <span style={{ position: "absolute", top: 4, right: 6, fontSize: 8.5,
+                  color: colorNivel(nota.nivel), fontFamily: mono }}>{nota.txt}</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* El final de la partida sí para el mundo: es lo único que lo hace. */}
+      {fase === "fin" && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9, display: "flex",
+          alignItems: "center", justifyContent: "center", background: "rgba(6,10,15,0.86)" }}>
+          <div className="pm-fade" style={{ ...panelStyle, padding: 24, textAlign: "center",
+            maxWidth: 520,
+            border: `1px solid ${fin.tipo === "victoria" ? C.green : C.red}`,
+            boxShadow: `0 0 30px ${fin.tipo === "victoria" ? C.green : C.red}33` }}>
+            <div style={{ fontSize: 30, marginBottom: 6,
+              color: fin.tipo === "victoria" ? C.green : C.red,
+              textShadow: `0 0 16px ${fin.tipo === "victoria" ? C.green : C.red}66` }}>
+              {fin.tipo === "victoria" ? "✪ VICTORIA ✪" : "✝ DERROTA ✝"}
+            </div>
+            <p style={{ fontSize: 15, color: C.ink, margin: "0 0 16px" }}>{fin.razon}</p>
+            <div style={{ fontFamily: mono, fontSize: 12, color: C.muted, marginBottom: 18 }}>
+              {s.turno} turnos · {completadas.length}/{totalTechs} nodos · {s.edu.sabios.length} sabios · {s.proyectos.filter((p) => p.estado === "completado").length} proyectos · de {fmtAnio(s.cronica[0]?.anio)} a {fmtAnio(s.anio)}
+            </div>
+            <button className="pm-cta" onClick={reiniciar} style={{
+              padding: "13px 30px", background: `linear-gradient(180deg, ${C.gold}, ${C.brassDark})`,
+              color: "#14100A", border: "none", borderRadius: 8, fontFamily: mono, fontWeight: 700,
+              letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", fontSize: 13 }}>
+              ⚜ Nueva partida
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
