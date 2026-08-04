@@ -1470,6 +1470,11 @@ function evolucionarMundo(s, dias, rnd, empuje) {
   const dem = demografiaDe(s.ciencia);
   const hechos = [];
   let agotados = [];
+  // De dónde partió cada comarca este año. Hace falta al final, cuando se
+  // apunta lo que se va a recordar: para saber si hubo mortandad hay que saber
+  // cuántos había, y para saber si se rompieron las cadenas hay que saber
+  // cuántos las llevaban.
+  const memAntes = antesDeRecordar(provs);
 
   const nuevas = provs.map((p) => {
     const a = ambDe(p);
@@ -1716,7 +1721,12 @@ function evolucionarMundo(s, dias, rnd, empuje) {
     }
   }
 
-  return { provincias: conAmbiente, reservas: { ...(s.reservas || {}), ...gasto },
+  // ——— y lo que queda escrito ———
+  // Va al final del todo, cuando ya se sabe cómo le fue el año a cada comarca:
+  // se apunta lo que se va a recordar y se olvida lo que ya no pesa.
+  const conMemoria = recordar(conAmbiente, s, memAntes);
+
+  return { provincias: conMemoria, reservas: { ...(s.reservas || {}), ...gasto },
            urnas,
            // De qué población partió cada provincia. Hace falta porque el mundo
            // y el reino resuelven el mismo turno por separado —el terremoto por
@@ -2180,6 +2190,12 @@ function ganasDeIrse(q, p, s) {
   g -= (C.renta || 0) > 8 ? 0.30 : 0;              // el que vive de la renta no se va: la renta es de aquí
   g -= C.urb < 0.2 ? 0.06 : 0;                     // al que tiene tierra le cuesta soltarla
   if (q.clase === "siervo" || q.clase === "esclavo") g -= 0.22;   // no se van porque no pueden
+  // Y lo que la comarca recuerda, que es de lo que más pesa y de lo que menos
+  // se habla: de donde hubo hambre se sigue yendo gente cuando ya no la hay,
+  // porque ya hay a quién escribirle, y de donde se vivió bien no se va nadie
+  // aunque venga un año malo. La emigración tiene inercia de generaciones.
+  const mem = memoriaDe(p, s.anio || 1200);
+  g += acotar(mem.irse, -1.2, 2) * 0.20;
   g = acotar(g, 0, 1);
   // Y el pasaje. Irse cuesta, y el que no tiene absolutamente nada no puede
   // pagarlo: emigra el que está mal, no el que está peor. Es de las cosas más
@@ -2286,22 +2302,35 @@ function mudarPops(provs, saldos, s, rnd, dias) {
       if (parte < 0.003) continue;
       const id = provs[e.i].id;
       const l = llegan.get(id) || [];
-      l.push({ ...q, n: parte, de: undefined });
+      // `orig` no es del grupo: es del viaje. Sirve para saber de qué comarca
+      // viene lo que este grupo se acuerda, y se tira al llegar.
+      l.push({ ...q, n: parte, de: undefined, orig: q.de });
       llegan.set(id, l);
     }
   }
 
+  const porId = new Map(provs.map((p) => [p.id, p]));
+  const anio = s.anio || 1200;
   return conMenos.map((p) => {
     const l = llegan.get(p.id);
     if (!l || !l.length) return p;
     const pops = (p.pops || []).map((q) => ({ ...q }));
     const idx = new Map(pops.map((q, k) => [q.clase + "|" + q.cultura + "|" + q.religion, k]));
+    // Lo que llega de cada sitio, para saber cuánto pesa lo que trae contado.
+    const desde = new Map();
+    const habia = poblacionPops(p.pops || []);
+    for (const v of l) if (v.orig) desde.set(v.orig, (desde.get(v.orig) || 0) + v.n);
+    let marcas = p.marcas || [];
+    for (const [id, cuantos] of desde) {
+      const o = porId.get(id);
+      if (o && o.id !== p.id) marcas = memoriaQueViaja({ marcas }, o, cuantos, habia, anio);
+    }
     for (const v of l) {
       const k = v.clase + "|" + v.cultura + "|" + v.religion;
       const j = idx.get(k);
       if (j == null) {
         // llega gente que aquí no había: un grupo nuevo, con lo suyo puesto
-        pops.push({ ...v, n: +v.n.toFixed(3), venido: true });
+        pops.push({ ...v, n: +v.n.toFixed(3), venido: true, orig: undefined });
         idx.set(k, pops.length - 1);
       } else {
         // se juntan con los suyos, y las medias se pesan
@@ -2315,7 +2344,7 @@ function mudarPops(provs, saldos, s, rnd, dias) {
         y.n = +t.toFixed(3);
       }
     }
-    return { ...p, pops };
+    return marcas === (p.marcas || []) ? { ...p, pops } : { ...p, pops, marcas };
   });
 }
 
@@ -2370,6 +2399,255 @@ function asimilarPops(pops, anios) {
     }
   }
   return fuera.filter((q) => q.n > 0.004);
+}
+
+// ═══ MEMORIA HISTÓRICA ══════════════════════════════════════
+// Lo que le pasó a una comarca no termina cuando termina. Una provincia que
+// vio pasar al ejército extranjero no vuelve a ser la de antes, y no por
+// treinta años: por generaciones. Lo dice todo el que ha mirado un mapa
+// electoral encima de un mapa de la guerra civil de hace ochenta años, o el
+// que se pregunta por qué la Vendée vota distinto que el departamento de al
+// lado desde 1793.
+//
+// Hasta acá el juego era amnésico. La furia bajaba, la lealtad se recuperaba,
+// el hambre pasaba, y en veinte años no quedaba ni rastro: cada provincia
+// volvía sola a su punto de partida. Y así una partida no tiene historia, tiene
+// episodios. Con memoria, en cambio, lo que el jugador hace en 1340 sigue ahí
+// en 1600, más flojo pero ahí, y una comarca deja de ser un casillero para ser
+// un sitio con pasado.
+//
+// Cuatro cosas que la memoria no es:
+// · NO ES UN MODIFICADOR PERMANENTE. Se desvanece, y despacio: cada marca
+//   tiene una media vida en años, y a los tres cuartos de siglo del saqueo
+//   queda la mitad de lo que quedaba. Nunca llega a cero del todo, pero deja
+//   de decidir nada.
+// · NO ES SIEMPRE RENCOR. Los años buenos también se recuerdan, y lo que dejan
+//   es lo contrario: una comarca que vivió bien tres décadas no quiere que
+//   nada cambie, y eso la hace difícil de sublevar y fácil de gobernar. La
+//   prosperidad es conservadora, y esa es una de las cosas mejor establecidas
+//   que hay.
+// · NO ES TODA IGUAL. La invasión de fuera y el escarmiento del propio rey
+//   dejan cicatrices que apuntan al revés: al pueblo invadido se le pide
+//   servir y sirve —1793, 1812, 1941—, y al pueblo escarmentado se le pide
+//   servir y no va. Sin distinguirlas, un sistema de memoria dice que todo lo
+//   malo enfada igual, que es no decir nada.
+// · Y NO SE QUEDA QUIETA. Se va con la gente. El que se fue de la hambruna se
+//   la lleva puesta y se la cuenta a sus hijos en la otra punta del mundo, y
+//   por eso las diásporas se acuerdan de cosas que en el país de origen ya se
+//   olvidaron.
+const MARCAS = [
+  { id: "invasion", n: "la invasión", vida: 110,
+    dice: "pasó por acá un ejército que no era el nuestro",
+    // se cierra filas contra el de fuera: enfada, ata, y hace servir
+    rencor: 0.85, arraigo: 0.20, irse: 0.30, libre: 0.05, servir: 0.55 },
+  { id: "saqueo", n: "el saqueo", vida: 70,
+    dice: "se llevaron hasta las puertas",
+    rencor: 0.70, arraigo: -0.10, irse: 0.55, libre: 0.05, servir: 0.20 },
+  { id: "escarmiento", n: "el escarmiento", vida: 85,
+    dice: "entró la tropa del rey y no vino a defendernos",
+    // la cicatriz que apunta a la corona: ni obedece ni olvida
+    rencor: 1.00, arraigo: -0.45, irse: 0.40, libre: 0.55, servir: -0.75 },
+  { id: "hambre", n: "el hambre", vida: 55,
+    dice: "se pasó hambre de la de verdad",
+    rencor: 0.60, arraigo: -0.30, irse: 0.85, libre: 0.15, servir: -0.20 },
+  { id: "peste", n: "la mortandad", vida: 45,
+    dice: "se murió media comarca en un año",
+    rencor: 0.20, arraigo: -0.05, irse: 0.35, libre: 0, servir: -0.25 },
+  { id: "ruina", n: "la ruina", vida: 30,
+    dice: "se vino todo abajo de un día para otro",
+    rencor: 0.15, arraigo: -0.05, irse: 0.35, libre: 0, servir: -0.10 },
+  { id: "libertad", n: "la libertad", vida: 130,
+    dice: "acá se rompieron las cadenas",
+    // el que salió de la servidumbre no vuelve a dar la libertad por supuesta
+    rencor: -0.15, arraigo: -0.20, irse: -0.10, libre: 1.00, servir: 0.30 },
+  { id: "bonanza", n: "los años buenos", vida: 65,
+    dice: "hubo décadas en que acá se vivía bien",
+    rencor: -0.55, arraigo: 1.00, irse: -0.60, libre: 0, servir: 0.20 },
+  { id: "victoria", n: "la victoria", vida: 60,
+    dice: "de acá salieron los que ganaron aquella guerra",
+    rencor: -0.30, arraigo: 0.50, irse: -0.20, libre: 0, servir: 0.65 },
+];
+const MARCA_IDX = Object.fromEntries(MARCAS.map((x) => [x.id, x]));
+
+// Qué es vivir bien en cada siglo. Es la misma trampa en la que ya se cayó con
+// la riqueza, con el censo electoral y con el reparto de la tierra: medida en
+// absoluto, la holgura de una familia cualquiera de 1900 dobla a la del noble
+// mejor puesto de 1300, y entonces todo el siglo XIX entero sale recordando
+// años buenos y el XIV entero sale sin recordar ninguno. Lo que la gente
+// compara no es con la Edad Media: es con lo que en su siglo se llama pasarla
+// bien. Los números salen de medir el reino desgraciado y el reino próspero de
+// cada época y quedarse con el punto medio.
+const varaDelSiglo = (anio) =>
+  0.31 + Math.pow(acotar(((anio || 1200) - 1200) / 800, 0, 1), 1.5) * 0.62;
+
+// Lo que queda hoy de una marca. Media vida: a los `vida` años, la mitad. Un
+// saqueo de 1340 todavía pesa un cuarto en 1480 y nada en 1700.
+function fuerzaMarca(m, anio) {
+  const M = MARCA_IDX[m.i]; if (!M) return 0;
+  const pasan = Math.max(0, (anio || 0) - (m.a || 0));
+  return m.f * Math.pow(0.5, pasan / M.vida);
+}
+// Apuntar. Si ya estaba, se ahonda en vez de duplicarse: que te saqueen dos
+// veces no son dos recuerdos, es un recuerdo peor. Y se ahonda con rendimiento
+// decreciente, porque una comarca arrasada tres veces no está tres veces peor;
+// está arrasada.
+function marcar(marcas, id, anio, fuerza) {
+  if (!MARCA_IDX[id] || !(fuerza > 0)) return marcas || [];
+  const out = (marcas || []).slice();
+  const j = out.findIndex((m) => m.i === id);
+  if (j >= 0) {
+    const queda = fuerzaMarca(out[j], anio);
+    // lo viejo, traído a hoy, más lo nuevo sobre lo que falta para el tope
+    out[j] = { i: id, a: anio, f: +Math.min(1, queda + fuerza * (1 - queda * 0.72)).toFixed(3) };
+  } else out.push({ i: id, a: anio, f: +Math.min(1, fuerza).toFixed(3) });
+  return out;
+}
+// Y olvidar. No se guarda lo que ya no pesa: una comarca no arrastra la lista
+// entera de todo lo que le pasó desde el año mil.
+//
+// El umbral tiene que estar por debajo de lo que suma un año suelto de los que
+// se apuntan de a poco. Puesto en 0,035 pasaba esto: los años buenos entraban
+// a 0,02, no llegaban al umbral, y al año siguiente se olvidaban antes de
+// poder sumarse al del año anterior. Un reino podía vivir bien sesenta años
+// seguidos y no acordarse de ninguno, porque cada año borraba al anterior.
+const NADA = 0.015;
+function olvidar(marcas, anio) {
+  if (!marcas || !marcas.length) return marcas || [];
+  const vivas = marcas.filter((m) => fuerzaMarca(m, anio) > NADA);
+  return vivas.length === marcas.length ? marcas : vivas;
+}
+
+// Lo que la memoria de una comarca hace hoy. Se devuelve como cinco diales y
+// no como un número, porque no es lo mismo estar resentido que querer irse.
+function memoriaDe(p, anio) {
+  const ms = (p && p.marcas) || [];
+  const r = { rencor: 0, arraigo: 0, irse: 0, libre: 0, servir: 0, hay: 0, viva: [] };
+  for (const m of ms) {
+    const f = fuerzaMarca(m, anio); if (!(f > 0.02)) continue;
+    const M = MARCA_IDX[m.i];
+    r.rencor += M.rencor * f; r.arraigo += M.arraigo * f;
+    r.irse += M.irse * f; r.libre += M.libre * f; r.servir += M.servir * f;
+    r.hay += f;
+    r.viva.push({ id: m.i, anio: m.a, f: +f.toFixed(3) });
+  }
+  r.viva.sort((a, b) => b.f - a.f);
+  return r;
+}
+// La misma cuenta para el reino entero, pesada por gente: la memoria de una
+// comarca de cien mil habitantes no vale lo mismo que la de una de mil.
+function memoriaDelReino(provs, anio) {
+  let g = 0;
+  const r = { rencor: 0, arraigo: 0, irse: 0, libre: 0, servir: 0, hay: 0 };
+  for (const p of provs || []) {
+    const n = p.poblacion || 0; if (!(n > 0)) continue;
+    const m = memoriaDe(p, anio); g += n;
+    for (const k of ["rencor", "arraigo", "irse", "libre", "servir", "hay"]) r[k] += m[k] * n;
+  }
+  if (!g) return r;
+  for (const k of Object.keys(r)) r[k] = +(r[k] / g).toFixed(4);
+  return r;
+}
+
+// ——— y qué se apunta cada año ———
+// Lo que se recuerda no lo decide una lista de eventos: lo decide lo que
+// efectivamente le pasó a la gente de esa comarca ese año. El hambre se apunta
+// porque hubo hambrientos, no porque saltó un evento de hambruna.
+function recordar(provs, s, antes) {
+  const anio = s.anio || 1200;
+  const ref = varaDelSiglo(anio);
+  return (provs || []).map((p) => {
+    let m = olvidar(p.marcas || [], anio);
+    const c = p.consumo || null;
+    const ant = antes ? antes[p.id] : null;
+    // El hambre de la que se habla en tercera generación no es un año flojo:
+    // es el año en que un pueblo entero no tuvo qué comer. Por eso hace falta
+    // que sea general y no que a alguno le haya ido mal.
+    if (c && c.hambrientos > 0.15) m = marcar(m, "hambre", anio, acotar((c.hambrientos - 0.15) * 1.9, 0, 0.9));
+    // Y los años buenos se apuntan de a poquito, que es como se viven: una
+    // bonanza no es un año, es una racha de cuarenta. A este ritmo hacen falta
+    // dos generaciones seguidas viviendo mejor que el resto del reino para que
+    // una comarca se vuelva de verdad conservadora, y eso es exactamente lo
+    // que se quería: la prosperidad tarda en volverse carácter.
+    if (c && c.hambrientos < 0.04 && c.holgura > ref + 0.02)
+      m = marcar(m, "bonanza", anio, acotar((c.holgura - ref) * 0.22, 0, 0.032));
+    // el ejército de fuera, cada año que se queda
+    if (p.ocupada) m = marcar(m, "invasion", anio, 0.32);
+    // El terremoto, la riada, el volcán. Pero solo los que dejaron marca de
+    // verdad: una comarca corriente recibe un golpe cada pocos años y si se
+    // apuntaran todos, en un siglo no habría comarca sin memoria de ruina y la
+    // ruina no significaría nada. Se recuerda el que costó años levantar.
+    if (p.golpe && p.golpe.anio === anio && (p.golpe.anios || 0) >= 3)
+      m = marcar(m, "ruina", anio, acotar(0.06 + (p.golpe.anios - 3) * 0.035, 0, 0.40));
+    // La mortandad que el hambre no explica: si una comarca pierde uno de cada
+    // diez en un año y comía, fue otra cosa, y esa otra cosa se recuerda.
+    if (ant && ant.pob > 60 && p.poblacion < ant.pob * 0.90 && !(c && c.hambrientos > 0.18))
+      m = marcar(m, "peste", anio, acotar((1 - p.poblacion / ant.pob - 0.10) * 3.2, 0, 0.9));
+    // Y las cadenas que se rompen. No se apunta que no haya siervos: se apunta
+    // el año en que dejó de haberlos, que es lo que la comarca recuerda.
+    if (ant && ant.cad > 0.06) {
+      const hoy = cadenasDe(p);
+      if (hoy < ant.cad * 0.72) m = marcar(m, "libertad", anio, acotar((ant.cad - hoy) * 2.4, 0, 0.8));
+    }
+    // Y se deja escrito lo que esa memoria pesa hoy, para que el mapa y la
+    // ficha de la comarca no tengan que rehacer la cuenta ni acarrear el año.
+    // Es la foto del cierre del año: si después se muda gente y trae lo suyo,
+    // se verá en la del año que viene, que es cuando se habrá sabido.
+    if (m === (p.marcas || []) && !m.length) return p;
+    return { ...p, marcas: m, mem: memoriaDe({ marcas: m }, anio) };
+  });
+}
+// Qué parte de la comarca no es dueña de sí misma.
+function cadenasDe(p) {
+  const cl = (p.soc || {}).clases || {};
+  const g = (p.soc || {}).gente || 0;
+  if (!(g > 0)) return 0;
+  return +(((cl.esclavo || 0) + (cl.siervo || 0)) / g).toFixed(4);
+}
+// La comarca que más arrastra y de qué. Es lo que el cronista tiene a mano
+// cuando quiere levantar la vista del año en curso.
+function mejorMemoria(s) {
+  let mejor = null;
+  for (const p of (s || {}).provincias || []) {
+    const v = ((p.mem || {}).viva || [])[0];
+    if (!v) continue;
+    // que sea de otra época: lo de hace tres años no es memoria, es actualidad
+    if (((s || {}).anio || 0) - v.anio < 25) continue;
+    if (!mejor || v.f > mejor.f) mejor = { ...v, prov: p.nombre };
+  }
+  return mejor;
+}
+
+// Lo que hace falta guardar del año anterior para poder comparar.
+function antesDeRecordar(provs) {
+  return Object.fromEntries((provs || []).map((p) => [p.id,
+    { pob: p.poblacion || 0, cad: cadenasDe(p) }]));
+}
+
+// ——— y la memoria que viaja ———
+// El que se va se la lleva puesta. Una parte de lo que recordaba su comarca de
+// origen entra en la comarca de destino, en proporción a cuántos llegan: mil
+// hambrientos irlandeses en un pueblo de mil almas traen el hambre entera;
+// mil en una ciudad de un millón, casi nada. Es lo que hace que Boston se
+// acuerde de una hambruna que pasó a cuatro mil kilómetros.
+function memoriaQueViaja(destino, origen, llegan, habia, anio) {
+  if (!(llegan > 0) || !origen || !(origen.marcas || []).length) return destino.marcas || [];
+  const peso = acotar(llegan / Math.max(1, habia + llegan), 0, 1);
+  if (peso < 0.004) return destino.marcas || [];
+  let m = destino.marcas || [];
+  const yaEsta = new Set(m.map((x) => x.i));
+  for (const x of origen.marcas) {
+    const f = fuerzaMarca(x, anio);
+    if (!(f > 0.05)) continue;
+    // se transmite de boca en boca, así que llega gastada: nunca entera
+    const trae = f * peso * 0.65;
+    // Y si lo que llega es polvo, no llega nada. Sin este suelo, cada mudanza
+    // sembraba una miga de cada recuerdo en cada destino, y en un siglo todas
+    // las comarcas del reino guardaban una lista completa de todo lo que le
+    // había pasado a cualquiera, con un peso de cero. Un archivo así no dice
+    // nada y ocupa lo mismo.
+    if (trae > NADA || yaEsta.has(x.i)) m = marcar(m, x.i, anio, trae);
+  }
+  return m;
 }
 
 // El reparto del turno: primero se crece donde hay sitio, después se mudan los
@@ -4258,12 +4536,22 @@ const SIRVE = { campesino: 1, pastor: 0.9, pescador: 0.8, minero: 0.9, obrero: 1
 function brazosDelReino(s) {
   const reg = regimenDeLeva(s);
   const leg = legitimidad(s);
+  const anio = s.anio || 1200;
   let aptos = 0, gente = 0;
-  for (const p of s.provincias || []) for (const q of p.pops || []) {
-    gente += q.n;
-    // y hay que estar sano para servir: un reino enfermo no llena las filas
-    const sano = q.salud == null ? 1 : acotar(0.45 + q.salud / 90, 0.4, 1.15);
-    aptos += q.n * (SIRVE[q.clase] == null ? 0.7 : SIRVE[q.clase]) * sano;
+  for (const p of s.provincias || []) {
+    // Lo que la comarca recuerda de la última vez que le pidieron hijos. Al
+    // pueblo que vio pasar al ejército extranjero se le pide servir y sirve;
+    // al que vio entrar a la tropa del propio rey se le pide y no va. Es la
+    // diferencia entre la levée en masse y las quintas que había que cobrar a
+    // tiros en el mismo siglo y a veces en el mismo país.
+    const mem = memoriaDe(p, anio);
+    const gana = acotar(1 + acotar(mem.servir, -1.5, 1.5) * 0.42, 0.35, 1.5);
+    for (const q of p.pops || []) {
+      gente += q.n;
+      // y hay que estar sano para servir: un reino enfermo no llena las filas
+      const sano = q.salud == null ? 1 : acotar(0.45 + q.salud / 90, 0.4, 1.15);
+      aptos += q.n * (SIRVE[q.clase] == null ? 0.7 : SIRVE[q.clase]) * sano * gana;
+    }
   }
   if (!gente) return { reg, leg, total: 0, aptos: 0 };
   // La conscripción solo rinde lo que promete donde el país se siente propio.
@@ -4833,6 +5121,11 @@ function radicalizarPops(pops, p, s) {
   // justamente lo que inventó la prosperidad industrial.
   let arriba = 0;
   for (const q of pops || []) arriba = Math.max(arriba, (q.eco || {}).ingreso || 0);
+  // Lo que la comarca no ha olvidado. No es un modificador de humor: es la
+  // razón por la que dos provincias con la misma cosecha, el mismo pan y el
+  // mismo impuesto no reaccionan igual, que es lo que pasa siempre y lo que
+  // ningún promedio explica.
+  const mem = memoriaDe(p, anio);
   return (pops || []).map((q) => {
     const C = CLASES[q.clase] || CLASES.campesino;
     const E = q.eco || { hambre: 0, decencia: 1 };
@@ -4852,8 +5145,11 @@ function radicalizarPops(pops, p, s) {
     // siglo XIX entero transcurría en paz.
     if (E.gusto != null) meta += acotar(1 - E.gusto, 0, 1) * 20;
     // y la voz negada, que solo muerde en quien sabe leer: un analfabeto sin
-    // voz no echa de menos lo que no sabe que existe
-    meta += negada[C.fac] * 96 * acotar(0.15 + q.letras * 1.1, 0, 1);
+    // voz no echa de menos lo que no sabe que existe. Y muerde más donde se
+    // sabe lo que es no tenerla: al que salió de la servidumbre, que le
+    // vuelvan a decir que se calle le sienta distinto que al que nunca supo
+    // que se podía hablar.
+    meta += negada[C.fac] * 96 * acotar(0.15 + q.letras * 1.1, 0, 1) * (1 + acotar(mem.libre, 0, 1.5) * 0.7);
     // La distancia con el de arriba. Una diferencia de cuatro veces es el orden
     // de siempre y no indigna a nadie; de treinta, sí. Y hay que poder verla:
     // el que lee el periódico sabe lo que gana el dueño, y el que no, no.
@@ -4893,6 +5189,13 @@ function radicalizarPops(pops, p, s) {
     // tener guardado respecto a lo que uno gana, no respecto a la Edad Media.
     const colchon = E.ingreso > 0 ? acotar((q.caudal || 0) / (E.ingreso * 2), 0, 1) : 0;
     meta -= colchon * 9;
+    // ——— y lo que la comarca no olvida ———
+    // El rencor viejo no hace una revuelta él solo, pero es lo que hace que
+    // una comarca salte con la mitad de motivo que la de al lado. Y los años
+    // buenos son lo contrario: quien vivió bien treinta años tiene mucho que
+    // perder y lo sabe.
+    meta += acotar(mem.rencor, -1.5, 2.5) * 17;
+    meta -= acotar(mem.arraigo, -1.5, 2) * 12;
     meta = acotar(meta, 0, 100);
     // La brasa sube más rápido de lo que baja. Una injusticia se aprende en un
     // año y se olvida en diez, y por eso las comarcas que se levantaron una vez
@@ -4951,6 +5254,13 @@ const REVUELTAS = [
 ];
 const cabeRevuelta = (R, x) => R.puerta(x) && R.fuerza(x) > R.umbral;
 // El retrato de una comarca en un año: de aquí salen las tres decisiones.
+// La furia media de una comarca, que es lo que hace falta cuando solo hay que
+// saber dónde está el problema y no de qué está hecho.
+function furiaProvincia(p) {
+  let g = 0, f = 0;
+  for (const q of p.pops || []) { g += q.n; f += q.n * (q.furia || 0); }
+  return g > 0 ? f / g : 0;
+}
 function retratoDeFuria(p, s) {
   const pops = p.pops || [];
   if (!pops.length) return null;
@@ -5008,7 +5318,14 @@ function revueltaDe(p, s, rnd) {
   // año: se tira, y por eso las revueltas se agolpan tras un mal año y no
   // llegan puntuales como un impuesto. Cuanto más se pasa del umbral, más
   // probable, que es como arde algo que lleva tiempo secándose.
-  const prob = acotar((elegida.fuerza(x) - elegida.umbral) / 55, 0.03, 0.28);
+  // Y la comarca que se acuerda de haber vivido bien tarda mucho más en
+  // prender: no porque no tenga motivos, sino porque tiene qué perder y una
+  // generación entera de memoria diciéndole que las cosas se pueden arreglar
+  // sin quemarlas. La comarca escarmentada, al revés: ya sabe cómo termina y
+  // ya sabe que aguantar tampoco sirvió.
+  const mem = memoriaDe(p, s.anio || 1200);
+  const freno = acotar(1 + acotar(mem.arraigo, -1.5, 2) * 0.45 - acotar(mem.rencor, -1.5, 2.5) * 0.22, 0.45, 2.2);
+  const prob = acotar((elegida.fuerza(x) - elegida.umbral) / 55 / freno, 0.02, 0.30);
   if ((rnd ? rnd() : Math.random()) > prob) return null;
   return { id: elegida.id, n: elegida.n, prov: p.nombre, provId: p.id,
     fuerza: +acotar(elegida.fuerza(x) / 100, 0.1, 3).toFixed(2), retrato: x };
@@ -5570,6 +5887,16 @@ const VISTAS = [
     fmt: (v) => (v < 0.005 ? "nadie pasa hambre" : Math.round(v * 100) + "% pasa hambre"),
     mio: (m) => ((m.consumo || {}).hambrientos != null ? m.consumo.hambrientos : null),
     pie: "dónde no se llega a comer este año" },
+  // Y el mapa que no se puede leer en ningún otro sitio: lo que cada comarca
+  // arrastra de lo que le pasó. Va en dos direcciones porque la memoria va en
+  // dos direcciones —hay comarcas que no perdonan y comarcas que no quieren
+  // que nada cambie— y en un mapa de una sola rampa las dos salían iguales.
+  { id: "memoria", n: "Lo que no se olvida", ambito: "reino", rampa: "gente",
+    cortes: [-0.55, -0.18, 0.18, 0.55, 1.05],
+    fmt: (v) => (v <= -0.55 ? "no quiere que nada cambie" : v < -0.18 ? "le fue bien y se acuerda"
+      : v <= 0.18 ? "sin cuentas pendientes" : v < 0.55 ? "arrastra algo" : "no perdona"),
+    mio: (m) => { const x = m.mem; return x && x.hay > 0.02 ? +(x.rencor - x.arraigo).toFixed(3) : 0; },
+    pie: "lo que cada comarca arrastra de su historia" },
 ];
 // Un color por estamento, agrupados por lo que son: la tierra en verdes, el
 // taller y la fábrica en ocres, el comercio y la letra en azules, y arriba el
@@ -7088,6 +7415,43 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                       {mia.cosecha < 1 ? "mala cosecha" : "buena cosecha"}: el pan
                       {" "}{precioPan(mia.cosecha) > 1 ? "sube" : "baja"} un
                       {" "}{Math.round(Math.abs(precioPan(mia.cosecha) - 1) * 100)}%
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+            {/* Lo que la comarca no ha olvidado. Es la única parte de la ficha
+                que no habla del año: habla de por qué esta comarca reacciona
+                distinto que la de al lado ante exactamente lo mismo. */}
+            {mia && mia.mem && mia.mem.viva && mia.mem.viva.length > 0 && (() => {
+              const M = mia.mem;
+              const dial = (v, mas, menos) => (v > 0.18 ? mas : v < -0.18 ? menos : null);
+              const dichos = [
+                dial(M.rencor, "no perdona lo que le hicieron", "está en paz con el reino"),
+                dial(M.arraigo, "no quiere que nada cambie", "no tiene nada que conservar"),
+                dial(M.irse, "de acá se sigue yendo gente", "de acá no se va nadie"),
+                dial(M.libre, "sabe lo que vale que la dejen hablar", null),
+                dial(M.servir, "da hijos para el ejército sin que se los pidan", "no da un hijo para el ejército"),
+              ].filter(Boolean);
+              return (
+                <>
+                  <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, color: C.brass,
+                    margin: "8px 0 4px" }}>─ LO QUE NO SE OLVIDA</div>
+                  {M.viva.slice(0, 3).map((x) => {
+                    const K = MARCA_IDX[x.id];
+                    return (
+                      <div key={x.id} style={{ display: "flex", justifyContent: "space-between", gap: 8,
+                        fontSize: 10.5, color: C.ink, marginTop: 1 }}>
+                        <span style={{ color: C.muted }}>{K.n} <span style={{ fontFamily: mono, fontSize: 9 }}>de {fmtAnio(x.anio)}</span></span>
+                        <span style={{ fontFamily: mono, color: x.f > 0.5 ? C.gold : C.muted }}>
+                          {x.f > 0.66 ? "como si fuera ayer" : x.f > 0.33 ? "todavía se cuenta" : "ya casi nadie"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {dichos.length > 0 && (
+                    <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.45 }}>
+                      {capitalizar(dichos.slice(0, 2).join("; "))}.
                     </div>
                   )}
                 </>
@@ -9690,7 +10054,10 @@ const salio = (rnd, p) => rnd() < acotar(p, 0, 1);
 // Un resultado vacío al que cada efecto le va agregando.
 const vacio = () => ({ hechos: [], d: {}, fac: {}, oro: 0, deuda: 0, pob: 0,
                        vec: [], ejercito: {}, prov: [], grano: 0, fallo: false,
-                       leva: 0, explora: null });
+                       leva: 0, explora: null,
+                       // lo que este acto va a dejar escrito en la memoria de
+                       // alguna comarca, que es lo único que dura más que el reinado
+                       marcas: [] });
 const sumar = (r, campo, k, v) => { r[campo][k] = (r[campo][k] || 0) + v; };
 
 const EFECTOS = {
@@ -9939,6 +10306,10 @@ const EFECTOS = {
       sumar(r, "d", "militar", 5); sumar(r, "d", "prestigio", 6);
       sumar(r, "fac", "ejercito", 10);
       r.hechos.push({ t: "victoria_campo" });
+      // Una victoria se cuenta durante tres generaciones y hace que la
+      // siguiente leva se llene sola. Es la mitad de por qué los estados que
+      // ganaban seguían ganando.
+      r.marcas.push({ id: "victoria", donde: "todas", f: +(0.22 * i).toFixed(3) });
     } else {
       r.fallo = true;
       r.frente = -Math.round(16 * i);
@@ -10102,10 +10473,18 @@ const EFECTOS = {
     for (const g of FACCIONES) if (!f || g.id !== f.id) sumar(r, "fac", g.id, -Math.round(2 * i));
     sumar(r, "d", "prestigio", -Math.round(2 * i));
     r.hechos.push({ t: "reprime", faccion: f });
+    // Y queda escrito donde entró la tropa. Un escarmiento acaba con el
+    // problema de este año y crea el de los siguientes ciento cincuenta: la
+    // comarca escarmentada no vuelve a fiarse, no vuelve a dar hijos para el
+    // ejército, y vota distinto que la de al lado durante generaciones.
+    r.marcas.push({ id: "escarmiento", donde: "peor", f: +(0.26 * i).toFixed(3) });
     if (salio(c.rnd, 0.22 * i)) {
       r.fallo = true;
       sumar(r, "d", "estabilidad", -Math.round(14 * i));
       r.hechos.push({ t: "represion_fracasa", faccion: f });
+      // el escarmiento que sale mal deja el doble de cicatriz y ni siquiera
+      // el silencio que se compraba con ella
+      r.marcas.push({ id: "escarmiento", donde: "peor", f: +(0.30 * i).toFixed(3) });
     }
     return r;
   },
@@ -10549,6 +10928,29 @@ function aplicarEfectos(n, ef, rnd) {
         ? { ...p, soc: resumenPops(p.pops) } : p));
       e.pops = sociedadDelReino(e.provincias, n.anio, (n.gobierno || {}).forma);
     }
+  }
+  // ——— y lo que queda escrito de lo que se hizo ———
+  // Las órdenes del rey también dejan memoria, y no en el reino en abstracto
+  // sino en las comarcas concretas donde entró la tropa. Va acá y no en el
+  // resolvedor porque hasta acá no se sabe cuáles fueron.
+  if ((ef.marcas || []).length && (e.provincias || []).length) {
+    const anio = n.anio || 0;
+    // Dónde entró la tropa: donde estaba el problema. Las dos comarcas más
+    // furiosas, que es adonde se manda a los soldados y no a un mapa entero.
+    const furiosas = new Set((e.provincias || []).slice()
+      .map((p) => ({ id: p.id, f: furiaProvincia(p) }))
+      .sort((a, b) => b.f - a.f).slice(0, 2).map((x) => x.id));
+    let toco = false;
+    const provs = e.provincias.map((p) => {
+      let m = p.marcas || [];
+      for (const x of ef.marcas) {
+        const va = x.donde === "todas" || (x.donde === "peor" ? furiosas.has(p.id) : x.donde === p.id);
+        if (va && x.f > 0) m = marcar(m, x.id, anio, x.f);
+      }
+      if (m === (p.marcas || [])) return p;
+      toco = true; return { ...p, marcas: m };
+    });
+    if (toco) e.provincias = provs;
   }
   if (ef.oro) e.edu = { ...e.edu, oro: Math.max(0, (e.edu.oro || 0) + ef.oro) };
   if (ef.deuda) e.deuda = Math.max(0, (e.deuda || 0) + ef.deuda);
@@ -11620,6 +12022,22 @@ function narrar(hechos, s, rnd, res) {
   else if (eco.mismo === 2 && rnd() < 0.8) trozos.push(deBolsa("otraVez", OTRA_VEZ, paso));
   if (eco.antes && aliento >= 2 && rnd() < 0.5)
     trozos.push(`Es la misma ${eco.lugar} donde ${eco.antes.nota}`);
+  // Y la memoria larga, la que no cabe en seis turnos: lo que la comarca
+  // arrastra desde hace generaciones. Un cronista que cuenta un motín en una
+  // comarca que fue arrasada hace ochenta años lo dice, porque es lo primero
+  // que diría cualquiera que viva ahí.
+  if (aliento >= 2 && rnd() < 0.45) {
+    // El sitio del que se está hablando. Unos hechos traen la comarca entera y
+    // otros solo su nombre, así que hay que buscarla por las dos puertas.
+    const nom = principal && (principal.prov || principal.zona);
+    const donde = (principal && principal.provincia)
+      || (nom ? (s.provincias || []).find((p) => p.nombre === nom) : null);
+    const vieja = donde && (donde.mem || {}).viva && donde.mem.viva[0];
+    if (vieja && vieja.f > 0.34 && (s.anio || 0) - vieja.anio > 25) {
+      const K = MARCA_IDX[vieja.id];
+      trozos.push(`En ${donde.nombre} todavía se acuerdan de ${fmtAnio(vieja.anio)}: ${K.dice}`);
+    }
+  }
 
   // ——— quién reacciona ———
   const mov = Object.entries((res && res.fac) || {}).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
@@ -11812,6 +12230,7 @@ function motorLocal(s, accion, dias, semilla) {
     // ——— lo que la API no podía tocar ———
     efectos: { memoria: recuerdoDe(res.hechos, s), vivo, migrar: { dias }, oro: res.oro, deuda: res.deuda, fac: res.fac, ejercito: res.ejercito,
                pob: res.pob, grano: res.grano, prov: res.prov, guerra: res.guerra, leva: res.leva,
+               marcas: res.marcas,
                paz: res.paz, frente: res.frente, bajas: res.bajas, aguante: res.aguante,
                tributo: res.tributo, factoria: res.factoria, sede: res.sede,
                sabio: res.sabio, general: res.general, destituir: res.destituir, pi: res.pi },
@@ -11853,6 +12272,30 @@ function aplicarVecinos(vecs, cambios) {
 // arma con los dos o tres que más pesan, así que el texto sigue a la partida
 // en vez de rellenar.
 const INFORMES = [
+  // ——— lo que la comarca no olvida ———
+  // El observador que mira hacia atrás. No cuenta lo que pasó este año sino lo
+  // que sigue contándose en una comarca desde hace generaciones, y es lo único
+  // de la crónica que puede referirse a algo que ocurrió antes de que naciera
+  // el soberano. Peso bajo a propósito: una crónica que habla del pasado todos
+  // los años deja de contar el presente, y además una memoria vale justamente
+  // porque no se nombra a diario.
+  { id: "memoria_larga", peso: (s) => {
+      const p = mejorMemoria(s); return p && p.f > 0.34 ? 2.4 + p.f * 3 : 0; },
+    huecos: (s) => { const p = mejorMemoria(s);
+      return { donde: { nombre: p ? p.prov : "la comarca" }, n: p ? p.anio : 0,
+               cual: p ? p.id : "hambre" }; },
+    porCual: {
+      invasion: ["En {donde} siguen contando lo de {n}, cuando pasó por allí un ejército que no era el nuestro. (Los viejos lo cuentan como si lo hubieran visto|No hay casa que no tenga su versión|Se enseña a los hijos antes que el catecismo)"],
+      saqueo: ["En {donde} no se ha olvidado lo de {n}: se llevaron hasta las puertas. (Todavía se señalan las casas|Todavía se nombra a los que vinieron|Y todavía no se ha devuelto nada)"],
+      escarmiento: ["En {donde} se acuerdan de {n}, del año en que entró la tropa del rey. (No vino a defenderlos y eso no se explica dos veces|Desde entonces la corona pide y allí se calla|Los que lo vieron ya murieron y la historia sigue)"],
+      hambre: ["En {donde} se sigue midiendo todo contra el hambre de {n}. (Los que la pasaron ya no viven y el miedo sí|Se guarda grano de más desde entonces|Se cuenta a los hijos qué se comió aquel invierno)"],
+      peste: ["En {donde} se cuenta lo de {n}, cuando se murió media comarca en un año. (Aún se rodean las casas que quedaron vacías|Se dice el número exacto y nadie lo comprueba)"],
+      ruina: ["En {donde} se acuerdan de {n}, del año en que se vino todo abajo. (Se levantó lo que se pudo y donde se pudo|Hay quien no volvió a construir de piedra)"],
+      libertad: ["En {donde} se celebra todavía lo de {n}, el año en que se rompieron las cadenas. (No hace falta que nadie explique por qué|Se cuenta con nombres y apellidos|Los que lo vieron lo contaron hasta morirse)"],
+      bonanza: ["En {donde} se habla de los años buenos como si acabaran de terminar. (Todo lo nuevo se compara con aquello y pierde|Nadie de allí quiere que nada cambie|Se cuenta que entonces sobraba, y a lo mejor es verdad)"],
+      victoria: ["En {donde} todavía se nombra a los de {n}, los que se fueron a aquella guerra y volvieron ganándola. (Hay una calle con su nombre y no la cambia nadie|Los nietos lo cuentan mejor que los que fueron)"] },
+    fr: ["En {donde} siguen contando lo que pasó en {n}"] },
+
   // ——— el planeta, que se mueve solo ———
   // Estos observadores no miran al reino sino al mundo. Son los que hacen que
   // un turno pasivo pueda contar algo que no decidió nadie: que el monte
