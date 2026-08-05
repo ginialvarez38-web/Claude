@@ -6659,7 +6659,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -6878,7 +6878,11 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     frenar();
     setRotulo(null);
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    e.currentTarget.setPointerCapture?.(e.pointerId);
+    // Atrapar el puntero acá parecía lo correcto —así el arrastre sigue aunque
+    // el dedo salga del mapa— y rompía lo más básico: con el puntero atrapado
+    // por el lienzo, el navegador manda el clic al lienzo y no a la comarca, y
+    // tocar una provincia no la abría. Se atrapa cuando el arrastre empieza de
+    // verdad, que es cuando hace falta.
     if (punteros.current.size === 1) {
       movido.current = false;
       arrastre.current = { x: e.clientX, y: e.clientY, vx: vbRef.current.x, vy: vbRef.current.y };
@@ -6900,7 +6904,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     const a = arrastre.current;
     if (!a || a.pinch || a.vx == null) return;
     const dx = e.clientX - a.x, dy = e.clientY - a.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) movido.current = true;
+    if (Math.abs(dx) + Math.abs(dy) > 4 && !movido.current) {
+      movido.current = true;
+      // ahora sí: de aquí en más el gesto es un arrastre y el mapa se queda con
+      // el puntero hasta que se suelte, salga por donde salga
+      try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
+    }
     const k = escalaPx();
     fijar(limitar({ ...vbRef.current, x: a.vx - dx * k, y: a.vy - dy * k }));
   }
@@ -7427,6 +7436,31 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     if (!onSeleccion) return;
     onSeleccion(seleccion === id ? null : id);
   };
+  // El clic derecho abre la rueda sobre lo que haya debajo. Se sondea el punto
+  // igual que para el rótulo: si cae en comarca propia, va la comarca; si cae
+  // en tierra ajena, va el país; si cae en el mar, no va nada y la rueda no se
+  // abre. El navegador se queda sin su menú, que acá no sirve para nada.
+  function onContexto(e) {
+    if (!onRueda) return;
+    e.preventDefault();
+    // La rueda se abre encima del mapa y se queda con el «soltar» del botón,
+    // así que el gesto se cierra acá a mano. Sin esto el mapa se quedaba
+    // creyendo que el dedo seguía apoyado y el clic siguiente no elegía nada.
+    punteros.current.clear();
+    arrastre.current = null;
+    movido.current = false;
+    setRotulo(null);
+    const r = medRef.current, v = vbRef.current;
+    if (!r || !r.w) return;
+    const mx = v.x + ((e.clientX - r.left) / r.w) * v.w;
+    const my = v.y + ((e.clientY - r.top) / r.h) * v.h;
+    let a = null;
+    try { a = accidenteEn(mx, my, (v.w / r.w) * 9); } catch (_) { a = null; }
+    const mio = a && a.t === "tierra"
+      ? mias.find((m) => (a.idx != null && m.idx === a.idx) || m.nombre === a.n) : null;
+    onRueda(mio ? { id: mio.id }
+      : a && a.t === "tierra" ? { ajena: true, nombre: a.n } : null, e.clientX, e.clientY);
+  }
   const enComparacion = new Set(comparadas || []);
   const entrar = (id) => (e) => { if (e.pointerType !== "touch" && !arrastre.current) setHover(id); };
   const salir = () => setHover(null);
@@ -7439,6 +7473,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         onPointerLeave={() => setRotulo(null)}
+        onContextMenu={onContexto}
         onDoubleClick={(e) => zoomSuave(e.shiftKey ? 2 : 0.5, e.clientX, e.clientY)}
         onClick={() => { if (movido.current) return; setCiudadSel(null); if (onSeleccion) onSeleccion(null); }}
         style={{ width: "100%", height: "100%", display: "block", touchAction: "none", cursor: "grab" }}>
@@ -7701,7 +7736,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, marginTop: 3,
             color: sel.ocupada ? C.red : sel.capital ? C.gold : C.brass }}>
             {sel.ocupada ? "EN MANOS AJENAS" : sel.capital ? "CAPITAL DEL REINO" : "PROVINCIA"}
-            {onComparar && <span style={{ color: C.cyan, opacity: 0.75 }}>{" · CTRL+CLIC PARA COMPARAR"}</span>}
+            {onComparar && <span style={{ color: C.cyan, opacity: 0.75 }}>{" · CTRL+CLIC: COMPARAR"}</span>}
+            {onRueda && <span style={{ color: C.brass, opacity: 0.75 }}>{" · DERECHO O M: QUÉ HACER"}</span>}
           </div>
           {/* Si se está buscando sitio para una obra, el veredicto de esta
               comarca va arriba del todo: es lo que se vino a mirar. */}
@@ -14798,6 +14834,134 @@ function correrSecretarios(s, rnd) {
       texto: `✒ Despachado en tu nombre: ${linea}.` }] } };
 }
 
+// ═══ EL MENÚ RADIAL ═════════════════════════════════════════
+// (doc: cada objeto posee un menú radial; al hacer clic derecho aparecen
+// únicamente las acciones posibles; no existen listas interminables.)
+//
+// Lo importante no es que sea redondo: es el filtro. Un menú que enseña ocho
+// cosas y deja seis en gris obliga a leerlas todas para descubrir que solo dos
+// sirven. Acá lo que no se puede hacer no está, y lo que está se puede hacer
+// —el oro alcanza, la técnica llega, la comarca es tuya— sin excepciones.
+//
+// Y no hay una sola acción que no exista ya en algún panel: la rueda no
+// inventa poderes, ahorra el viaje. Las dos que sí tocan el reino —mudar la
+// corte y abrir camino— son las que el mapa venía pidiendo desde que hay una
+// capa que dice dónde conviene un camino y ninguna forma de abrirlo.
+
+const COSTE_CAPITAL = 140;
+// Un camino cuesta más cuanto mejor sea, y el siglo manda: no se decreta un
+// ferrocarril en 1300 porque no se sabe hacer.
+function costeCamino(p, s) {
+  const hasta = viaMaxima((s || {}).stats);
+  const va = acotar(Math.round((p || {}).via || 0), 0, VIAS.length - 1);
+  if (va >= hasta) return null;
+  const destino = va + 1;
+  return { destino, n: VIAS[destino].n, oro: Math.round(35 * Math.pow(1.9, destino - 1)) };
+}
+function abrirCamino(s, id) {
+  const p = (s.provincias || []).find((q) => q.id === id);
+  if (!p || p.ocupada) return null;
+  const c = costeCamino(p, s);
+  if (!c || ((s.edu || {}).oro || 0) < c.oro) return null;
+  return { oro: c.oro,
+    s: { ...s, edu: { ...s.edu, oro: s.edu.oro - c.oro },
+      provincias: s.provincias.map((q) => (q.id === id ? { ...q, via: c.destino } : q)) },
+    texto: `◆ Se abre ${c.n} en ${p.nombre} (⚜ ${c.oro}). Lo que allí se coseche ya tiene por dónde salir.` };
+}
+function mudarCapital(s, id) {
+  const p = (s.provincias || []).find((q) => q.id === id);
+  if (!p || p.capital || p.ocupada) return null;
+  if (((s.edu || {}).oro || 0) < COSTE_CAPITAL) return null;
+  const vieja = (s.provincias || []).find((q) => q.capital);
+  return { oro: COSTE_CAPITAL,
+    s: { ...s, edu: { ...s.edu, oro: s.edu.oro - COSTE_CAPITAL },
+      // mudar la corte descoloca a medio reino: la que la pierde lo siente
+      stats: { ...s.stats, estabilidad: acotar(s.stats.estabilidad - 3, 0, 100) },
+      provincias: s.provincias.map((q) => q.id === id
+        ? { ...q, capital: true, lealtad: acotar((q.lealtad ?? 60) + 6, 0, 100) }
+        : q.capital ? { ...q, capital: false, lealtad: acotar((q.lealtad ?? 60) - 8, 0, 100) } : q) },
+    texto: `👑 La corte se muda a ${p.nombre}${vieja ? `, y ${vieja.nombre} deja de ser cabeza del reino` : ""}`
+      + ` (⚜ ${COSTE_CAPITAL}, Estabilidad −3). Los que se quedan lo dirán durante una generación.` };
+}
+
+// Cada acción sabe cuándo se puede y qué hace. `hace` no toca nada por su
+// cuenta: devuelve lo que hay que hacer, y quien lo pidió decide si abre un
+// panel, pinta el mapa o cambia el reino.
+const ACCIONES = [
+  { id: "ficha", n: "ver la comarca", ico: "◈", col: "gold",
+    puede: (p, s, x) => !p.ajena && x.seleccion !== p.id,
+    hace: (p) => ({ tipo: "ver", id: p.id }) },
+  { id: "administrar", n: "administrarla", ico: "▤", col: "green",
+    puede: (p) => !p.ajena,
+    hace: (p) => ({ tipo: "ir", mando: "prov", id: p.id }) },
+  { id: "camino", n: "abrir camino", ico: "🛤", col: "brass",
+    // solo si hay escalón por subir y con qué pagarlo
+    puede: (p, s, x) => { if (p.ajena || p.ocupada) return false;
+      const c = costeCamino(p, s); return !!c && x.oro >= c.oro; },
+    rotulo: (p, s) => { const c = costeCamino(p, s); return `abrir ${c.n} · ⚜ ${c.oro}`; },
+    hace: (p) => ({ tipo: "obra", obra: "camino", id: p.id }) },
+  { id: "capital", n: "hacer capital", ico: "👑", col: "gold",
+    puede: (p, s, x) => !p.ajena && !p.capital && !p.ocupada && x.oro >= COSTE_CAPITAL,
+    rotulo: () => `hacer capital · ⚜ ${COSTE_CAPITAL}`,
+    hace: (p) => ({ tipo: "obra", obra: "capital", id: p.id }) },
+  { id: "conviene", n: "qué conviene aquí", ico: "▣", col: "cyan",
+    puede: (p, s) => !p.ajena && !p.ocupada && (s.provincias || []).length > 1,
+    hace: (p, s) => {
+      // la obra que mejor le sienta a esta comarca, no la mejor comarca para
+      // una obra: es la misma cuenta mirada del otro lado
+      let mejor = null;
+      for (const o of OBRAS_SITIO) {
+        const c = conviene(o, p, s.provincias, s);
+        if (!c || c.veto) continue;
+        if (!mejor || c.punt > mejor.punt) mejor = { ...c, obra: o.id };
+      }
+      return mejor ? { tipo: "sitio", obra: mejor.obra, id: p.id } : null;
+    } },
+  { id: "comparar", n: "compararla", ico: "⇄", col: "cyan",
+    puede: (p, s, x) => !p.ajena && !(x.comparadas || []).includes(p.id)
+      && (x.comparadas || []).length < 4,
+    hace: (p) => ({ tipo: "comparar", id: p.id }) },
+  { id: "gente", n: "ver a su gente", ico: "☗", col: "violet",
+    puede: (p) => !!(p.soc && p.soc.claseMayor),
+    hace: (p) => ({ tipo: "vista", vista: "clases", id: p.id }) },
+  { id: "reclamar", n: "reclamarla", ico: "⚔", col: "red",
+    puede: (p) => !!p.ocupada,
+    hace: () => ({ tipo: "ir", mando: "ejercito" }) },
+  { id: "tratar", n: "tratar con ellos", ico: "❖", col: "blue",
+    puede: (p, s, x) => !!p.ajena && (x.vecino || null) != null,
+    rotulo: (p, s, x) => `tratar con ${x.vecino}`,
+    hace: () => ({ tipo: "ir", mando: "gob" }) },
+];
+const ACCION_IDX = Object.fromEntries(ACCIONES.map((a) => [a.id, a]));
+const TOPE_RUEDA = 7;   // más de siete y ya es una lista, que es lo que se venía a evitar
+
+// Lo que se puede hacer aquí y ahora, y nada más. Si no se puede hacer nada
+// —tierra de nadie, mar abierto— la rueda no se abre: un menú vacío es peor
+// que ningún menú.
+function accionesDe(p, s, x) {
+  if (!p) return [];
+  const ctx = x || {};
+  const out = [];
+  for (const a of ACCIONES) {
+    let ok = false;
+    try { ok = !!a.puede(p, s || {}, ctx); } catch (e) { ok = false; }
+    if (!ok) continue;
+    let rot = a.n;
+    try { if (a.rotulo) rot = a.rotulo(p, s || {}, ctx) || a.n; } catch (e) { rot = a.n; }
+    out.push({ id: a.id, n: rot, ico: a.ico, col: a.col });
+  }
+  return out.slice(0, TOPE_RUEDA);
+}
+// Y lo que hay que hacer cuando se elige una.
+function pedidoDeAccion(id, p, s, x) {
+  const a = ACCION_IDX[id];
+  if (!a || !p) return null;
+  let ok = false;
+  try { ok = !!a.puede(p, s || {}, x || {}); } catch (e) { ok = false; }
+  if (!ok) return null;                      // lo que no se podía mostrar tampoco se puede hacer
+  try { return a.hace(p, s || {}, x || {}); } catch (e) { return null; }
+}
+
 // ——— la columna de la izquierda ———
 // Todo lo que reclama atención aparece acá y en ningún otro sitio. Nada
 // interrumpe la partida con una ventana encima: el que gobierna decide qué
@@ -14870,6 +15034,86 @@ function avisosDelReino(s, x) {
   return A.sort((a, b) => NIVELES.indexOf(a.nivel) - NIVELES.indexOf(b.nivel));
 }
 
+// La rueda. Los iconos en un anillo y el nombre en el medio: es la forma que
+// no se estira con el largo de las etiquetas, y la que deja el dedo a la misma
+// distancia de todas las opciones. Lo que dice cada una se lee al pasar por
+// encima, en el centro, que es donde ya está mirando el ojo.
+//
+// Se maneja con el ratón y sin él: las flechas giran, Enter elige, Esc cierra,
+// y los números eligen directo.
+function RuedaAcciones({ x, y, titulo, glosa, acciones, onElegir, onCerrar }) {
+  const [sobre, setSobre] = useState(-1);
+  // El anillo tiene que despegarse del disco del medio: con los botones
+  // pegados, sus sombras y la del disco se funden en un borrón negro que tapa
+  // el mapa justo donde uno está mirando.
+  const R = 97, RB = 21;
+  const n = acciones.length;
+  useEffect(() => {
+    const oye = (ev) => {
+      // Mientras la rueda está abierta, el teclado es suyo: si no, un 3 elegiría
+      // la tercera acción y además abriría el tercer ministerio.
+      const mio = () => { ev.preventDefault(); ev.stopPropagation(); };
+      if (ev.key === "Escape") { mio(); onCerrar(); return; }
+      if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
+        mio(); setSobre((i) => (i + 1 + n) % n); return; }
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
+        mio(); setSobre((i) => (i <= 0 ? n - 1 : i - 1)); return; }
+      if (ev.key === "Enter" || ev.key === " ") {
+        mio(); if (acciones[sobre]) onElegir(acciones[sobre].id); return; }
+      const d = Number(ev.key);
+      if (ev.key.length === 1 && d >= 1 && d <= n) { mio(); onElegir(acciones[d - 1].id); }
+    };
+    if (typeof window === "undefined") return undefined;
+    window.addEventListener("keydown", oye, true);
+    return () => window.removeEventListener("keydown", oye, true);
+  }, [n, sobre, acciones, onElegir, onCerrar]);
+  const mostrada = acciones[sobre];
+  return (
+    <div onClick={onCerrar} onContextMenu={(e) => { e.preventDefault(); onCerrar(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 20 }}>
+      <div className="pm-fade" role="menu" aria-label={titulo}
+        onClick={(e) => e.stopPropagation()}
+        style={{ position: "absolute", left: x, top: y, width: 0, height: 0 }}>
+        {/* el disco del medio: de qué se trata y qué hace lo que se está señalando */}
+        <div style={{ position: "absolute", left: -62, top: -40, width: 124, height: 80,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          borderRadius: 62, background: "rgba(10,16,23,0.97)", border: `1px solid ${C.line}`,
+          boxShadow: "0 3px 12px rgba(0,0,0,0.45)", pointerEvents: "none", padding: "0 8px" }}>
+          <div style={{ fontFamily: serif, fontSize: 13, color: C.ink, textAlign: "center",
+            lineHeight: 1.15 }}>{titulo}</div>
+          <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 0.6, marginTop: 3,
+            color: mostrada ? C[mostrada.col] || C.brass : C.muted, textAlign: "center",
+            lineHeight: 1.25 }}>
+            {mostrada ? mostrada.n : glosa}
+          </div>
+        </div>
+        {acciones.map((a, i) => {
+          // de arriba y en el sentido del reloj: es como se leen los relojes y
+          // como se recuerda dónde estaba la que se usó la vez pasada
+          const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+          const cx = Math.cos(ang) * R, cy = Math.sin(ang) * R;
+          const act = sobre === i;
+          const col = C[a.col] || C.brass;
+          return (
+            <button key={a.id} role="menuitem" title={a.n}
+              onMouseEnter={() => setSobre(i)} onMouseLeave={() => setSobre(-1)}
+              onClick={(e) => { e.stopPropagation(); onElegir(a.id); }}
+              style={{ position: "absolute", left: cx - RB, top: cy - RB,
+                width: RB * 2, height: RB * 2, borderRadius: RB, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
+                background: act ? `${col}2E` : "rgba(10,16,23,0.96)",
+                border: `1px solid ${act ? col : C.line}`, color: act ? col : C.ink,
+                boxShadow: act ? `0 0 14px ${col}55` : "0 4px 14px rgba(0,0,0,0.5)",
+                transition: "background 90ms, border-color 90ms" }}>
+              {a.ico}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function PaxMundi() {
   const [fase, setFase] = useState("setup");
   const [era, setEra] = useState(null);
@@ -14928,6 +15172,12 @@ export default function PaxMundi() {
   // La lista de lo que un secretario no puede hacer se lee una vez y no se
   // vuelve a mirar; va plegada.
   const [vedadoAbierto, setVedadoAbierto] = useState(false);
+  // La rueda: sobre qué se abrió y en qué punto de la pantalla.
+  const [rueda, setRueda] = useState(null);
+  const ruedaRef = useRef(null);
+  ruedaRef.current = rueda;
+  const provSelRef = useRef(null);
+  const abrirRuedaRef = useRef(() => {});
   const [vistaPedida, setVistaPedida] = useState(null);
   const buscaRef = useRef(null);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
@@ -14971,6 +15221,7 @@ export default function PaxMundi() {
         // comparación, después el panel. Se mira por la referencia y no por la
         // variable: el oyente se registra una sola vez y la variable que
         // atrapó entonces sigue valiendo lo que valía entonces.
+        if (ruedaRef.current) { setRueda(null); return; }
         if (sitioRef.current) { setSitio(null); return; }
         setComparadas((xs) => { if (xs.length) return []; setTab(null); setProvSel(null); return xs; });
         return;
@@ -14987,6 +15238,11 @@ export default function PaxMundi() {
       } else if (ev.key === "0") {
         const m = MANDOS[9];
         if (m) { ev.preventDefault(); setTab((t) => (t === m.id ? null : m.id)); }
+      } else if ((ev.key === "m" || ev.key === "M") && provSelRef.current) {
+        // La rueda sin ratón: sobre la comarca elegida y en medio de la pantalla.
+        ev.preventDefault();
+        abrirRuedaRef.current({ id: provSelRef.current },
+          window.innerWidth / 2, window.innerHeight / 2);
       }
     };
     window.addEventListener("keydown", oye);
@@ -16496,6 +16752,49 @@ export default function PaxMundi() {
   const alComparar = (id) => setComparadas((xs) => (xs.includes(id)
     ? xs.filter((x) => x !== id) : xs.length >= 4 ? [...xs.slice(1), id] : [...xs, id]));
 
+  // ——— la rueda ———
+  // Sobre qué se abrió, qué se puede hacer con ello y qué pasa al elegir. Todo
+  // lo que la rueda ofrece existe en otro sitio: lo único que ahorra es el
+  // viaje hasta ese otro sitio.
+  const ctxRueda = { oro: Math.floor((s.edu || {}).oro || 0), comparadas, seleccion: provSel,
+    vecino: rueda && rueda.ajena
+      ? ((s.vecinos || []).find((v) => v.nombre === rueda.nombre
+          || v.nombre === PAIS_ES[rueda.nombre] || PAIS_ES[v.nombre] === rueda.nombre) || {}).nombre
+        || (PAIS_ES[rueda.nombre] ? rueda.nombre : null)
+      : null };
+  const objRueda = !rueda ? null
+    : rueda.id ? (s.provincias || []).find((p) => p.id === rueda.id) || null
+    : rueda.ajena ? { ajena: true, nombre: PAIS_ES[rueda.nombre] || rueda.nombre } : null;
+  const accRueda = objRueda ? accionesDe(objRueda, s, ctxRueda) : [];
+  provSelRef.current = provSel;
+  abrirRuedaRef.current = abrirRueda;
+  function abrirRueda(que, px, py) {
+    if (!que) { setRueda(null); return; }
+    // no se abre en el borde: hay que poder llegar a todos los botones
+    const m = 132;
+    setRueda({ ...que, x: acotar(px, m, (typeof window !== "undefined" ? window.innerWidth : 1200) - m),
+      y: acotar(py, ALTO_CAB + m - 40, (typeof window !== "undefined" ? window.innerHeight : 800) - ALTO_PIE - m + 40) });
+  }
+  function elegirDeRueda(id) {
+    const pedido = pedidoDeAccion(id, objRueda, s, ctxRueda);
+    setRueda(null);
+    if (!pedido) return;
+    if (pedido.tipo === "ver") { setProvSel(pedido.id); return; }
+    if (pedido.tipo === "ir") { if (pedido.id) setProvSel(pedido.id); setTab(pedido.mando); return; }
+    if (pedido.tipo === "comparar") { alComparar(pedido.id); return; }
+    if (pedido.tipo === "vista") { setProvSel(pedido.id); setVistaPedida({ id: pedido.vista, k: Date.now() }); return; }
+    if (pedido.tipo === "sitio") { setProvSel(pedido.id); setSitio(pedido.obra); setTab(null); return; }
+    if (pedido.tipo === "obra") {
+      setState((st) => {
+        const r = pedido.obra === "camino" ? abrirCamino(st, pedido.id) : mudarCapital(st, pedido.id);
+        if (!r) return st;
+        return { ...r.s, cronica: [...st.cronica,
+          { anio: st.anio, dia: st.dia, tipo: "orden", texto: r.texto }] };
+      });
+      setProvSel(pedido.id);
+    }
+  }
+
   // ——— lo que tiene que decir el asesor de este ministerio ———
   const consejos = tab ? consejosDe(tab, s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
     neto: netoPres, piT, techoOcupado, proyActivos,
@@ -16542,6 +16841,7 @@ export default function PaxMundi() {
           vistaPedida={vistaPedida}
           comparadas={comparadas}
           onComparar={alComparar}
+          onRueda={abrirRueda}
           sitio={sitioMapa}
           margenSup={ALTO_CAB}
           margenInf={ALTO_PIE}
@@ -16657,6 +16957,17 @@ export default function PaxMundi() {
           cuáles son las tres mejores, que es lo que casi siempre se quiere
           saber; el resto está en el color de cada comarca y en lo que dice al
           pasar por encima. */}
+      {/* ── LA RUEDA ──────────────────────────────────────────────────
+          Clic derecho sobre lo que sea y salen las acciones que se pueden
+          hacer con ello, y solo esas. Si no se puede hacer nada —mar abierto,
+          tierra de nadie— no se abre: un menú vacío es peor que ninguno. */}
+      {rueda && accRueda.length > 0 && (
+        <RuedaAcciones x={rueda.x} y={rueda.y} acciones={accRueda}
+          titulo={objRueda.nombre + (objRueda.capital ? " · la corte" : objRueda.ocupada ? " · ocupada" : "")}
+          glosa={objRueda.ajena ? "tierra ajena" : `${accRueda.length} cosas que hacer`}
+          onElegir={elegirDeRueda} onCerrar={() => setRueda(null)} />
+      )}
+
       {dondeSitio && (
         <div className="pm-fade" style={{ position: "fixed", top: ALTO_CAB + 10,
           left: "50%", transform: "translateX(-50%)", zIndex: 6, maxWidth: "min(560px, 70vw)",
