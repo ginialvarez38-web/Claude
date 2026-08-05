@@ -6659,7 +6659,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, comparadas, onComparar }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -7404,9 +7404,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const fichaBreve = med.h > 0 && med.h < 380;
   const tocar = (id) => (e) => {
     e.stopPropagation();
-    if (movido.current || !onSeleccion) return;
+    if (movido.current) return;
+    // Con la tecla de control —o mayúsculas, o meta— la comarca no se abre: se
+    // suma a la comparación. Es el gesto que ya tiene aprendido cualquiera que
+    // haya seleccionado varias cosas en cualquier programa.
+    if ((e.ctrlKey || e.metaKey || e.shiftKey) && onComparar) { onComparar(id); return; }
+    if (!onSeleccion) return;
     onSeleccion(seleccion === id ? null : id);
   };
+  const enComparacion = new Set(comparadas || []);
   const entrar = (id) => (e) => { if (e.pointerType !== "touch" && !arrastre.current) setHover(id); };
   const salir = () => setHover(null);
 
@@ -7561,6 +7567,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               <g key={"rm" + m.id}>
                 {esSel && <circle cx={m.x} cy={m.y} r={r * 2.4} fill="none" stroke="#FFE9A8"
                   strokeWidth={rMarca * 0.16} opacity="0.75" className="pm-latido" />}
+                {enComparacion.has(m.id) && <circle cx={m.x} cy={m.y} r={r * 1.9} fill="none"
+                  stroke="#45C4B0" strokeWidth={rMarca * 0.2} opacity="0.9"
+                  strokeDasharray={`${rMarca * 0.5} ${rMarca * 0.35}`} />}
                 {m.capital ? (
                   <path d={estrella(m.x, m.y, r * 1.45)} fill={m.ocupada ? "#B4595F" : "#F0C74A"}
                     stroke="rgba(20,14,6,0.8)" strokeWidth={rMarca * 0.14} />
@@ -7674,6 +7683,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, marginTop: 3,
             color: sel.ocupada ? C.red : sel.capital ? C.gold : C.brass }}>
             {sel.ocupada ? "EN MANOS AJENAS" : sel.capital ? "CAPITAL DEL REINO" : "PROVINCIA"}
+            {onComparar && <span style={{ color: C.cyan, opacity: 0.75 }}>{" · CTRL+CLIC PARA COMPARAR"}</span>}
           </div>
           <div style={{ fontSize: 10.5, color: C.muted, fontFamily: mono, marginTop: 5, lineHeight: 1.5 }}>
             {(TERRENOS[sel.terreno] || TERRENOS.llanura).n.toLowerCase()}
@@ -13872,6 +13882,74 @@ function buscarEnElMundo(consulta, s, tope) {
   return out;
 }
 
+// ═══ COMPARAR COMARCAS ══════════════════════════════════════
+// Poner dos o tres comarcas una al lado de otra y ver en qué se parecen y en
+// qué no. Suena a poco y es de las cosas que más ahorran: sin esto, comparar
+// significa abrir una ficha, apuntar el número, cerrarla, abrir la otra y
+// acordarse. Con esto, se ven las dos filas y se acabó.
+//
+// Los indicadores son los que pide el documento, y ni uno más de los que se
+// puedan sacar de lo que la partida ya calcula. Cada uno trae además su nivel
+// del semáforo de siempre, así que la columna que va mal se ve antes de leer
+// la cifra.
+const COMPARA = [
+  { id: "gente", n: "población", val: (p) => p.poblacion || 0,
+    fmt: (v) => fmtPob(v), cortes: [200, 1200, 4000, 12000] },
+  { id: "pib", n: "lo que produce en total", val: (p) => ((p.soc || {}).rinde || 0) * (p.poblacion || 0),
+    fmt: (v) => fmtPob(Math.round(v)), cortes: [300, 1500, 5000, 15000],
+    pie: "gente por lo que rinde cada uno" },
+  { id: "rinde", n: "producción por cabeza", val: (p) => ((p.soc || {}).rinde != null ? p.soc.rinde : null),
+    fmt: (v) => "×" + v.toFixed(2), cortes: [0.85, 1.05, 1.35, 1.8] },
+  { id: "industria", n: "industria", val: (p) => parteDeClases(p, ["obrero", "tecnico", "artesano", "minero"]),
+    fmt: (v) => Math.round(v * 100) + "%", cortes: [0.04, 0.1, 0.2, 0.34],
+    pie: "quién vive del taller y de la mina" },
+  { id: "letras", n: "educación", val: (p) => ((p.soc || {}).letras != null ? p.soc.letras : null),
+    fmt: (v) => Math.round(v * 100) + " de cada 100", cortes: [0.06, 0.16, 0.34, 0.6] },
+  { id: "via", n: "infraestructura", val: (p) => (p.via || 0),
+    fmt: (v) => (v >= 3 ? "ferrocarril" : v >= 2 ? "carretera" : v >= 1 ? "calzada" : v > 0 ? "senda" : "sin camino"),
+    cortes: [0.5, 1.5, 2.5, 3.5] },
+  { id: "cerca", n: "conectividad", val: (p, provs) => 1 - aislamientoDe(p, provs || []),
+    fmt: (v) => Math.round(v * 100) + "%", cortes: [0.35, 0.48, 0.62, 0.78],
+    pie: "cuánto cuesta que llegue una orden" },
+  { id: "humo", n: "contaminación", val: (p) => Math.max((p.humo || {}).aire || 0, (p.humo || {}).agua || 0),
+    fmt: (v) => (v < 0.06 ? "limpia" : Math.round(v * 100) + "% sucia"),
+    cortes: [0.55, 0.38, 0.22, 0.08], alReves: true },
+  { id: "animo", n: "felicidad", val: (p) => ((p.soc || {}).animo != null ? p.soc.animo : null),
+    fmt: (v) => Math.round(v) + " de 100", cortes: [35, 48, 60, 72] },
+  // dos que el documento no nombra y que en este juego dicen más que ninguna
+  { id: "vida", n: "se vive", val: (p) => ((p.soc || {}).esperanza != null ? p.soc.esperanza : null),
+    fmt: (v) => Math.round(v) + " años", cortes: [28, 34, 42, 55] },
+  { id: "lealtad", n: "lealtad", val: (p) => (p.lealtad == null ? null : p.lealtad),
+    fmt: (v) => Math.round(v) + " de 100", cortes: [25, 42, 58, 74] },
+];
+const COMPARA_IDX = Object.fromEntries(COMPARA.map((x) => [x.id, x]));
+
+// La tabla. Devuelve una fila por indicador con el valor de cada comarca, ya
+// formateado, con su nivel, y con quién gana y quién pierde señalado: lo que
+// se busca al comparar no es el número, es cuál de las dos.
+function compararComarcas(provs, ids) {
+  const elegidas = (ids || []).map((id) => (provs || []).find((p) => p.id === id)).filter(Boolean);
+  if (elegidas.length < 2) return { comarcas: elegidas, filas: [] };
+  const filas = COMPARA.map((ind) => {
+    const cel = elegidas.map((p) => {
+      let v = null;
+      try { v = ind.val(p, provs); } catch (e) { v = null; }
+      if (v == null || !Number.isFinite(v)) return { v: null, txt: "—", nivel: null };
+      return { v, txt: ind.fmt(v), nivel: nivelDe(v, ind.cortes, ind.alReves) };
+    });
+    const hay = cel.filter((c) => c.v != null);
+    if (!hay.length) return { id: ind.id, n: ind.n, pie: ind.pie, cel, mejor: -1, peor: -1 };
+    const mejorV = ind.alReves ? Math.min(...hay.map((c) => c.v)) : Math.max(...hay.map((c) => c.v));
+    const peorV = ind.alReves ? Math.max(...hay.map((c) => c.v)) : Math.min(...hay.map((c) => c.v));
+    // si todas empatan no hay ni mejor ni peor: señalarlas todas sería mentir
+    const empate = mejorV === peorV;
+    return { id: ind.id, n: ind.n, pie: ind.pie, cel,
+      mejor: empate ? -1 : cel.findIndex((c) => c.v === mejorV),
+      peor: empate ? -1 : cel.findIndex((c) => c.v === peorV) };
+  });
+  return { comarcas: elegidas, filas };
+}
+
 // ═══ LOS ASESORES ═══════════════════════════════════════════
 // Cada ministerio tiene quien le mire los números y le diga lo que ve. No
 // deciden nada: explican. Y explican siempre lo mismo, en el mismo orden, que
@@ -14314,6 +14392,9 @@ export default function PaxMundi() {
   const [buscaSel, setBuscaSel] = useState(0);
   const [mira, setMira] = useState(null);
   const [consejoAbierto, setConsejoAbierto] = useState(null);
+  // Las comarcas puestas una al lado de otra. Son pocas a propósito: con seis
+  // columnas la tabla deja de leerse y vuelve a ser lo que venía a evitar.
+  const [comparadas, setComparadas] = useState([]);
   const [vistaPedida, setVistaPedida] = useState(null);
   const buscaRef = useRef(null);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
@@ -14351,7 +14432,12 @@ export default function PaxMundi() {
         if (buscaRef.current) buscaRef.current.focus();
         return;
       }
-      if (ev.key === "Escape") { if (!escribiendo) { setTab(null); setProvSel(null); } return; }
+      if (ev.key === "Escape") {
+        if (escribiendo) return;
+        // Esc deshace de a una cosa: primero la comparación, después el panel.
+        setComparadas((xs) => { if (xs.length) return []; setTab(null); setProvSel(null); return xs; });
+        return;
+      }
       if (!escribiendo && ev.key === "/") {
         ev.preventDefault();
         if (buscaRef.current) buscaRef.current.focus();
@@ -15850,6 +15936,11 @@ export default function PaxMundi() {
   const avisos = avisosDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
     piT, libres: reservaHombres(s.poblacion, s.ejercito, s.bajasRecientes, s).libres });
 
+  // ——— las comarcas que se están comparando ———
+  const compara = comparadas.length >= 2 ? compararComarcas(s.provincias, comparadas) : null;
+  const alComparar = (id) => setComparadas((xs) => (xs.includes(id)
+    ? xs.filter((x) => x !== id) : xs.length >= 4 ? [...xs.slice(1), id] : [...xs, id]));
+
   // ——— lo que tiene que decir el asesor de este ministerio ———
   const consejos = tab ? consejosDe(tab, s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
     neto: netoPres, piT, techoOcupado, proyActivos,
@@ -15894,6 +15985,8 @@ export default function PaxMundi() {
           onSeleccion={(id) => setProvSel(id)}
           mira={mira}
           vistaPedida={vistaPedida}
+          comparadas={comparadas}
+          onComparar={alComparar}
           margenSup={ALTO_CAB}
           margenInf={ALTO_PIE}
           alto="100%" />
@@ -15998,7 +16091,76 @@ export default function PaxMundi() {
       {/* ── DERECHA: lo que se está mirando ───────────────────────────────
           Un ministerio o la comarca seleccionada. No es una pantalla: es una
           franja apoyada en el borde, y el mundo sigue detrás. */}
-      {tab && MANDO_IDX[tab] && (
+      {/* ── LA COMPARACIÓN ────────────────────────────────────────────
+          Dos o tres comarcas una al lado de otra. Se suman con control y un
+          clic en el mapa, y mientras haya alguna comparándose manda sobre el
+          ministerio: es lo que el jugador acaba de pedir mirar. */}
+      {compara && (
+      <aside className="pm-fade" style={{ position: "fixed", top: ALTO_CAB, right: 0, bottom: ALTO_PIE,
+        width: "min(470px, 46vw)", zIndex: 5, overflowY: "auto", overflowX: "hidden",
+        background: "rgba(12,18,26,0.97)", borderLeft: `1px solid ${C.line}`,
+        boxShadow: "-12px 0 30px rgba(0,0,0,0.5)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
+          position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
+          background: "rgba(10,16,23,0.99)" }}>
+          <span style={{ color: C.cyan }}>⇄</span>
+          <span style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: 1.8,
+            textTransform: "uppercase", color: C.cyan }}>una al lado de otra</span>
+          <button onClick={() => setComparadas([])} title="dejar de comparar"
+            style={{ marginLeft: "auto", padding: "2px 8px", borderRadius: 5, cursor: "pointer",
+              background: "transparent", border: `1px solid ${C.line}`, color: C.muted,
+              fontFamily: mono, fontSize: 12 }}>✕</button>
+        </div>
+        <div style={{ padding: "10px 12px 16px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: "0 6px 7px 0" }} />
+                {compara.comarcas.map((p) => (
+                  <th key={p.id} style={{ textAlign: "right", padding: "0 0 7px 8px",
+                    fontFamily: serif, fontSize: 13, fontWeight: 400, color: C.ink,
+                    borderBottom: `1px solid ${C.line}` }}>
+                    {p.nombre}
+                    <button onClick={() => alComparar(p.id)} title="quitar de la comparación"
+                      style={{ marginLeft: 5, padding: "0 4px", borderRadius: 4, cursor: "pointer",
+                        background: "transparent", border: "none", color: C.muted,
+                        fontFamily: mono, fontSize: 10 }}>✕</button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {compara.filas.map((f) => (
+                <tr key={f.id}>
+                  <td title={f.pie || undefined}
+                    style={{ padding: "5px 6px 5px 0", color: C.muted, fontFamily: mono,
+                      fontSize: 9.5, letterSpacing: 0.9, textTransform: "uppercase",
+                      borderBottom: `1px solid ${C.line}55`, whiteSpace: "nowrap" }}>{f.n}</td>
+                  {f.cel.map((c, i) => (
+                    <td key={i} style={{ padding: "5px 0 5px 8px", textAlign: "right",
+                      fontFamily: mono, fontSize: 11.5, whiteSpace: "nowrap",
+                      borderBottom: `1px solid ${C.line}55`,
+                      color: c.nivel ? colorNivel(c.nivel) : C.muted,
+                      background: i === f.mejor ? "rgba(87,178,107,0.10)"
+                        : i === f.peor ? "rgba(224,82,82,0.09)" : "transparent" }}>
+                      {c.txt}
+                      {i === f.mejor && <span style={{ color: C.green, marginLeft: 4 }}>▲</span>}
+                      {i === f.peor && <span style={{ color: C.red, marginLeft: 4 }}>▼</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 10, lineHeight: 1.5, opacity: 0.85 }}>
+            Con <b style={{ color: C.ink }}>control</b> y un clic en el mapa se añade o se quita una
+            comarca. Caben cuatro; al añadir la quinta se va la más vieja.
+          </div>
+        </div>
+      </aside>
+      )}
+
+      {tab && MANDO_IDX[tab] && !compara && (
       <aside className="pm-fade" style={{ position: "fixed", top: ALTO_CAB, right: 0, bottom: ALTO_PIE,
         width: "min(430px, 44vw)", zIndex: 5, overflowY: "auto", overflowX: "hidden",
         background: "rgba(12,18,26,0.955)", borderLeft: `1px solid ${C.line}`,
