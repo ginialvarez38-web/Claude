@@ -6659,7 +6659,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, comparadas, onComparar }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -7371,9 +7371,24 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // Lo que la vista puesta mide justo donde está el dedo. Un mapa de colores
   // sin número al lado obliga a adivinar entre dos tonos parecidos, y en una
   // rampa de seis pasos los dos del medio se parecen siempre.
+  // Devuelve qué se está midiendo y cuánto mide. Buscar sitio para una obra
+  // manda sobre la capa puesta: si el mapa está pintado de conveniencias, lo
+  // que hace falta leer al pasar por encima es la conveniencia, no la lluvia.
   const lecturaEn = (r) => {
-    if (!temat || !r || r.t !== "tierra") return null;
-    const mio = mias.find((m) => (r.idx != null && m.idx === r.idx) || m.nombre === r.n);
+    if (!r || r.t !== "tierra") return null;
+    const suyo = mias.find((m) => (r.idx != null && m.idx === r.idx) || m.nombre === r.n);
+    if (sitio && sitio.mapa && suyo && sitio.mapa[suyo.id]) {
+      const c = sitio.mapa[suyo.id];
+      const O = OBRA_SITIO_IDX[sitio.obra];
+      return { que: O ? O.n : "dónde conviene", col: colorNivel(c.nivel),
+        txt: (DICE[c.nivel] || "") + (c.porque.length ? " · " + c.porque.join("; ") : "") };
+    }
+    const t = medidaEn(r, suyo);
+    return t == null ? null : { que: V.n.toLowerCase(), col: C.gold, txt: t };
+  };
+  const medidaEn = (r, suyo) => {
+    if (!temat) return null;
+    const mio = suyo;
     const amb = mio ? ambDe(mio)
       : V.ambito === "reino" ? null
       : ambienteDe(r.idx, r.x, r.y, r.terreno, r.costera, false);
@@ -7492,7 +7507,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <path d={trazoReino} fill="#222B1A" stroke="none" />
           {conTrazo.map((m) => (
             <path key={"rf" + m.id} d={m.poly}
-              fill={m.ocupada ? `url(#${uid}Ocupada)` : (colorMio(V, m, cortesVista, mias, anio) || "#6E7A48")}
+              fill={sitio && sitio.mapa && sitio.mapa[m.id]
+                ? colorNivel(sitio.mapa[m.id].nivel)
+                : m.ocupada ? `url(#${uid}Ocupada)` : (colorMio(V, m, cortesVista, mias, anio) || "#6E7A48")}
               /* En una vista temática el relleno va opaco. Con el 0,88 de
                  siempre, el mismo valor salía un punto más oscuro dentro de tu
                  frontera que fuera, y entonces el color deja de significar lo
@@ -7657,8 +7674,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           {(() => {
             const l = lecturaEn(rotulo);
             return l ? (
-              <div style={{ fontFamily: mono, fontSize: 10, color: C.gold }}>
-                {V.n.toLowerCase()}: {l}
+              <div style={{ fontFamily: mono, fontSize: 10, color: l.col }}>
+                {l.que}: {l.txt}
               </div>
             ) : null;
           })()}
@@ -7668,9 +7685,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       {/* La columna de la izquierda: la provincia elegida arriba y la ciudad
           que se haya tocado debajo. Van juntas porque una ciudad está en una
           provincia y lo natural es leer las dos de un vistazo. */}
-      <div style={{ position: "absolute", left: 10, top: 10, zIndex: 3, display: "flex",
+      <div style={{ position: "absolute", left: margenIzq ? `calc(10px + ${margenIzq})` : 10,
+        top: 10 + (margenSup || 0), zIndex: 3, display: "flex",
         flexDirection: "column", gap: 7, alignItems: "flex-start",
-        maxHeight: "calc(100% - 20px)", pointerEvents: "none" }}>
+        maxHeight: `calc(100% - ${20 + (margenSup || 0) + (margenInf || 0)}px)`, pointerEvents: "none" }}>
       {sel && (
         <div className="pm-fade" style={{
           width: acotar((med.w || 420) * 0.45, 148, 200),
@@ -7685,6 +7703,25 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             {sel.ocupada ? "EN MANOS AJENAS" : sel.capital ? "CAPITAL DEL REINO" : "PROVINCIA"}
             {onComparar && <span style={{ color: C.cyan, opacity: 0.75 }}>{" · CTRL+CLIC PARA COMPARAR"}</span>}
           </div>
+          {/* Si se está buscando sitio para una obra, el veredicto de esta
+              comarca va arriba del todo: es lo que se vino a mirar. */}
+          {sitio && sitio.mapa && sitio.mapa[sel.id] && (() => {
+            const c = sitio.mapa[sel.id], O = OBRA_SITIO_IDX[sitio.obra], col = colorNivel(c.nivel);
+            return (
+              <div style={{ marginTop: 6, padding: "5px 7px", borderRadius: 7,
+                background: `${col}18`, border: `1px solid ${col}66` }}>
+                <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.2, color: col }}>
+                  {O ? O.ico + " " + O.n.toUpperCase() : "DÓNDE CONVIENE"}
+                </div>
+                <div style={{ fontFamily: serif, fontSize: 12, color: C.ink, marginTop: 2 }}>
+                  {DICE[c.nivel]}
+                </div>
+                <div style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, lineHeight: 1.45, marginTop: 2 }}>
+                  {c.porque.join("; ")}
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ fontSize: 10.5, color: C.muted, fontFamily: mono, marginTop: 5, lineHeight: 1.5 }}>
             {(TERRENOS[sel.terreno] || TERRENOS.llanura).n.toLowerCase()}
             {sel.rio ? " · con río" : ""}{sel.costera ? " · costera" : ""}
@@ -13882,6 +13919,179 @@ function buscarEnElMundo(consulta, s, tope) {
   return out;
 }
 
+// ═══ DÓNDE CONVIENE CONSTRUIR ═══════════════════════════════
+// Se elige qué se quiere levantar y el mapa entero se pinta con el semáforo de
+// siempre: dónde es ideal, dónde vale, dónde no. Y sobre todo, por qué: cada
+// comarca dice en una línea qué tiene a favor y qué en contra, así que el
+// jugador no tiene que revisar veintiocho fichas ni fiarse de un número.
+//
+// Lo que decide no es una opinión: son siete lecturas de la provincia, las
+// mismas que pide el documento —recursos, transporte, agua, brazos, mercado,
+// seguridad— cada una sacada de algo que la partida ya calcula. La séptima,
+// la electricidad, no está porque en este juego no hay electricidad.
+//
+// Y hay una distinción que es la mitad de la gracia: no todas las obras
+// convienen donde las cosas van bien. Una universidad se pone donde ya se lee;
+// un hospital, donde el agua está peor. «Conviene» quiere decir «hace más
+// bien», y para unas cosas eso es lo mejor y para otras lo peor.
+const FACTORES = {
+  recursos: { n: "lo que hay bajo tierra",
+    mide: (p, s) => acotar((yacimientosConocidos(p, (s || {}).anio || 1500) || []).length / 2, 0, 1),
+    bien: "hay minas reconocidas", mal: "no se ha encontrado nada" },
+  transporte: { n: "cómo se llega",
+    mide: (p) => acotar((p.via || 0) / 3 * 0.6 + (p.rioNav ? 0.25 : p.rio ? 0.1 : 0) + (p.costera ? 0.25 : 0), 0, 1),
+    bien: "se llega bien", mal: "no llega ni un camino" },
+  agua: { n: "el agua",
+    mide: (p) => { const a = ambDe(p) || {};
+      return acotar((p.rio ? 0.45 : 0) + acotar((a.lluvia || 0) / 900, 0, 1) * 0.55, 0, 1); },
+    bien: "hay agua de sobra", mal: "es tierra seca" },
+  aguamala: { n: "lo sucia que está el agua",
+    mide: (p) => acotar((p.humo || {}).agua || 0, 0, 1),
+    bien: "el agua está para enfermar a cualquiera", mal: "el agua ya está limpia" },
+  brazos: { n: "la gente que hay",
+    mide: (p, s, provs) => { const t = Math.max(1, ...(provs || [p]).map((q) => q.poblacion || 0));
+      return acotar((p.poblacion || 0) / t, 0, 1); },
+    bien: "hay brazos de sobra", mal: "casi no vive nadie" },
+  mercado: { n: "a quién venderle",
+    mide: (p) => { const urb = p.ciudad && p.poblacion ? acotar(p.ciudad.pob / p.poblacion, 0, 1) : 0;
+      return acotar(urb * 0.55 + (p.costera ? 0.25 : 0) + acotar((p.via || 0) / 3, 0, 1) * 0.2, 0, 1); },
+    bien: "hay ciudad y salida", mal: "no hay a quién venderle" },
+  seguridad: { n: "si está tranquila",
+    mide: (p) => (p.ocupada ? 0 : acotar((p.lealtad == null ? 60 : p.lealtad) / 100
+      * (1 - acotar(furiaProvincia(p) / 100, 0, 0.8)), 0, 1)),
+    bien: "está tranquila y obedece", mal: "aquí no manda la corona" },
+  desafecto: { n: "cuánto hace falta calmarla",
+    mide: (p) => (p.ocupada ? 1 : acotar(1 - (p.lealtad == null ? 60 : p.lealtad) / 100
+      + furiaProvincia(p) / 200, 0, 1)),
+    bien: "aquí hace falta contentar a alguien", mal: "aquí ya están contentos" },
+  tierra: { n: "lo que da la tierra",
+    mide: (p, s, provs) => { const f = fertProv(p);
+      const t = Math.max(0.01, ...(provs || [p]).map((q) => fertProv(q)));
+      return acotar(f / t, 0, 1); },
+    bien: "es buena tierra de labor", mal: "la tierra no da" },
+  aislada: { n: "lo lejos que queda",
+    mide: (p, s, provs) => acotar(aislamientoDe(p, provs || []), 0, 1),
+    bien: "queda a trasmano y hace falta acercarla", mal: "ya se llega sin problema" },
+  letras: { n: "quién lee",
+    mide: (p) => acotar(((p.soc || {}).letras) || 0, 0, 1),
+    bien: "aquí ya se lee", mal: "aquí no lee nadie" },
+  frontera: { n: "si es raya",
+    mide: (p, s, provs) => { if (p.ocupada) return 1;
+      const ps = (provs || []).filter((q) => q.lat != null);
+      if (ps.length < 3) return 0.4;
+      const cx = ps.reduce((a, q) => a + q.lon, 0) / ps.length;
+      const cy = ps.reduce((a, q) => a + q.lat, 0) / ps.length;
+      const d = Math.hypot(p.lon - cx, p.lat - cy);
+      const max = Math.max(0.01, ...ps.map((q) => Math.hypot(q.lon - cx, q.lat - cy)));
+      return acotar(d / max, 0, 1); },
+    bien: "está en la raya del reino", mal: "está en el corazón del reino" },
+};
+
+const OBRAS_SITIO = [
+  { id: "caminos", n: "abrir caminos", ico: "🛤", mando: "proy",
+    pesa: { aislada: 1, brazos: 0.55, mercado: 0.35, seguridad: 0.25 },
+    dice: "un camino vale donde todavía no llega ninguno" },
+  { id: "puerto", n: "armar un puerto", ico: "⚓", mando: "proy",
+    exige: (p) => (p.costera || p.rioNav ? null : "no toca el agua"),
+    pesa: { mercado: 1, transporte: 0.6, brazos: 0.5, seguridad: 0.3 },
+    dice: "hace falta agua que llegue al mar o que la barca suba" },
+  { id: "regadio", n: "traer el agua al campo", ico: "🌾", mando: "proy",
+    pesa: { tierra: 1, agua: 0.9, brazos: 0.45 },
+    dice: "el regadío se pone donde hay tierra buena y con qué regarla" },
+  { id: "mercado", n: "abrir un mercado", ico: "⚖", mando: "proy",
+    pesa: { mercado: 1, transporte: 0.7, brazos: 0.6, seguridad: 0.3 },
+    dice: "un mercado necesita quién venda, quién compre y por dónde llegar" },
+  { id: "hospital", n: "levantar un hospital", ico: "✚", mando: "proy",
+    pesa: { aguamala: 1, brazos: 0.8, mercado: 0.2 },
+    dice: "un hospital hace más bien donde el agua está peor" },
+  { id: "templo", n: "levantar un templo", ico: "⛪", mando: "proy",
+    pesa: { desafecto: 0.9, brazos: 0.7, seguridad: 0.2 },
+    dice: "el templo calma, y calma donde hace falta calmar" },
+  { id: "fortificar", n: "fortificar", ico: "🛡", mando: "ejercito",
+    pesa: { frontera: 1, brazos: 0.5, transporte: 0.3 },
+    dice: "se fortifica la raya, no el centro" },
+  { id: "sede", n: "fundar casa de estudios", ico: "🏛", mando: "sedes",
+    pesa: { letras: 1, mercado: 0.6, brazos: 0.5, seguridad: 0.3 },
+    dice: "una casa de estudios cuaja donde ya hay quien lea" },
+  { id: "factoria", n: "abrir una industria", ico: "🏭", mando: "eco",
+    pesa: { recursos: 1, brazos: 0.8, transporte: 0.7, mercado: 0.4 },
+    dice: "una industria quiere materia, brazos y por dónde sacar lo que hace" },
+];
+const OBRA_SITIO_IDX = Object.fromEntries(OBRAS_SITIO.map((x) => [x.id, x]));
+
+// La cuenta de cada comarca para una obra: la nota, el nivel del semáforo y las
+// dos razones que más pesan a favor y en contra. Dos y no siete: la lista
+// entera no la lee nadie, y lo que hace falta saber es qué la hace buena o
+// mala, no el desglose.
+//
+// Cada factor se mide contra las demás comarcas del reino y no contra una vara
+// absoluta. Es la misma lección que ya costó cinco veces en la simulación: un
+// factor que en la práctica nunca pasa de medio —el agua sucia, por ejemplo—
+// no puede competir con uno que llega a uno, y entonces manda siempre el
+// mismo, que suele ser «dónde hay más gente». Preguntando por el puesto en la
+// fila, la pregunta que se responde es la que el jugador hacía: de las
+// comarcas que tengo, ¿cuál?
+function dondeConviene(obra, provs, s) {
+  const O = typeof obra === "string" ? OBRA_SITIO_IDX[obra] : obra;
+  const ps = provs || [];
+  if (!O || !ps.length) return [];
+  const claves = Object.keys(O.pesa).filter((k) => FACTORES[k]);
+  // el crudo de cada factor en cada comarca
+  const crudo = {};
+  for (const k of claves) {
+    crudo[k] = ps.map((p) => {
+      try { const v = FACTORES[k].mide(p, s, ps); return Number.isFinite(v) ? v : 0; }
+      catch (e) { return 0; }
+    });
+  }
+  // y su puesto en la fila, de 0 a 1
+  const rel = {};
+  for (const k of claves) {
+    const vs = crudo[k];
+    const orden = vs.slice().sort((a, b) => a - b);
+    const n = vs.length;
+    rel[k] = vs.map((v) => {
+      if (orden[0] === orden[n - 1]) return 0.5;      // si todas empatan, ninguna destaca
+      let menores = 0;
+      for (const x of orden) if (x < v) menores++;
+      return menores / (n - 1);
+    });
+  }
+  const out = ps.map((p, i) => {
+    const veto = O.exige ? O.exige(p, s) : null;
+    const partes = [];
+    let suma = 0, peso = 0;
+    for (const k of claves) {
+      const F = FACTORES[k], w = O.pesa[k], v = rel[k][i], bruto = crudo[k][i];
+      partes.push({ id: k, n: F.n, v, bruto, w,
+        dice: v >= 0.7 ? F.bien : v <= 0.3 ? F.mal : null });
+      suma += v * w; peso += w;
+    }
+    const punt = peso > 0 ? suma / peso : 0;
+    const aFavor = partes.filter((x) => x.dice && x.v >= 0.7).sort((a, b) => b.v * b.w - a.v * a.w)[0];
+    const enContra = partes.filter((x) => x.dice && x.v <= 0.3).sort((a, b) => a.v * a.w - b.v * b.w)[0];
+    let porque = veto ? [veto] : [aFavor && aFavor.dice, enContra && enContra.dice].filter(Boolean);
+    // Una comarca a la que ningún factor le sale ni alto ni bajo se quedaba
+    // muda, y muda es peor que mediocre: el jugador ve un color y no sabe de
+    // dónde salió. Se nombra lo que más pesó, aunque no destaque.
+    if (!porque.length) {
+      const manda = partes.slice().sort((a, b) => b.w - a.w)[0];
+      porque = [manda ? `sin nada que la haga buena ni mala; lo que decide es ${manda.n}`
+        : "sin nada que la distinga"];
+    }
+    return { id: p.id, nombre: p.nombre, punt: +punt.toFixed(3), veto,
+      nivel: veto ? "grave" : nivelDe(punt, [0.24, 0.4, 0.56, 0.72]),
+      porque, partes };
+  });
+  return out.sort((a, b) => (a.veto ? 1 : 0) - (b.veto ? 1 : 0) || b.punt - a.punt);
+}
+// Lo mismo para una sola comarca. Necesita las demás igual, porque la nota es
+// su puesto entre ellas.
+function conviene(obra, p, provs, s) {
+  if (!p) return null;
+  return dondeConviene(obra, provs && provs.length ? provs : [p], s).find((x) => x.id === p.id) || null;
+}
+
 // ═══ COMPARAR COMARCAS ══════════════════════════════════════
 // Poner dos o tres comarcas una al lado de otra y ver en qué se parecen y en
 // qué no. Suena a poco y es de las cosas que más ahorran: sin esto, comparar
@@ -14395,6 +14605,11 @@ export default function PaxMundi() {
   // Las comarcas puestas una al lado de otra. Son pocas a propósito: con seis
   // columnas la tabla deja de leerse y vuelve a ser lo que venía a evitar.
   const [comparadas, setComparadas] = useState([]);
+  // Qué obra se está buscando dónde poner. Mientras haya una, el mapa deja de
+  // contar lo que contaba y pasa a contar dónde conviene.
+  const [sitio, setSitio] = useState(null);
+  const sitioRef = useRef(null);
+  sitioRef.current = sitio;
   const [vistaPedida, setVistaPedida] = useState(null);
   const buscaRef = useRef(null);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
@@ -14434,7 +14649,11 @@ export default function PaxMundi() {
       }
       if (ev.key === "Escape") {
         if (escribiendo) return;
-        // Esc deshace de a una cosa: primero la comparación, después el panel.
+        // Esc deshace de a una cosa: primero la búsqueda de sitio, después la
+        // comparación, después el panel. Se mira por la referencia y no por la
+        // variable: el oyente se registra una sola vez y la variable que
+        // atrapó entonces sigue valiendo lo que valía entonces.
+        if (sitioRef.current) { setSitio(null); return; }
         setComparadas((xs) => { if (xs.length) return []; setTab(null); setProvSel(null); return xs; });
         return;
       }
@@ -15936,6 +16155,12 @@ export default function PaxMundi() {
   const avisos = avisosDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
     piT, libres: reservaHombres(s.poblacion, s.ejercito, s.bajasRecientes, s).libres });
 
+  // ——— dónde conviene lo que se quiere levantar ———
+  const dondeSitio = sitio && OBRA_SITIO_IDX[sitio]
+    ? dondeConviene(sitio, s.provincias, s) : null;
+  const sitioMapa = dondeSitio
+    ? { obra: sitio, mapa: Object.fromEntries(dondeSitio.map((x) => [x.id, x])) } : null;
+
   // ——— las comarcas que se están comparando ———
   const compara = comparadas.length >= 2 ? compararComarcas(s.provincias, comparadas) : null;
   const alComparar = (id) => setComparadas((xs) => (xs.includes(id)
@@ -15987,8 +16212,13 @@ export default function PaxMundi() {
           vistaPedida={vistaPedida}
           comparadas={comparadas}
           onComparar={alComparar}
+          sitio={sitioMapa}
           margenSup={ALTO_CAB}
           margenInf={ALTO_PIE}
+          /* La ficha de la comarca elegida sale por la izquierda del mapa, que
+             es justo donde se apilan los avisos: quedaba debajo de ellos y no
+             se leía. Se corre lo que ocupa la columna de avisos. */
+          margenIzq={avisos.length > 0 ? (avisosAbiertos ? "min(300px, 26vw)" : "74px") : null}
           alto="100%" />
       </div>
 
@@ -16091,6 +16321,55 @@ export default function PaxMundi() {
       {/* ── DERECHA: lo que se está mirando ───────────────────────────────
           Un ministerio o la comarca seleccionada. No es una pantalla: es una
           franja apoyada en el borde, y el mundo sigue detrás. */}
+      {/* ── DÓNDE CONVIENE ────────────────────────────────────────────
+          Mientras se busca sitio para algo, el mapa entero deja de contar lo
+          que contaba y cuenta esto. El letrero dice qué se está buscando y
+          cuáles son las tres mejores, que es lo que casi siempre se quiere
+          saber; el resto está en el color de cada comarca y en lo que dice al
+          pasar por encima. */}
+      {dondeSitio && (
+        <div className="pm-fade" style={{ position: "fixed", top: ALTO_CAB + 10,
+          left: "50%", transform: "translateX(-50%)", zIndex: 6, maxWidth: "min(560px, 70vw)",
+          padding: "9px 12px", borderRadius: 10, background: "rgba(10,16,23,0.95)",
+          border: `1px solid ${C.brass}66`, boxShadow: "0 8px 26px rgba(0,0,0,0.55)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontSize: 16 }}>{OBRA_SITIO_IDX[sitio].ico}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, color: C.brass }}>
+                DÓNDE CONVIENE · {OBRA_SITIO_IDX[sitio].n.toUpperCase()}
+              </div>
+              <div style={{ fontSize: 11.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                {OBRA_SITIO_IDX[sitio].dice}.
+              </div>
+            </div>
+            <button onClick={() => setSitio(null)} title="dejar de buscar sitio (Esc)"
+              style={{ marginLeft: "auto", padding: "3px 9px", borderRadius: 6, cursor: "pointer",
+                background: "transparent", border: `1px solid ${C.line}`, color: C.muted,
+                fontFamily: mono, fontSize: 11 }}>✕</button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {dondeSitio.filter((x) => !x.veto).slice(0, 3).map((x, i) => (
+              <button key={x.id} onClick={() => { setProvSel(x.id); }}
+                style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "4px 9px",
+                  borderRadius: 7, cursor: "pointer", background: `${colorNivel(x.nivel)}18`,
+                  border: `1px solid ${colorNivel(x.nivel)}66`, color: C.ink,
+                  fontFamily: serif, fontSize: 12.5 }}>
+                <span style={{ fontFamily: mono, fontSize: 9, color: colorNivel(x.nivel) }}>{i + 1}º</span>
+                {x.nombre}
+                <span style={{ fontFamily: mono, fontSize: 9, color: C.muted }}>
+                  {x.porque[0] || DICE[x.nivel]}
+                </span>
+              </button>
+            ))}
+            {!dondeSitio.some((x) => !x.veto) && (
+              <span style={{ fontSize: 11.5, color: C.red }}>
+                Ninguna comarca del reino sirve: {dondeSitio[0].veto}.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── LA COMPARACIÓN ────────────────────────────────────────────
           Dos o tres comarcas una al lado de otra. Se suman con control y un
           clic en el mapa, y mientras haya alguna comparándose manda sobre el
@@ -16244,6 +16523,35 @@ export default function PaxMundi() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* ── DÓNDE CONVIENE ────────────────────────────────────────────
+            La puerta de entrada a la construcción inteligente. Cada ministerio
+            trae las obras que le tocan; al pulsar una, el mapa entero se pinta
+            con lo bien o mal que le sienta a cada comarca. No hace falta abrir
+            veintiocho fichas para comparar: la respuesta ya está en el color. */}
+        {OBRAS_SITIO.some((o) => o.mando === tab) && (
+          <div style={{ padding: "10px 12px 2px" }}>
+            <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass,
+              marginBottom: 6 }}>▣ DÓNDE CONVIENE</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {OBRAS_SITIO.filter((o) => o.mando === tab).map((o) => (
+                <button key={o.id} onClick={() => setSitio(sitio === o.id ? null : o.id)}
+                  title={o.dice}
+                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 9px",
+                    borderRadius: 7, cursor: "pointer", fontFamily: serif, fontSize: 12.5,
+                    background: sitio === o.id ? `${C.brass}22` : "rgba(0,0,0,0.22)",
+                    border: `1px solid ${sitio === o.id ? C.brass : C.line}`,
+                    color: sitio === o.id ? C.brass : C.ink }}>
+                  <span style={{ fontSize: 13 }}>{o.ico}</span>{o.n}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: C.muted, marginTop: 6, lineHeight: 1.5, opacity: 0.85 }}>
+              El mapa se pinta con lo que le conviene a cada comarca. Verde, el
+              mejor sitio; rojo, donde no vale la pena.
+            </div>
           </div>
         )}
 
