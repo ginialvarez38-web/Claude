@@ -6644,7 +6644,267 @@ const MINI_MUNDO = (
     <path d={MUNDO_D} fill="#3E5137" stroke="#728F5C" strokeWidth="0.5" />
   </svg>
 );
-const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, sierras: true, reticula: true };
+// ═══ LOS PISOS DEL MAPA ═════════════════════════════════════
+// (doc: nivel 1 planetaria —continentes, océanos, cordilleras, fronteras—;
+// nivel 2 nacional —provincias, capitales, carreteras, ferrocarriles, bosques,
+// campos, puertos, grandes industrias—; nivel 3 regional —barrios, minas,
+// fábricas, presas, aeropuertos, fortificaciones—.)
+//
+// Todo lo que aparece al bajar sale de lo que el reino ya sabe de sí mismo: el
+// bosque que le queda, la gente que alimenta, el camino que tiene abierto, las
+// vetas que descubrió, el humo que echa. No hay una capa de datos nueva por
+// debajo de la comarca —eso sería inventar un reino que la simulación no
+// tiene— y por eso el nivel 4 del documento, el de las casas y las grúas, no
+// está: dibujarlo sería dibujar mentiras bonitas.
+//
+// Lo que sí hay es reparto: dónde cae cada árbol, cada parcela y cada mina se
+// sortea con la semilla de la comarca, así que no baila entre cuadros y dos
+// partidas del mismo reino se ven iguales.
+const PISOS = [
+  { id: 1, n: "planetaria", hasta: Infinity,
+    dice: "continentes, océanos, cordilleras y fronteras" },
+  { id: 2, n: "nacional", hasta: 62,
+    dice: "provincias, capitales, caminos, bosques, campos, puertos e industria" },
+  { id: 3, n: "regional", hasta: 7.5,
+    dice: "barrios, minas, fábricas, presas, pistas y fortificaciones" },
+];
+function pisoDelMapa(w) {
+  let p = PISOS[0];
+  for (const q of PISOS) if (w <= q.hasta && q.id > p.id) p = q;
+  return p;
+}
+
+// Los contornos de un trazo, en anillos sueltos: hace falta saber si un punto
+// cae dentro de la comarca antes de plantarle un árbol encima.
+const _contornos = new Map();
+function contornosDe(d) {
+  if (!d) return [];
+  const hay = _contornos.get(d);
+  if (hay) return hay;
+  const rs = [];
+  for (const trozo of String(d).split("M").slice(1)) {
+    const pts = [];
+    const re = /(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g;
+    let m;
+    while ((m = re.exec(trozo))) pts.push([+m[1], +m[2]]);
+    if (pts.length >= 3) rs.push(pts);
+  }
+  if (_contornos.size > 400) _contornos.clear();
+  _contornos.set(d, rs);
+  return rs;
+}
+function pisaDentro(d, x, y) {
+  let dentro = false;
+  for (const r of contornosDe(d)) {
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) dentro = !dentro;
+    }
+  }
+  return dentro;
+}
+
+// Los caminos que un reino ya tiene el día que empieza. Sin esto, una partida
+// de 1962 arrancaba con sendas de tierra entre sus ciudades: el camino no se
+// inventa en un siglo, se hereda. La corte y las comarcas con gente tienen lo
+// mejor que la época sabe hacer; el rincón despoblado, un escalón menos.
+function caminosDeEpoca(provs, stats) {
+  const ps = provs || [];
+  if (!ps.length) return ps;
+  const tope = viaMaxima(stats);
+  if (tope <= 0) return ps.map((p) => ({ ...p, via: p.via != null ? p.via : 0 }));
+  const pobs = ps.map((p) => p.poblacion || 0).sort((a, b) => a - b);
+  const media = pobs[Math.floor(pobs.length / 2)] || 1;
+  return ps.map((p) => {
+    if (p.via != null) return p;
+    const grande = (p.poblacion || 0) >= media;
+    const v = p.capital ? tope : grande ? Math.max(0, tope - 1) : Math.max(0, tope - 2);
+    return { ...p, via: v };
+  });
+}
+
+// La red del reino: cada comarca con sus vecinas, una sola vez por par, y con
+// el camino que de verdad las une —el peor de los dos, que es el que manda—.
+function redDeCaminos(mias) {
+  const idx = {};
+  for (const m of mias || []) idx[m.id] = m;
+  const vistos = new Set();
+  const out = [];
+  for (const m of mias || []) {
+    for (const id of m.ady || []) {
+      const q = idx[id];
+      if (!q) continue;
+      const clave = m.id < id ? m.id + "|" + id : id + "|" + m.id;
+      if (vistos.has(clave)) continue;
+      vistos.add(clave);
+      out.push({ x1: m.x, y1: m.y, x2: q.x, y2: q.y,
+        via: Math.min(acotar(Math.round(m.via || 0), 0, 3), acotar(Math.round(q.via || 0), 0, 3)) });
+    }
+  }
+  return out;
+}
+
+// Cuánto de la comarca está bajo arado. Sale de la gente que alimenta contra
+// lo que su tierra aguanta: una comarca llena tiene el campo entero roturado y
+// una vacía es monte.
+function aradoDe(m) {
+  const techo = m.techo || 0;
+  if (techo <= 0) return 0.25;
+  return acotar((m.poblacion || 0) / techo, 0, 1);
+}
+// El bosque que le queda. Si la partida no lo lleva contado, el que le tocaría
+// por su bioma.
+function bosqueDe(m) {
+  if (m.bosque != null) return acotar(m.bosque, 0, 1);
+  const b = (BIOMAS[(ambDe(m) || {}).bioma] || {}).fert;
+  return acotar((b || 0.5) * 0.42, 0, 1);
+}
+
+const _detalle = new Map();
+// Lo que se ve dentro de una comarca cuando uno se acerca. Devuelve puntos en
+// unidades de mapa, agrupados por lo que son; el que dibuja decide el tamaño.
+const SIN_DETALLE = { arbol: [], campo: [], puerto: [], fabrica: [], mina: [],
+  fuerte: [], presa: [], pista: [], barrio: [] };
+function detalleComarca(m, anio, piso) {
+  // Desde el espacio no se ven los árboles. Es el piso 1 del documento: la
+  // tierra, el agua y las fronteras, y nada más.
+  if (piso < 2) return SIN_DETALLE;
+  if (!m || !m.poly) return null;
+  const caja = cajaTrazo(m.poly);
+  if (!caja) return null;
+  // La llave lleva todo lo que cambia el dibujo. Iba con el bosque y el arado
+  // y nada más, y entonces la misma comarca con río y sin río devolvía lo
+  // guardado: salía un embalse donde no había agua que embalsar.
+  const clave = `${m.id}|${anio}|${piso}|${Math.round(bosqueDe(m) * 12)}|${Math.round(aradoDe(m) * 12)}`
+    + `|${m.rio ? 1 : 0}${m.costera ? 1 : 0}${m.capital ? 1 : 0}${m.ocupada ? 1 : 0}`
+    + `|${(m.hallado || []).length}|${Math.round(((m.ciudad || {}).pob || 0) / 20)}`
+    + `|${Math.round((((m.humo || {}).aire) || 0) * 10)}`;
+  const hay = _detalle.get(clave);
+  if (hay) return hay;
+  const [x0, y0, x1, y1] = caja;
+  const anchoC = x1 - x0, altoC = y1 - y0;
+  const area = anchoC * altoC * 0.62;                    // la comarca no llena su caja
+  const rnd = dado("det|" + m.id + "|" + anio);
+  // Reparte n puntos dentro de la comarca. Se tira dentro de la caja y se
+  // descarta lo que cae fuera del contorno: con seis intentos por punto sale
+  // bien hasta en las comarcas con forma de gancho.
+  const sembrar = (n, sesgo) => {
+    const out = [];
+    let intentos = 0;
+    while (out.length < n && intentos < n * 6 + 12) {
+      intentos++;
+      const x = x0 + rnd() * anchoC, y = y0 + rnd() * altoC;
+      if (!pisaDentro(m.poly, x, y)) continue;
+      if (sesgo && rnd() > sesgo(x, y)) continue;
+      out.push([+x.toFixed(3), +y.toFixed(3)]);
+    }
+    return out;
+  };
+  const cerca = (x, y) => 1 - acotar(Math.hypot(x - m.x, y - m.y) / (Math.max(anchoC, altoC) * 0.6), 0, 0.85);
+  const bos = bosqueDe(m), ara = aradoDe(m);
+  // Al bajar un piso no basta con dibujar lo mismo más grande: la misma
+  // cantidad repartida en el doble de pantalla se ve el doble de vacía. Cada
+  // piso siembra más.
+  const dens = acotar(area * 2.6, 0, 1) * (piso >= 3 ? 2.9 : 1);
+  const d = { arbol: [], campo: [], puerto: [], fabrica: [], mina: [], fuerte: [], presa: [], pista: [], barrio: [] };
+
+  // ——— piso 2: lo que se ve de un país ———
+  d.arbol = sembrar(Math.round(acotar(bos * 14 * dens, 0, piso >= 3 ? 52 : 26)));
+  d.campo = sembrar(Math.round(acotar(ara * 11 * dens, 0, piso >= 3 ? 44 : 22)), cerca);
+  // el puerto va donde el agua toca tierra, y solo si hay quien la use
+  if (m.costera && (m.poblacion || 0) > 40) {
+    const p = sembrar(1);
+    if (p.length) d.puerto = p;
+  }
+  // la industria se ve por el humo que echa, que es lo que la delata desde lejos
+  const humo = ((m.humo || {}).aire) || 0;
+  const fab = Math.round(acotar(humo * 7, 0, 5)) + (piso >= 3 && (m.ciudad || {}).pob > 60 ? 1 : 0);
+  if (fab > 0) d.fabrica = sembrar(fab, cerca);
+
+  // ——— piso 3: lo que se ve de una comarca ———
+  if (piso >= 3) {
+    // las vetas que el reino descubrió, no las que hay
+    const yac = (yacimientosConocidos(m, anio || 1200) || []).length;
+    if (yac > 0) d.mina = sembrar(Math.min(4, yac));
+    // los barrios de la ciudad, alrededor de la ciudad
+    const pob = ((m.ciudad || {}).pob) || 0;
+    if (pob > 8) {
+      const n = acotar(Math.round(Math.sqrt(pob) / 2.2), 1, 9);
+      const r = Math.max(anchoC, altoC) * 0.07;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + rnd();
+        const q = r * (0.35 + rnd() * 0.9);
+        d.barrio.push([+(m.x + Math.cos(a) * q).toFixed(3), +(m.y + Math.sin(a) * q * 0.7).toFixed(3)]);
+      }
+    }
+    // se fortifica la raya y la corte, que es lo que se fortificaba
+    if (m.capital || m.ocupada) {
+      const p = sembrar(1, cerca);
+      if (p.length) d.fuerte = p;
+    }
+    // la presa es de cuando se supo hacer, y donde hay río que cerrar
+    if (m.rio && (anio || 0) >= 1890) {
+      const p = sembrar(1);
+      if (p.length) d.presa = p;
+    }
+    // y la pista, de cuando se voló, y donde hay a quién traer
+    if ((anio || 0) >= 1930 && ((m.ciudad || {}).pob || 0) > 40) {
+      const p = sembrar(1, (x, y) => 1 - cerca(x, y) * 0.6);
+      if (p.length) d.pista = p;
+    }
+  }
+  if (_detalle.size > 260) _detalle.clear();
+  _detalle.set(clave, d);
+  return d;
+}
+
+// Los dibujos. Uno por clase y todos en un solo trazo: doscientos árboles en
+// doscientos nodos hunden el mapa; en un `path` no se notan.
+const GLIFOS = {
+  arbol: (x, y, r) => `M${x - r * 0.8},${y + r * 0.6}L${x},${y - r * 1.5}L${x + r * 0.8},${y + r * 0.6}Z`,
+  campo: (x, y, r) => `M${x - r * 1.5},${y - r * 0.5}L${x + r * 0.4},${y - r * 0.9}`
+    + `L${x + r * 1.5},${y + r * 0.5}L${x - r * 0.4},${y + r * 0.9}Z`,
+  puerto: (x, y, r) => `M${x},${y - r * 1.4}L${x},${y + r}M${x - r},${y - r * 0.7}L${x + r},${y - r * 0.7}`
+    + `M${x - r},${y + r * 0.4}L${x},${y + r * 1.3}L${x + r},${y + r * 0.4}`,
+  fabrica: (x, y, r) => `M${x - r},${y + r}L${x - r},${y - r * 0.3}L${x},${y - r * 0.3}L${x},${y + r}Z`
+    + `M${x + r * 0.15},${y + r}L${x + r * 0.15},${y - r * 1.5}L${x + r * 0.6},${y - r * 1.5}L${x + r * 0.6},${y + r}Z`,
+  mina: (x, y, r) => `M${x - r},${y + r * 0.8}L${x - r * 0.4},${y - r * 0.8}`
+    + `L${x + r * 0.4},${y - r * 0.8}L${x + r},${y + r * 0.8}Z`,
+  fuerte: (x, y, r) => `M${x - r},${y - r}L${x - r * 0.35},${y - r * 1.5}L${x + r * 0.35},${y - r * 1.5}`
+    + `L${x + r},${y - r}L${x + r * 1.5},${y - r * 0.35}L${x + r * 1.5},${y + r * 0.35}L${x + r},${y + r}`
+    + `L${x + r * 0.35},${y + r * 1.5}L${x - r * 0.35},${y + r * 1.5}L${x - r},${y + r}`
+    + `L${x - r * 1.5},${y + r * 0.35}L${x - r * 1.5},${y - r * 0.35}Z`,
+  presa: (x, y, r) => `M${x - r * 1.6},${y - r * 0.8}Q${x},${y + r * 0.6} ${x + r * 1.6},${y - r * 0.8}`
+    + `L${x + r * 1.6},${y - r * 0.2}Q${x},${y + r * 1.2} ${x - r * 1.6},${y - r * 0.2}Z`,
+  pista: (x, y, r) => `M${x - r * 1.7},${y + r * 0.7}L${x + r * 1.3},${y - r * 0.9}`
+    + `L${x + r * 1.7},${y - r * 0.4}L${x - r * 1.3},${y + r * 1.2}Z`,
+  barrio: (x, y, r) => `M${x - r},${y - r * 0.7}L${x + r},${y - r * 0.7}L${x + r},${y + r * 0.7}L${x - r},${y + r * 0.7}Z`,
+};
+// Cómo se pinta cada cosa, y desde qué piso se ve.
+// Los colores tienen que despegarse del relleno de la comarca, que ya es
+// pardo y verde: un bosque verde oscuro sobre un verde medio no se ve, se
+// intuye. Van más contrastados de lo que pediría un atlas, porque encima del
+// mapa político hay que reconocerlos de un vistazo y no buscarlos.
+const PINTA = {
+  arbol:   { piso: 2, col: "#1E4128", op: 0.92, r: 1.15, trazo: false },
+  campo:   { piso: 2, col: "#C8AE58", op: 0.5, r: 1.5, trazo: false },
+  puerto:  { piso: 2, col: "#AEDCEE", op: 0.95, r: 1.7, trazo: true },
+  fabrica: { piso: 2, col: "#4A4038", op: 0.95, r: 1.45, trazo: false },
+  barrio:  { piso: 3, col: "#7A6F60", op: 0.85, r: 1.0, trazo: false },
+  mina:    { piso: 3, col: "#4E4433", op: 0.95, r: 1.3, trazo: false },
+  fuerte:  { piso: 3, col: "#D8C58E", op: 0.95, r: 1.45, trazo: false },
+  presa:   { piso: 3, col: "#8FC8DC", op: 0.95, r: 1.7, trazo: false },
+  pista:   { piso: 3, col: "#B4B2AC", op: 0.9, r: 1.7, trazo: false },
+};
+// El camino, según lo que sea. Un ferrocarril no se dibuja como una senda.
+const PINTA_VIA = [
+  { col: "#9C8A66", ancho: 0.85, raya: "1.6 2.2", op: 0.6 },   // senda
+  { col: "#C4A972", ancho: 1.1, raya: null, op: 0.72 },        // calzada
+  { col: "#E6CE92", ancho: 1.5, raya: null, op: 0.82 },        // carretera
+  { col: "#F2ECDC", ancho: 1.7, raya: null, op: 0.92 },        // ferrocarril
+];
+
+const CAPAS_INI = { provincias: true, ciudades: true, fisico: true, paises: true, sierras: true, reticula: true, detalle: true };
 // Cada clase de accidente con su color y su palabra: el rótulo dice qué es
 // antes de decir cómo se llama, que es lo que uno quiere saber primero cuando
 // toca una mancha azul en el medio de la nada.
@@ -7377,6 +7637,77 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     }).filter(Boolean).sort((a, b) => a - b);
     return as.length ? as[Math.floor(as.length / 2)] : 0;
   }, [conTrazo]);
+  // ——— los pisos del mapa ———
+  // Cuanto más se baja, más cosas hay. Y no aparecen de golpe: entran con la
+  // opacidad para que acercarse sea bajar y no cambiar de mapa.
+  const piso = pisoDelMapa(w);
+  const entra = acotar((PISOS[1].hasta * 1.25 - w) / (PISOS[1].hasta * 0.5), 0, 1);
+  const entra3 = acotar((PISOS[2].hasta * 1.3 - w) / (PISOS[2].hasta * 0.6), 0, 1);
+
+  // Los caminos del reino. Van debajo de todo lo demás: es lo que enlaza las
+  // comarcas y lo que se mira para saber por dónde sale lo que se produce.
+  const capaCaminos = useMemo(() => {
+    if (!capas.detalle || piso.id < 2 || !mias.length) return null;
+    const red = redDeCaminos(mias).filter((e) =>
+      enVista((e.x1 + e.x2) / 2, (e.y1 + e.y2) / 2) || enVista(e.x1, e.y1) || enVista(e.x2, e.y2));
+    if (!red.length) return null;
+    const porVia = [[], [], [], []];
+    for (const e of red) porVia[e.via].push(`M${e.x1},${e.y1}L${e.x2},${e.y2}`);
+    return (
+      <g style={{ pointerEvents: "none" }} opacity={entra}>
+        {porVia.map((ds, v) => ds.length === 0 ? null : (
+          <path key={"vi" + v} d={ds.join("")} fill="none" stroke={PINTA_VIA[v].col}
+            strokeWidth={px * PINTA_VIA[v].ancho} opacity={PINTA_VIA[v].op}
+            strokeLinecap="round"
+            strokeDasharray={PINTA_VIA[v].raya
+              ? PINTA_VIA[v].raya.split(" ").map((n) => +n * px).join(" ") : undefined} />
+        ))}
+        {/* las traviesas del ferrocarril, que es lo que lo hace ferrocarril */}
+        {porVia[3].length > 0 && (
+          <path d={porVia[3].join("")} fill="none" stroke="#3A3630" strokeWidth={px * 2.6}
+            opacity={0.55 * entra} strokeDasharray={`${px * 0.5} ${px * 2.1}`} />
+        )}
+      </g>
+    );
+  }, [w, px, claveVista, mias, capas.detalle, piso.id]);
+
+  // Y lo que hay dentro de cada comarca. Todo de una clase va en un solo
+  // trazo: son cientos de figuras y en cientos de nodos el mapa se arrastra.
+  const capaDetalle = useMemo(() => {
+    if (!capas.detalle || piso.id < 2 || !mias.length) return null;
+    const juntos = {};
+    let cuantas = 0;
+    for (const m of mias) {
+      if (!m.poly || !enVista(m.x, m.y)) continue;
+      const caja = cajaTrazo(m.poly);
+      if (caja && (caja[2] - caja[0]) / px < 26) continue;   // todavía no da la escala
+      const d = detalleComarca(m, anio, piso.id);
+      if (!d) continue;
+      for (const [tipo, pts] of Object.entries(d)) {
+        const P = PINTA[tipo];
+        if (!P || P.piso > piso.id || !pts.length) continue;
+        const r = px * P.r * (P.piso >= 3 ? 3.4 : 3.0);
+        const trozos = juntos[tipo] || (juntos[tipo] = []);
+        for (const [x, y] of pts) { trozos.push(GLIFOS[tipo](x, y, r)); cuantas++; }
+      }
+      if (cuantas > 900) break;                              // techo de dibujo
+    }
+    const tipos = Object.keys(juntos);
+    if (!tipos.length) return null;
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {tipos.map((t) => (
+          <path key={"dt" + t} d={juntos[t].join("")}
+            fill={PINTA[t].trazo ? "none" : PINTA[t].col}
+            stroke={PINTA[t].trazo ? PINTA[t].col : undefined}
+            strokeWidth={PINTA[t].trazo ? px * 0.5 : undefined}
+            strokeLinecap={PINTA[t].trazo ? "round" : undefined}
+            opacity={PINTA[t].op * (PINTA[t].piso >= 3 ? entra3 : entra)} />
+        ))}
+      </g>
+    );
+  }, [w, px, claveVista, mias, anio, capas.detalle, piso.id]);
+
   // Lo que la vista puesta mide justo donde está el dedo. Un mapa de colores
   // sin número al lado obliga a adivinar entre dos tonos parecidos, y en una
   // rampa de seis pasos los dos del medio se parecen siempre.
@@ -7605,6 +7936,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
               strokeWidth={px * 3.5} strokeLinejoin="round" className="pm-latido" />
           )}
         </g>
+
+        {/* Lo que hay dentro de las comarcas y lo que las enlaza. Va aquí y
+            no más arriba porque el relleno del reino es opaco y se lo comía:
+            un bosque debajo de su propia provincia no lo ve nadie. Encima van
+            todavía las marcas y los nombres, que son los que mandan. */}
+        {capaDetalle}
+        {capaCaminos}
 
         {capaPicos}
 
@@ -8183,6 +8521,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             return `${(Math.round(km / red) * red).toLocaleString("es")} km`;
           })()}
         </div>
+        {/* En qué piso está uno. Sin esto, que el mapa se llene de árboles y
+            caminos al acercarse parece un capricho del dibujo; con esto se
+            entiende que hay pisos y que bajando se ve más. */}
+        <div style={{ marginTop: 3, opacity: 0.72, letterSpacing: 0.4 }}>
+          {piso.id === 1 ? "◍" : piso.id === 2 ? "◎" : "◉"} vista {piso.n}
+        </div>
       </div>
 
       {/* leyenda y capas */}
@@ -8370,6 +8714,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass, margin: "9px 0 6px" }}>─ CAPAS</div>
           {[["provincias", "Provincias del mundo"], ["ciudades", "Ciudades"],
             ["fisico", "Relieve y ríos"], ["sierras", "Cordilleras"],
+            ["detalle", "Caminos, bosques y obras"],
             ["paises", "Nombres de país"], ["reticula", "Retícula"]].map(([k, t]) => (
             <label key={k} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
               fontSize: 11, color: capas[k] ? C.ink : C.muted, padding: "2px 0" }}>
@@ -15289,7 +15634,7 @@ export default function PaxMundi() {
         generarProvincias({ sabidos: semillaEpoca(init.anio).sabidos }, pais || init.nacion?.nombre || era, paisSel),
         { anio: init.anio, poblacion: pobIni, ciencia: cienciaIni, stats: statsIni,
           region: paisSel, gobierno: { forma: formaGob } });
-      const provsIni = arranque.provincias;
+      const provsIni = caminosDeEpoca(arranque.provincias, statsIni);
       setState({
         era, anio: init.anio, dia: 0, turno: 1, nacion: init.nacion,
         presupuesto: { ...PRESUPUESTO_INICIAL },
