@@ -14483,6 +14483,321 @@ function consejosDe(mando, s, x) {
   return out.sort((a, b) => NIVELES.indexOf(a.nivel) - NIVELES.indexOf(b.nivel));
 }
 
+// ═══ SECRETARIOS AUTOMATIZADOS ══════════════════════════════
+// El asesor mira y explica; el secretario hace. Y hace solo lo que se le
+// autorizó, con el dinero que se le autorizó y sin pasar del límite que se le
+// puso. Cada ministerio puede tener el suyo, y todos empiezan apagados: un
+// juego que se juega solo desde el primer turno no es un juego.
+//
+// Lo que un secretario despacha es lo repetitivo —amortizar, cubrir la cuota,
+// poner director a la sede que no tiene, no dejar a los sabios sin rumbo—, que
+// es lo que en una partida larga se hace treinta veces igual y acaba siendo
+// tramitar en vez de gobernar. Lo que decide el rumbo del reino no se delega
+// nunca; abajo está la lista, escrita para poder probarla.
+const VEDADO = [
+  "declarar la guerra o firmar la paz",
+  "resolver un dilema del consejo",
+  "cambiar la forma de gobierno",
+  "ceder, anexar o abandonar una comarca",
+  "decretar un proyecto nacional",
+  "envilecer la moneda",
+  "licenciar el último cuerpo del reino",
+  "gastar por encima de lo autorizado",
+  "bajar el tesoro del piso que se le puso",
+];
+
+const SECRETARIOS = [
+  { id: "eco", n: "el escribano de la hacienda", ico: "✒", de: "las cuentas" },
+  { id: "ejercito", n: "el veedor de las tropas", ico: "⚔", de: "la leva y la paga" },
+  { id: "sedes", n: "el bedel mayor", ico: "🏛", de: "las casas de estudios" },
+  { id: "ciencia", n: "el amanuense de los sabios", ico: "⚗", de: "el rumbo del saber" },
+];
+const SECRE_IDX = Object.fromEntries(SECRETARIOS.map((x) => [x.id, x]));
+
+// El objetivo no es un adorno: cambia lo que la misma tarea hace. Un secretario
+// con orden de guardar amortiza poco y no toma prestado; el mismo con orden de
+// quitarse la deuda vacía el tesoro contra ella.
+const OBJETIVOS = {
+  eco: [
+    { id: "guardar", n: "guardar", dice: "llenar el arca y no deber nada que apremie",
+      reparto: { tesoro: 55, saber: 20, obras: 15, milicia: 10 }, contraDeuda: 0.35, presta: false },
+    { id: "crecer", n: "hacer crecer", dice: "obras y caminos antes que arca llena",
+      reparto: { tesoro: 25, saber: 25, obras: 40, milicia: 10 }, contraDeuda: 0.2, presta: true },
+    { id: "saber", n: "pagar el saber", dice: "el patronazgo antes que nada",
+      reparto: { tesoro: 20, saber: 50, obras: 20, milicia: 10 }, contraDeuda: 0.2, presta: true },
+    { id: "limpiar", n: "quitarse la deuda", dice: "todo contra lo que se debe",
+      reparto: { tesoro: 60, saber: 15, obras: 15, milicia: 10 }, contraDeuda: 0.9, presta: false },
+  ],
+  ejercito: [
+    { id: "poco", n: "lo justo", dice: "la mitad de lo que se podría sostener", parte: 0.45 },
+    { id: "pagable", n: "lo que se pague solo", dice: "hasta donde la renta lo aguante", parte: 0.75 },
+    { id: "lleno", n: "cuanto se pueda", dice: "el límite del reino", parte: 1 },
+  ],
+  sedes: [
+    { id: "barato", n: "muchas y humildes", dice: "la más barata que falte" },
+    { id: "alto", n: "pocas y altas", dice: "la más alta que se pueda pagar" },
+  ],
+  ciencia: [
+    { id: "ancho", n: "por donde hay más camino", dice: "la rama con más frentes abiertos" },
+    { id: "urgente", n: "por donde aprieta", dice: "la rama de lo que el reino tiene roto" },
+  ],
+};
+const objetivoDe = (mando, id) => (OBJETIVOS[mando] || []).find((o) => o.id === id)
+  || (OBJETIVOS[mando] || [])[0] || {};
+
+// Cada tarea mira el reino, decide si hay algo que hacer y lo hace. Devuelve el
+// estado nuevo, lo que costó y una línea que se le pueda enseñar al jugador:
+// nada de lo que hace un secretario puede quedar sin contar.
+const TAREAS = [
+  // ——— la hacienda ———
+  { id: "amortizar", n: "amortizar la deuda", mando: "eco",
+    dice: "va pagando lo que se debe con lo que sobra",
+    hace: (s, caja) => {
+      const debe = s.deuda || 0;
+      if (debe <= 0 || caja.cupo < 1) return null;
+      const ob = objetivoDe("eco", caja.objetivo);
+      const m = Math.floor(Math.min(caja.cupo * (ob.contraDeuda || 0.3), debe));
+      if (m < 1) return null;
+      const resto = debe - m;
+      return { oro: m,
+        s: { ...s, deuda: resto, edu: { ...s.edu, oro: s.edu.oro - m },
+          stats: resto === 0 ? { ...s.stats, prestigio: acotar(s.stats.prestigio + 3, 0, 100) } : s.stats },
+        texto: resto === 0 ? `canceló la última deuda de la corona (⚜ ${m})`
+          : `amortizó ⚜ ${m}; quedan ⚜ ${Math.round(resto)}` };
+    } },
+  { id: "emprestito", n: "tomar prestado en apuro", mando: "eco",
+    dice: "si el arca baja del piso, pide lo justo para volver a él",
+    hace: (s, caja) => {
+      const ob = objetivoDe("eco", caja.objetivo);
+      if (!ob.presta || caja.piso <= 0) return null;
+      const falta = Math.ceil(caja.piso - (s.edu.oro || 0));
+      if (falta <= 0) return null;
+      const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
+        s.factorias, s.ejercito, s.provincias);
+      const cr = capacidadCredito(s.ciencia, s.stats, ing, s.anio, s.creditoVetado, s.devaluaciones);
+      if (!cr.habilitado) return null;
+      const m = Math.min(falta, Math.max(0, cr.tope - (s.deuda || 0)));
+      if (m < 1) return null;
+      return { oro: 0,
+        s: { ...s, deuda: (s.deuda || 0) + m, edu: { ...s.edu, oro: s.edu.oro + m } },
+        texto: `tomó ⚜ ${Math.round(m)} prestados al ${(cr.tasa * 100).toFixed(1)}% para no dejar el arca seca` };
+    } },
+  { id: "reparto", n: "sostener el reparto de rentas", mando: "eco",
+    dice: "corre el presupuesto de a poco hacia lo que se le mandó",
+    hace: (s, caja) => {
+      const ob = objetivoDe("eco", caja.objetivo);
+      const meta = ob.reparto; if (!meta) return null;
+      const P = s.presupuesto || PRESUPUESTO_INICIAL;
+      // la partida que más lejos está de su meta, y solo un paso por turno: un
+      // secretario que reescribe el presupuesto entero de un año para otro es
+      // indistinguible de que te lo cambien a la espalda
+      const lejos = PARTIDAS.map((x) => ({ id: x.id, n: x.n, d: (meta[x.id] || 0) - (P[x.id] || 0) }))
+        .sort((a, b) => Math.abs(b.d) - Math.abs(a.d))[0];
+      if (!lejos || Math.abs(lejos.d) < 4) return null;
+      const paso = Math.sign(lejos.d) * Math.min(5, Math.abs(lejos.d));
+      const nuevo = ajustarPartida(P, lejos.id, paso);
+      if (nuevo === P) return null;
+      return { oro: 0, s: { ...s, presupuesto: nuevo },
+        texto: `movió ${paso > 0 ? "hacia" : "fuera de"} ${lejos.n.toLowerCase()} ${Math.abs(paso)} puntos del reparto` };
+    } },
+
+  // ——— la tropa ———
+  { id: "cuota", n: "cubrir la cuota de tropas", mando: "ejercito",
+    dice: "levanta un cuerpo por turno hasta llegar a lo mandado",
+    hace: (s, caja) => {
+      const ej = s.ejercito || {};
+      const lim = limiteFuerzas(s.stats, s.ciencia, s.poblacion);
+      const ob = objetivoDe("ejercito", caja.objetivo);
+      const meta = Math.max(1, Math.round(lim * (ob.parte || 0.5)));
+      if (unidadesTotales(ej) >= meta) return null;
+      const reg = regimenDeLeva(s);
+      const rv = reservaHombres(s.poblacion, ej, s.bajasRecientes, s);
+      // la mejor de las que se pueden pagar y dotar hoy, por lo que rinde el oro
+      const puede = RAMAS_EJERCITO.filter((r) => ramaDisponible(r, s.ciencia)
+        && Math.round(r.costo * reg.oro) <= caja.cupo && (reg.ajena || rv.libres >= r.brazos))
+        .sort((a, b) => fuerzaRama(b.id, s.ciencia) / b.costo - fuerzaRama(a.id, s.ciencia) / a.costo);
+      const r = puede[0]; if (!r) return null;
+      const costo = Math.round(r.costo * reg.oro);
+      const lv = llamarAFilas(s.provincias, reg.ajena ? 0 : r.brazos, s, dado("sec|leva|" + s.anio + r.id));
+      const provincias = lv.tomados > 0
+        ? lv.provincias.map((p) => (p.pops && p.pops.length ? { ...p, soc: resumenPops(p.pops) } : p))
+        : s.provincias;
+      return { oro: costo,
+        s: { ...s, ejercito: { ...ej, [r.id]: (ej[r.id] || 0) + 1 }, provincias,
+          pops: lv.tomados > 0 ? sociedadDelReino(provincias, s.anio, (s.gobierno || {}).forma) : s.pops,
+          edu: { ...s.edu, oro: s.edu.oro - costo } },
+        texto: `levantó una unidad de ${r.n.toLowerCase()} (⚜ ${costo}); van ${unidadesTotales(ej) + 1} de ${meta}` };
+    } },
+  { id: "licenciar", n: "licenciar lo que no se paga", mando: "ejercito",
+    dice: "si el sostén de la tropa se come la renta, manda a alguno a casa",
+    hace: (s) => {
+      const ej = s.ejercito || {};
+      const total = unidadesTotales(ej);
+      if (total <= 1 || s.guerra) return null;        // ni el último cuerpo ni en guerra
+      const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
+        s.factorias, s.ejercito, s.provincias);
+      const mant = mantenimientoEjercito(ej);
+      const lim = limiteFuerzas(s.stats, s.ciencia, s.poblacion);
+      if (mant <= ing * 0.45 && total <= lim) return null;
+      // se va la que peor rinde por lo que cuesta sostenerla
+      const r = RAMAS_EJERCITO.filter((x) => ej[x.id] > 0)
+        .sort((a, b) => fuerzaRama(a.id, s.ciencia) / a.mant - fuerzaRama(b.id, s.ciencia) / b.mant)[0];
+      if (!r) return null;
+      const nuevo = { ...ej, [r.id]: ej[r.id] - 1 };
+      if (!nuevo[r.id]) delete nuevo[r.id];
+      return { oro: 0,
+        s: { ...s, ejercito: nuevo, edu: { ...s.edu, oro: s.edu.oro + Math.round(r.costo * 0.25) },
+          facciones: { ...s.facciones, ejercito: Math.max(0, (s.facciones?.ejercito ?? 50) - 5) } },
+        texto: `licenció una unidad de ${r.n.toLowerCase()}: ahorra ⚜ ${r.mant} al año que no había de dónde sacar` };
+    } },
+  { id: "generales", n: "cubrir el mando vacante", mando: "ejercito",
+    dice: "nombra general cuando hay plaza y con qué pagarla",
+    hace: (s, caja) => {
+      const gen = s.generales || [];
+      if (gen.length >= cupoGenerales(s.ciencia) || caja.cupo < 30) return null;
+      const usados = new Set(gen.map((g) => g.nombre));
+      const libre = NOMBRES_GENERAL.find((n) => !usados.has(n));
+      if (!libre) return null;
+      const rnd = dado("sec|gen|" + s.anio + "|" + gen.length);
+      const ras = RASGOS_GENERAL[Math.floor(rnd() * RASGOS_GENERAL.length)];
+      const g = { nombre: libre, nacio: s.anio - (34 + Math.floor(rnd() * 20)),
+        pericia: 3 + Math.floor(rnd() * 7), rasgo: ras[0], glosa: ras[1] };
+      return { oro: 30,
+        s: { ...s, edu: { ...s.edu, oro: s.edu.oro - 30 }, generales: [...gen, g],
+          facciones: { ...s.facciones, ejercito: Math.min(100, (s.facciones?.ejercito ?? 50) + 6) } },
+        texto: `puso a ${libre} al mando a los ${s.anio - g.nacio} años (${ras[0].toLowerCase()}), ⚜ 30` };
+    } },
+
+  // ——— los estudios ———
+  { id: "director", n: "poner director donde falta", mando: "sedes",
+    dice: "no deja una casa de estudios sin quien la dirija",
+    hace: (s) => {
+      const sedes = (s.edu || {}).sedes || [];
+      const sin = sedes.find((x) => !x.director);
+      if (!sin) return null;
+      const ocupados = new Set(sedes.map((x) => x.director).filter(Boolean));
+      const libre = ((s.edu || {}).sabios || []).find((x) => !ocupados.has(x.nombre));
+      if (!libre) return null;
+      const meta = INSTITUCIONES.find((i) => i.id === sin.tipo);
+      const nom = sin.nombre || `${(meta || {}).nombre || sin.tipo} n.º ${sin.num}`;
+      return { oro: 0,
+        s: { ...s, edu: { ...s.edu,
+          sedes: sedes.map((x) => (x.id === sin.id ? { ...x, director: libre.nombre } : x)) } },
+        texto: `puso a ${libre.nombre} al frente de «${nom}»` };
+    } },
+  { id: "fundar", n: "fundar la casa que se pueda", mando: "sedes",
+    dice: "levanta estudios mientras el arca y el sostén lo aguanten",
+    hace: (s, caja) => {
+      const edu = s.edu || {};
+      const inst = edu.instituciones || {};
+      // el sostén de lo que ya hay no puede comerse la renta: fundar de más es
+      // la forma más rápida de arruinar un reino con buenas intenciones
+      const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
+        s.factorias, s.ejercito, s.provincias);
+      if (mantenimientoTotal(edu) + mantenimientoEjercito(s.ejercito) > ing * 0.6) return null;
+      const ob = objetivoDe("sedes", caja.objetivo);
+      const pueden = INSTITUCIONES.filter((i) => i.costo <= caja.cupo
+        && (!i.req || (inst[i.req] || 0) >= 1));
+      if (!pueden.length) return null;
+      // El escalón que todavía no existe va primero, aunque el objetivo sea
+      // fundar barato: sin la escuela no hay colegio, y un secretario que
+      // levanta la sexta escuela en vez del primer colegio no está ahorrando,
+      // está atascando el reino en el primer peldaño.
+      const faltan = pueden.filter((i) => !(inst[i.id] || 0));
+      const cuales = faltan.length ? faltan : pueden;
+      const i = ob.id === "alto" ? cuales[cuales.length - 1] : cuales[0];
+      const tiene = inst[i.id] || 0;
+      const nombre = `${i.nombre} de ${(s.nacion || {}).nombre || "la corona"}${tiene ? ` n.º ${tiene + 1}` : ""}`;
+      return { oro: i.costo,
+        s: { ...s, edu: { ...edu, oro: edu.oro - i.costo,
+          instituciones: { ...inst, [i.id]: tiene + 1 },
+          sedes: [...(edu.sedes || []), { id: nextId(), tipo: i.id, num: tiene + 1,
+            nombre, dom: null, director: null, inv: null }] } },
+        texto: `fundó «${nombre}» (⚜ ${i.costo}, +${i.pi} PI al año)` };
+    } },
+
+  // ——— el saber ———
+  { id: "rumbo", n: "no dejar a los sabios sin rumbo", mando: "ciencia",
+    dice: "si nadie dijo qué buscar, elige rama y lo apunta",
+    hace: (s, caja) => {
+      if ((s.ciencia || {}).foco) return null;
+      const front = fronteraDe(s);
+      if (!front.length) return null;
+      const ob = objetivoDe("ciencia", caja.objetivo);
+      const cuenta = {};
+      for (const n of front) cuenta[n.rama] = (cuenta[n.rama] || 0) + 1;
+      let rama = null;
+      if (ob.id === "urgente") {
+        // lo que el reino tiene roto: la rama del primer problema abierto que
+        // todavía tenga frente por donde entrar
+        for (const pr of (s.ciencia || {}).problemas || []) {
+          const r = (pr.ramas || []).find((x) => cuenta[x]);
+          if (r) { rama = r; break; }
+        }
+      }
+      if (!rama) rama = Object.keys(cuenta).sort((a, b) => cuenta[b] - cuenta[a])[0];
+      if (!rama) return null;
+      return { oro: 0, s: { ...s, ciencia: { ...s.ciencia, foco: rama } },
+        texto: `apuntó a los sabios hacia ${(RAMAS[rama] || { n: rama }).n.toLowerCase()}` };
+    } },
+];
+const TAREA_IDX = Object.fromEntries(TAREAS.map((t) => [t.id, t]));
+const tareasDe = (mando) => TAREAS.filter((t) => t.mando === mando);
+
+// La política de un ministerio: si está en pie, qué se le autorizó, en qué
+// orden, con cuánto del arca y hasta dónde. Todo apagado de fábrica.
+function politicaDe(pol, mando) {
+  const p = (pol || {})[mando] || {};
+  const mias = tareasDe(mando).map((t) => t.id);
+  const orden = [...(p.orden || []).filter((x) => mias.includes(x)),
+    ...mias.filter((x) => !(p.orden || []).includes(x))];
+  return { on: !!p.on, hace: p.hace || {}, orden,
+    parte: p.parte == null ? 25 : p.parte, piso: p.piso == null ? 60 : p.piso,
+    objetivo: p.objetivo || ((OBJETIVOS[mando] || [{}])[0] || {}).id };
+}
+const SECRE_INICIAL = () => Object.fromEntries(SECRETARIOS.map((S) => [S.id,
+  { on: false, hace: {}, orden: tareasDe(S.id).map((t) => t.id),
+    parte: 25, piso: 60, objetivo: ((OBJETIVOS[S.id] || [{}])[0] || {}).id }]));
+
+// El despacho de un turno. Se corre entero antes de que el jugador vea nada, y
+// deja constancia de todo: lo que hizo cada uno, lo que costó y por qué. El
+// que gobierna tiene que poder auditar a sus secretarios sin creerles.
+function correrSecretarios(s, rnd) {
+  const hechos = [];
+  let e = s;
+  for (const S of SECRETARIOS) {
+    const p = politicaDe(s.secretarios, S.id);
+    if (!p.on) continue;
+    // el presupuesto se calcula una vez, al abrir el despacho: si se recalculara
+    // tarea a tarea, gastar haría bajar el cupo y el límite dejaría de ser uno
+    let cupo = Math.max(0, Math.floor((((e.edu || {}).oro) || 0) * p.parte / 100));
+    for (const tid of p.orden) {
+      if (!p.hace[tid]) continue;
+      const T = TAREA_IDX[tid];
+      if (!T || T.mando !== S.id) continue;
+      // el límite manda sobre el presupuesto: por debajo del piso no se toca el
+      // arca ni aunque quede cupo
+      const libre = Math.max(0, (((e.edu || {}).oro) || 0) - p.piso);
+      const caja = { cupo: Math.min(cupo, libre), piso: p.piso, objetivo: p.objetivo };
+      let r = null;
+      try { r = T.hace(e, caja, rnd); } catch (err) { r = null; }
+      if (!r || !r.s) continue;
+      const gasto = Math.max(0, Math.round(r.oro || 0));
+      if (gasto > caja.cupo) continue;               // nunca por encima de lo autorizado
+      e = r.s;
+      cupo -= gasto;
+      hechos.push({ secre: S.id, tarea: tid, texto: r.texto, oro: gasto });
+      if (cupo <= 0) break;
+    }
+  }
+  if (!hechos.length) return { estado: s, hechos };
+  const linea = hechos.map((h) => `${SECRE_IDX[h.secre].ico} ${h.texto}`).join("; ");
+  return { hechos, estado: { ...e,
+    despacho: { anio: e.anio, turno: e.turno, hechos },
+    cronica: [...(e.cronica || []), { anio: e.anio, dia: e.dia, tipo: "orden",
+      texto: `✒ Despachado en tu nombre: ${linea}.` }] } };
+}
+
 // ——— la columna de la izquierda ———
 // Todo lo que reclama atención aparece acá y en ningún otro sitio. Nada
 // interrumpe la partida con una ventana encima: el que gobierna decide qué
@@ -14610,6 +14925,9 @@ export default function PaxMundi() {
   const [sitio, setSitio] = useState(null);
   const sitioRef = useRef(null);
   sitioRef.current = sitio;
+  // La lista de lo que un secretario no puede hacer se lee una vez y no se
+  // vuelve a mirar; va plegada.
+  const [vedadoAbierto, setVedadoAbierto] = useState(false);
   const [vistaPedida, setVistaPedida] = useState(null);
   const buscaRef = useRef(null);
   // El juego corre entero con el motor local. La IA es opcional: narra con más
@@ -14738,6 +15056,8 @@ export default function PaxMundi() {
         ciencia: cienciaIni,
         edu: { oro: 100, instituciones: {}, sabios: [], sedes: [] },
         proyectos: [],
+        // Todos apagados. Se delega queriendo, no por descuido.
+        secretarios: SECRE_INICIAL(),
         cronica: [{ anio: init.anio, dia: 0, tipo: "situacion", texto: init.situacion }],
       });
       setFase("jugando");
@@ -14745,6 +15065,14 @@ export default function PaxMundi() {
       setError("No pude generar el mundo. Intentá de nuevo.");
       setFase("setup");
     }
+  }
+
+  // Firmar la política de un secretario. Se guarda completa —y no el retazo
+  // que cambió— para que una partida vieja sin secretarios estrene la suya
+  // entera en cuanto se toque algo.
+  function setPol(mando, cambio) {
+    setState((st) => ({ ...st, secretarios: { ...(st.secretarios || {}),
+      [mando]: { ...politicaDe(st.secretarios, mando), ...cambio } } }));
   }
 
   function devaluar() {
@@ -15913,7 +16241,7 @@ export default function PaxMundi() {
       let finLocal = r.fin || null;
       if (!finLocal && nuevosStats.estabilidad <= 0)
         finLocal = { tipo: "derrota", razon: "El colapso interno disolvió tu gobierno." };
-      setState((s) => aplicarEfectos({
+      setState((s) => correrSecretarios(aplicarEfectos({
         ...s,
         anio: anioNuevo, dia: diaNuevo,
         turno: s.turno + 1,
@@ -15942,7 +16270,9 @@ export default function PaxMundi() {
         edu: { ...s.edu, oro: Math.max(0, s.edu.oro + gananciaOro + oroReembolso + oroTributo - (guerraNueva ? poderMilitar(nuevosStats, cienciaPrevia, pobNueva, P, state.ejercito).total * 0.55 * esc : 0)), sedes: sedesFin, sabios: sabiosVivos },
         proyectos: proyectosNuevos,
         cronica: [...s.cronica, ...entradas, ...entradasProy, ...entradasInv, ...entradasCiencia, ...entradasEco, ...entradasPob, ...entradasFac, ...entradasVec, ...entradasVida, ...entradasGuerra],
-      }, r.efectos, rndEfectos));
+      // Los secretarios despachan al final, con el turno ya resuelto: hacen
+      // sobre el reino que quedó, no sobre el que había al empezar.
+      }, r.efectos, rndEfectos), dado(semillaTurno + "|sec")).estado);
       setDeltas(nuevosDeltas);
       setUltimaLectura(r.interpretacion
         ? (r.interpretacion.maniobra
@@ -16554,6 +16884,163 @@ export default function PaxMundi() {
             </div>
           </div>
         )}
+
+        {/* ── EL SECRETARIO ─────────────────────────────────────────────
+            Lo repetitivo se delega; lo que decide el rumbo, no. El jugador
+            firma cuatro cosas —qué se persigue, qué se autoriza y en qué
+            orden, con cuánto y hasta dónde— y después puede auditar cada
+            despacho: abajo queda escrito lo que se hizo en su nombre. */}
+        {SECRE_IDX[tab] && (() => {
+          const S = SECRE_IDX[tab];
+          const pol = politicaDe(s.secretarios, tab);
+          // Solo el despacho de este turno: dejar colgado el de hace ocho años
+          // bajo el rótulo «el turno pasado» es peor que no decir nada.
+          const hechos = ((s.despacho || {}).turno === s.turno
+            ? (s.despacho.hechos || []) : []).filter((h) => h.secre === tab);
+          const mias = tareasDe(tab);
+          const activas = pol.orden.filter((id) => pol.hace[id]).length;
+          const cupo = Math.floor(((s.edu || {}).oro || 0) * pol.parte / 100);
+          const mover = (id, d) => {
+            const o = [...pol.orden]; const i = o.indexOf(id); const j = i + d;
+            if (i < 0 || j < 0 || j >= o.length) return;
+            o[i] = o[j]; o[j] = id; setPol(tab, { orden: o });
+          };
+          return (
+            <div style={{ padding: "10px 12px 2px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                <span style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.4, color: C.brass }}>
+                  {S.ico} SECRETARIO
+                </span>
+                <span style={{ fontSize: 11.5, color: C.muted, fontFamily: serif }}>{S.n}</span>
+                <button onClick={() => setPol(tab, { on: !pol.on })}
+                  title={pol.on ? "que deje de despachar" : "que despache lo autorizado"}
+                  style={{ marginLeft: "auto", padding: "3px 10px", borderRadius: 20, cursor: "pointer",
+                    fontFamily: mono, fontSize: 9.5, letterSpacing: 1,
+                    background: pol.on ? `${C.green}22` : "rgba(0,0,0,0.25)",
+                    border: `1px solid ${pol.on ? C.green : C.line}`,
+                    color: pol.on ? C.green : C.muted }}>
+                  {pol.on ? "● DESPACHA" : "○ PARADO"}
+                </button>
+              </div>
+
+              {!pol.on && (
+                <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
+                  Se ocupa de {S.de}: {mias.map((t) => t.n.toLowerCase()).join(", ")}. Nada de
+                  eso pasa hasta que lo pongas a despachar, y solo lo que le marques.
+                </div>
+              )}
+
+              {pol.on && (
+                <div style={{ borderRadius: 9, padding: "9px 10px", background: "rgba(0,0,0,0.22)",
+                  border: `1px solid ${C.line}` }}>
+                  {/* objetivo */}
+                  <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.1, color: C.muted }}>QUÉ PERSIGUE</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "4px 0 9px" }}>
+                    {(OBJETIVOS[tab] || []).map((o) => (
+                      <button key={o.id} onClick={() => setPol(tab, { objetivo: o.id })} title={o.dice}
+                        style={{ padding: "3px 8px", borderRadius: 6, cursor: "pointer",
+                          fontFamily: serif, fontSize: 12,
+                          background: pol.objetivo === o.id ? `${C.brass}22` : "transparent",
+                          border: `1px solid ${pol.objetivo === o.id ? C.brass : C.line}`,
+                          color: pol.objetivo === o.id ? C.brass : C.muted }}>{o.n}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: C.muted, marginTop: -5, marginBottom: 9, opacity: 0.85 }}>
+                    {(objetivoDe(tab, pol.objetivo) || {}).dice}
+                  </div>
+
+                  {/* tareas, en el orden en que se atienden */}
+                  <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.1, color: C.muted }}>
+                    QUÉ SE LE AUTORIZA {activas > 1 ? "· Y EN QUÉ ORDEN" : ""}
+                  </div>
+                  <div style={{ margin: "5px 0 9px" }}>
+                    {pol.orden.map((id, i) => {
+                      const T = TAREA_IDX[id]; if (!T) return null;
+                      const on = !!pol.hace[id];
+                      return (
+                        <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                          <button onClick={() => setPol(tab, { hace: { ...pol.hace, [id]: !on } })}
+                            style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 6, textAlign: "left",
+                              padding: "4px 7px", borderRadius: 6, cursor: "pointer",
+                              background: on ? `${C.green}14` : "transparent",
+                              border: `1px solid ${on ? C.green + "66" : C.line}`,
+                              color: on ? C.ink : C.muted, fontFamily: serif, fontSize: 12 }}>
+                            <span style={{ fontFamily: mono, fontSize: 10, color: on ? C.green : C.muted }}>
+                              {on ? "✓" : "·"}
+                            </span>
+                            {T.n}
+                            <span style={{ fontFamily: mono, fontSize: 9, color: C.muted, opacity: 0.8 }}>
+                              {T.dice}
+                            </span>
+                          </button>
+                          {activas > 1 && on && (
+                            <button onClick={() => mover(id, -1)} disabled={i === 0} title="atender antes"
+                              style={{ padding: "2px 5px", borderRadius: 5, cursor: i === 0 ? "default" : "pointer",
+                                background: "transparent", border: `1px solid ${C.line}`,
+                                color: i === 0 ? C.line : C.muted, fontFamily: mono, fontSize: 10 }}>▲</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* presupuesto y límite */}
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {[["CON CUÁNTO", "parte", pol.parte, 5, 0, 100, `${pol.parte}% del arca · ⚜ ${cupo} este turno`],
+                      ["HASTA DÓNDE", "piso", pol.piso, 20, 0, 2000, `nunca bajar de ⚜ ${pol.piso}`]].map(
+                      ([et, k, v, paso, min, max, pie]) => (
+                      <div key={k} style={{ flex: "1 1 160px" }}>
+                        <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.1, color: C.muted }}>{et}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
+                          {[-paso, paso].map((d) => (
+                            <button key={d} onClick={() => setPol(tab, { [k]: acotar(v + d, min, max) })}
+                              style={{ padding: "1px 8px", borderRadius: 5, cursor: "pointer",
+                                background: "transparent", border: `1px solid ${C.line}`,
+                                color: C.muted, fontFamily: mono, fontSize: 12 }}>{d < 0 ? "−" : "+"}</button>
+                          ))}
+                          <span style={{ fontFamily: mono, fontSize: 10.5, color: C.ink }}>{pie}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {activas === 0 && (
+                    <div style={{ fontSize: 11, color: C.gold, marginTop: 8 }}>
+                      Está en pie pero sin nada autorizado: no va a hacer nada.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* lo que hizo, que es lo que de verdad hay que poder revisar */}
+              {hechos.length > 0 && (
+                <div style={{ marginTop: 8, borderRadius: 9, padding: "8px 10px",
+                  background: `${C.brass}0E`, border: `1px solid ${C.brass}44` }}>
+                  <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 1.1, color: C.brass }}>
+                    DESPACHADO EL TURNO PASADO
+                  </div>
+                  {hechos.map((h, i) => (
+                    <div key={i} style={{ fontSize: 12, color: C.ink, marginTop: 4, lineHeight: 1.4 }}>
+                      · {h.texto}
+                      {h.oro > 0 && <span style={{ color: C.gold, fontFamily: mono, fontSize: 10 }}> ⚜ {h.oro}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button onClick={() => setVedadoAbierto(!vedadoAbierto)}
+                style={{ marginTop: 7, padding: 0, background: "transparent", border: "none",
+                  cursor: "pointer", color: C.muted, fontFamily: mono, fontSize: 9.5 }}>
+                {vedadoAbierto ? "▾" : "▸"} qué no puede hacer ningún secretario
+              </button>
+              {vedadoAbierto && (
+                <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.6, marginTop: 3, paddingLeft: 10 }}>
+                  {VEDADO.map((v) => <div key={v}>— {v}</div>)}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
             {tab === "cronica" && s.dilema && (
               <div className="pm-fade" style={{ margin: "13px 14px 0", padding: "13px 14px", borderRadius: 10,
