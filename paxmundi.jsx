@@ -6944,7 +6944,18 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // del arrastre: mientras el tirón quepa en él, el mapa se corre entero con un
 // «transform» —eso lo hace la tarjeta gráfica y no cuesta nada— y no se
 // redibuja ni una provincia. Al pasarse, se asienta el encuadre y se sigue.
-const MARGEN_LIENZO = 0.1;
+// Cuánto sobresale el lienzo del hueco por cada lado. Es el margen que se
+// puede arrastrar antes de tener que rehacer el mapa: cuanto más grande, menos
+// veces se redibuja.
+//
+// Estuvo en 0.1 porque agrandarlo empeoraba las cosas. Y era cierto, pero por
+// un motivo que no era este: el corrimiento se le aplicaba al <svg>, que el
+// navegador no sube a una capa propia, así que rasterizaba el mapa entero en
+// cada cuadro y agrandar el lienzo solo agrandaba ese trabajo. Con el
+// corrimiento en un div —que sí sube— el resultado se da vuelta: con 0.3 el
+// mapa se rehace tres veces en un arrastre largo en vez de siete, y los
+// cuadros lentos bajan del 4,9% al 2%. Más de 0.3 ya no compensa.
+const MARGEN_LIENZO = 0.3;
 // Un valor redondeado a escalones geométricos. Sirve para lo que se recuerda
 // entre cuadros: mientras se acerca el mapa, el ancho de un píxel cambia un
 // pelo en cada cuadro, y con eso solo ya se tiraban a la basura todas las
@@ -7961,7 +7972,18 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           lados. Ese sobrante no se ve nunca —el contenedor recorta— y es lo
           que hace que arrastrar sea gratis: el mapa se corre con un
           «transform» y aparece mundo ya dibujado, en vez de rehacerlo. */}
-      <svg ref={svgRef}
+      {/* El corrimiento va en este div y no en el <svg>. Parece lo mismo y no lo
+          es: un div con «will-change» el navegador lo sube a una capa propia y
+          moverlo le sale gratis —lo dibuja una vez y después solo lo desliza—,
+          mientras que un <svg> raíz muchas veces no lo hace y termina
+          rasterizando el mapa entero en cada cuadro. Con el mapa quieto debajo,
+          arrastrar deja de costar lo que costaba. */}
+      <div ref={svgRef}
+        style={{ position: "absolute",
+          left: `${-MARGEN_LIENZO * 100}%`, top: `${-MARGEN_LIENZO * 100}%`,
+          width: `${(1 + MARGEN_LIENZO * 2) * 100}%`, height: `${(1 + MARGEN_LIENZO * 2) * 100}%`,
+          willChange: "transform", transformOrigin: "0 0" }}>
+      <svg
         viewBox={`${vb.x - vb.w * MARGEN_LIENZO} ${vb.y - vb.h * MARGEN_LIENZO}`
           + ` ${vb.w * (1 + MARGEN_LIENZO * 2)} ${vb.h * (1 + MARGEN_LIENZO * 2)}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
@@ -7969,10 +7991,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         onContextMenu={onContexto}
         onDoubleClick={(e) => zoomSuave(e.shiftKey ? 2 : 0.5, e.clientX, e.clientY)}
         onClick={() => { if (movido.current) return; setCiudadSel(null); if (onSeleccion) onSeleccion(null); }}
-        style={{ position: "absolute",
-          left: `${-MARGEN_LIENZO * 100}%`, top: `${-MARGEN_LIENZO * 100}%`,
-          width: `${(1 + MARGEN_LIENZO * 2) * 100}%`, height: `${(1 + MARGEN_LIENZO * 2) * 100}%`,
-          display: "block", touchAction: "none", cursor: "grab", willChange: "transform" }}>
+        style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%",
+          display: "block", touchAction: "none", cursor: "grab" }}>
         {defs}
         {capaMundo}
         {capaProvincias && capaProvincias.fondo}
@@ -8195,6 +8215,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
 
         <rect x={vb.x} y={vb.y} width={vb.w} height={vb.h} fill={`url(#${uid}Vinieta)`} style={{ pointerEvents: "none" }} />
       </svg>
+      </div>
 
       {/* el nombre de lo que se está tocando: uno solo, el que se preguntó */}
       {rotulo && (
