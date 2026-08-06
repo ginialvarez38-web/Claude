@@ -37,9 +37,37 @@ necesita y dice cuál falla y con qué error. `paxmundi.py --probar` hace lo
 mismo con los archivos sueltos. Sale una tabla corta que se puede copiar
 entera.
 
-Si la revisión dice que todo sale bien y el navegador igual no muestra nada,
-probá con otro navegador, o abrí `http://127.0.0.1:8000` a mano en vez de
-`localhost`.
+Si la revisión dice que todo sale bien, el archivo no tiene nada roto: lo que
+falla es el camino entre Python y el navegador.
+
+**El caso más común: no corren del mismo lado.** Si Python corre dentro de un
+emulador, una máquina virtual, un contenedor o WSL, y el navegador está afuera,
+`127.0.0.1` no es el mismo sitio para los dos: cada uno tiene el suyo y no se
+ven. Por defecto el servidor solo atiende a su propia máquina, así que desde
+afuera no hay nadie. Se arregla abriéndolo:
+
+```
+python3 paxmundi_solo.py --red
+```
+
+Al arrancar te dice la dirección con la que llegar desde afuera —algo como
+`http://192.168.1.40:8000/`—. Esa es la que hay que abrir, no `localhost`.
+
+Con `--red` cualquiera de tu red puede abrir el juego. Sin clave de la API no
+hay nada que perder; con clave, tené en cuenta que las llamadas a la IA pasan
+por ahí.
+
+Si están del mismo lado y aun así no anda, hay intermediarios que se llevan mal
+con las conexiones reutilizadas:
+
+```
+python3 paxmundi_solo.py --simple
+```
+
+Una conexión por pedido: algo más lento y mucho más compatible.
+
+Y como último recurso, probá con otro navegador, o abrí `http://127.0.0.1:8000`
+a mano en vez de `localhost`.
 
 ## Para que la IA funcione
 

@@ -33,6 +33,7 @@ import argparse
 import http.server
 import json
 import os
+import socket
 import socketserver
 import sys
 import threading
@@ -340,6 +341,22 @@ class Servidor(socketserver.ThreadingTCPServer):
     verboso = False
 
 
+def mi_direccion():
+    """La dirección de esta máquina en la red, para abrirla desde otro lado.
+
+    No manda nada: abrir un socket UDP no habla con nadie, solo hace que el
+    sistema elija por cuál de sus placas saldría, y esa es la que sirve."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
+
+
 def clave_api():
     return (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 
@@ -373,9 +390,18 @@ def revisar(puerto):
     srv.server_close()
     if malas:
         print("\n   Algo no sale. Copiá todo esto y mandalo: dice qué ruta falla.")
-    else:
-        print("\n   Todo sale bien desde acá. Si el navegador igual no muestra nada,")
-        print("   probá otro navegador, o abrí %s a mano." % base)
+        return
+    print("\n   Todo sale bien desde acá: el servidor sirve las cuatro cosas enteras.")
+    print("   Si el navegador igual no muestra nada, el problema no es el archivo")
+    print("   sino el camino entre Python y el navegador. Por orden:")
+    print("     · ¿El navegador corre en el mismo lado que esto? Si Python está en")
+    print("       un emulador, una máquina virtual, un contenedor o WSL y el")
+    print("       navegador está afuera, «127.0.0.1» son dos sitios distintos y no")
+    print("       se ven. Arrancá con:  python3 paxmundi.py --red")
+    print("       y abrí la dirección que te va a decir, no localhost.")
+    print("     · Si aun estando del mismo lado no anda, probá:")
+    print("       python3 paxmundi.py --simple    (una conexión por pedido)")
+    print("     · Y abrí %s a mano, en vez de localhost." % base)
 
 
 def main():
@@ -384,8 +410,16 @@ def main():
     p.add_argument("--sin-navegador", action="store_true", help="no abrir el navegador solo")
     p.add_argument("--probar", action="store_true",
                    help="revisar que cada ruta contesta, y salir")
+    p.add_argument("--red", action="store_true",
+                   help="atender también desde afuera de esta máquina "
+                        "(emuladores, máquinas virtuales, otro aparato)")
+    p.add_argument("--simple", action="store_true",
+                   help="HTTP/1.0, una conexión por pedido: más lento y más compatible")
     p.add_argument("-v", "--verboso", action="store_true", help="mostrar cada pedido")
     args = p.parse_args()
+
+    if args.simple:
+        Manejador.protocol_version = "HTTP/1.0"
 
     # ——— revisión ———
     # Si el navegador dice «localhost no envió ningún dato», esto contesta por
@@ -398,8 +432,14 @@ def main():
         sys.exit("No encuentro ni paxmundi.jsx ni paxmundi.js.\nAl menos uno tiene que "
                  "estar en la misma carpeta que paxmundi.py:\n  %s" % RAIZ)
 
+    # Por defecto solo atiende a esta misma máquina, que es lo prudente: por
+    # acá pasa la clave de la API. Con --red atiende a cualquiera que llegue,
+    # que es lo que hace falta cuando el navegador está de un lado y Python
+    # del otro —un emulador, una máquina virtual, un contenedor, otro aparato—
+    # porque ahí «127.0.0.1» son dos sitios distintos y no se ven.
+    anfitrion = "0.0.0.0" if args.red else "127.0.0.1"
     try:
-        servidor = Servidor(("127.0.0.1", args.puerto), Manejador)
+        servidor = Servidor((anfitrion, args.puerto), Manejador)
     except OSError as e:
         sys.exit("No pude abrir el puerto %d (%s).\nProbá con otro: python3 paxmundi.py -p 8080"
                  % (args.puerto, e))
@@ -416,6 +456,12 @@ def main():
         if ARMADO.exists():
             print("   (paxmundi.js quedó viejo respecto del .jsx y se ignora)")
     print("   %s" % url)
+    if args.red:
+        mia = mi_direccion()
+        print("   desde otro aparato o desde afuera del emulador:")
+        print("      http://%s:%d/" % (mia or "TU-IP", args.puerto))
+        if clave_api():
+            print("   ojo: así lo alcanza cualquiera de tu red, y por acá pasa la clave.")
     if clave_api():
         print("   IA: clave encontrada")
     else:

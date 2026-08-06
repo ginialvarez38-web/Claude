@@ -37,6 +37,10 @@ llamada a la red posible es a la API de Anthropic, y solo si diste una clave.
                                           querés el código suelto
     python3 paxmundi_solo.py --probar     revisa que todo lo de adentro sale
                                           bien y dice qué falla, si algo falla
+    python3 paxmundi_solo.py --red        atiende también desde afuera de esta
+                                          máquina: hace falta si Python corre en
+                                          un emulador o una máquina virtual y el
+                                          navegador está del otro lado
 """
 
 import argparse
@@ -45,6 +49,7 @@ import http.server
 import json
 import lzma
 import os
+import socket
 import socketserver
 import sys
 import threading
@@ -281,6 +286,22 @@ class Servidor(socketserver.ThreadingTCPServer):
     verboso = False
 
 
+def mi_direccion():
+    """La direccion de esta maquina en la red, para abrirla desde otro lado.
+
+    No manda nada: abrir un socket UDP no habla con nadie, solo hace que el
+    sistema elija por cual de sus placas saldria, y esa es la que sirve."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
+
+
 def clave_api():
     return (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 
@@ -292,8 +313,16 @@ def main():
     p.add_argument("--extraer", action="store_true", help="escribir paxmundi.js al lado y salir")
     p.add_argument("--probar", action="store_true",
                    help="revisar que todo lo de adentro sale bien, y salir")
+    p.add_argument("--red", action="store_true",
+                   help="atender tambien desde afuera de esta maquina "
+                        "(emuladores, maquinas virtuales, otro aparato)")
+    p.add_argument("--simple", action="store_true",
+                   help="HTTP/1.0, una conexion por pedido: mas lento y mas compatible")
     p.add_argument("-v", "--verboso", action="store_true", help="mostrar cada pedido")
     args = p.parse_args()
+
+    if args.simple:
+        Manejador.protocol_version = "HTTP/1.0"
 
     if args.extraer:
         destino = Path(__file__).resolve().parent / "paxmundi.js"
@@ -338,13 +367,28 @@ def main():
         srv.server_close()
         if malas:
             print("\n   Algo no sale. Copiá todo esto y mandalo: dice que ruta falla.")
-        else:
-            print("\n   Todo sale bien desde acá. Si el navegador igual no muestra nada,")
-            print("   probá otro navegador, o abrí %s a mano." % base)
+            return
+        print("\n   Todo sale bien desde acá: el servidor sirve las cuatro cosas enteras.")
+        print("   Si el navegador igual no muestra nada, el problema no es el archivo")
+        print("   sino el camino entre Python y el navegador. Por orden:")
+        print("     - El navegador, ¿corre del mismo lado que esto? Si Python esta en")
+        print("       un emulador, una maquina virtual, un contenedor o WSL y el")
+        print("       navegador esta afuera, '127.0.0.1' son dos sitios distintos y no")
+        print("       se ven. Arranca con:  python3 paxmundi_solo.py --red")
+        print("       y abri la direccion que te va a decir, no localhost.")
+        print("     - Si aun estando del mismo lado no anda, proba:")
+        print("       python3 paxmundi_solo.py --simple    (una conexion por pedido)")
+        print("     - Y abri %s a mano, en vez de localhost." % base)
         return
 
+    # Por defecto solo atiende a esta misma maquina, que es lo prudente: por
+    # aca pasa la clave de la API. Con --red atiende a cualquiera que llegue,
+    # que es lo que hace falta cuando el navegador esta de un lado y Python del
+    # otro -un emulador, una maquina virtual, un contenedor, otro aparato-
+    # porque ahi "127.0.0.1" son dos sitios distintos y no se ven.
+    anfitrion = "0.0.0.0" if args.red else "127.0.0.1"
     try:
-        servidor = Servidor(("127.0.0.1", args.puerto), Manejador)
+        servidor = Servidor((anfitrion, args.puerto), Manejador)
     except OSError as e:
         sys.exit("No pude abrir el puerto %d (%s).\nProba con otro: "
                  "python3 paxmundi_solo.py -p 8080" % (args.puerto, e))
@@ -354,6 +398,12 @@ def main():
     print("PAX MUNDI")
     print("   un solo archivo, %.0f KB de juego dentro" % (len(juego()) / 1024))
     print("   %s" % url)
+    if args.red:
+        mia = mi_direccion()
+        print("   desde otro aparato o desde afuera del emulador:")
+        print("      http://%s:%d/" % (mia or "TU-IP", args.puerto))
+        if clave_api():
+            print("   ojo: asi lo alcanza cualquiera de tu red, y por aca pasa la clave.")
     if clave_api():
         print("   IA: clave encontrada (opcional; el motor local no la necesita)")
     else:
