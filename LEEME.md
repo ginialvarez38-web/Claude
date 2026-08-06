@@ -47,6 +47,7 @@ navegador llamar directamente.
 |---|---|
 | `paxmundi.jsx` | El juego. Un solo archivo, y es el que se edita. |
 | `paxmundi.js`  | El mismo juego ya traducido a JavaScript común. |
+| `runtime.js`   | El motor de pantalla: lo que el juego usa de React, escrito acá. |
 | `paxmundi.py`  | El servidor local: sirve el juego y hace de intermediario con la API. |
 | `paxmundi_solo.py` | Todo lo anterior en un único archivo: el juego va comprimido dentro. |
 
@@ -64,8 +65,24 @@ npx esbuild paxmundi.jsx --bundle --format=esm --outfile=paxmundi.js \
 propio archivo. Se regenera desde `paxmundi.js` y no se edita a mano; con
 `--extraer` vuelve a escribir el `paxmundi.js` original, byte por byte.
 
-## Lo único que se baja de afuera
+## No se baja nada de afuera
 
-React, desde un CDN, la primera vez (después queda en la caché del navegador).
-Si estás sin conexión o detrás de un cortafuegos que lo bloquea, el juego no
-puede arrancar y la página te lo dice en vez de quedarse en blanco.
+Ni una sola cosa. El juego arranca sin internet, detrás de un proxy, en una
+máquina aislada o en un avión.
+
+Hasta hace poco React se bajaba de un CDN la primera vez, y eso convertía un
+juego que cabe en un archivo en uno que no arranca sin conexión —y que, con el
+CDN bloqueado, no arranca nunca—. `runtime.js` es ese trozo, escrito acá: los
+cuatro ganchos que el juego usa (`useState`, `useRef`, `useEffect`, `useMemo`),
+lo que escribe el compilador de JSX (`jsx`, `jsxs`, `Fragment`) y `createRoot`.
+Nada más. Ni contextos, ni reductores, ni portales: lo que no está no puede
+fallar.
+
+Reconcilia como React —compara el árbol nuevo con el puesto y toca solo lo que
+cambió— y, sobre todo, se salta los trozos que siguen siendo el mismo objeto,
+que es lo que devuelve un `useMemo`. Ese atajo es la mitad del rendimiento del
+mapa.
+
+La única llamada a la red que puede hacer el juego es a la API de Anthropic
+para que la IA narre, y solo si le diste una clave. Sin clave no sale ni un
+paquete.

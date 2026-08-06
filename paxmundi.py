@@ -44,6 +44,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent
 FUENTE = RAIZ / "paxmundi.jsx"       # el juego, editable
 ARMADO = RAIZ / "paxmundi.js"        # el mismo juego ya traducido, si está
+MOTOR = RAIZ / "runtime.js"      # el motor de pantalla: React mínimo, propio
 
 API_ANTHROPIC = "https://api.anthropic.com/v1/messages"
 VERSION_API = "2023-06-01"
@@ -98,15 +99,15 @@ PLANTILLA = """<!doctype html>
   #fallo b { color: #E05252; }
 </style>
 
-<!-- React sale de un CDN: es lo único que se baja de afuera. Hace falta
-     internet la primera vez; después queda en la caché del navegador. -->
+<!-- Nada se baja de afuera. El motor de pantalla va en /runtime.js, que sale
+     de este mismo archivo: sin internet, sin CDN y sin sorpresas. -->
 <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.3.1",
-    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-    "react-dom": "https://esm.sh/react-dom@18.3.1?external=react",
-    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?external=react"
+    "react": "/runtime.js",
+    "react/jsx-runtime": "/runtime.js",
+    "react-dom": "/runtime.js",
+    "react-dom/client": "/runtime.js"
   }
 }
 </script>
@@ -234,6 +235,15 @@ class Manejador(http.server.BaseHTTPRequestHandler):
             if not ARMADO.exists():
                 return self.responder(500, "No encuentro paxmundi.js en %s" % RAIZ)
             return self.responder(200, ARMADO.read_text(encoding="utf-8"),
+                                  "text/javascript; charset=utf-8")
+
+        # El motor de pantalla. Antes venía de un CDN y era lo único que hacía
+        # falta bajar; ahora sale de acá al lado, así que el juego arranca sin
+        # internet.
+        if ruta == "/runtime.js":
+            if not MOTOR.exists():
+                return self.responder(500, "No encuentro runtime.js en %s" % RAIZ)
+            return self.responder(200, MOTOR.read_text(encoding="utf-8"),
                                   "text/javascript; charset=utf-8")
 
         if ruta == "/salud":
