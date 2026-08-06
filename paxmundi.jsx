@@ -14338,6 +14338,19 @@ const GlobalStyle = () => (
     .pm-scroll::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.3); border-radius: 3px; }
     .pm-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
     @media (prefers-reduced-motion: reduce) { .pm-fade, .pm-card, .pm-cta, .pm-latido { animation: none !important; transition: none !important; } }
+    /* El dedo no acierta un botón de 21 píxeles de alto. Se agrandan todos de
+       una: caso por caso no sirve, porque el que falla es siempre el que no se
+       miró. Solo crecen los que estaban por debajo.
+
+       Lo que manda acá es con qué se toca, no cuánto mide la pantalla: un
+       teléfono apaisado tiene 844 de ancho y el dedo sigue midiendo lo mismo.
+       Con ratón se quedan compactos, que es lo que conviene en el escritorio. */
+    @media (pointer: coarse) {
+      button { min-height: 36px; min-width: 36px; }
+    }
+    @media (max-width: 639px) {
+      .pm-scroll::-webkit-scrollbar { width: 0; height: 0; }
+    }
   `}</style>
 );
 
@@ -15833,6 +15846,47 @@ function RuedaAcciones({ x, y, titulo, glosa, acciones, onElegir, onCerrar }) {
   );
 }
 
+// ═══ PANTALLA ANGOSTA ═════════════════════════════════════════════════════
+//
+// En un teléfono vertical el panel de la derecha se llevaba el 44% del ancho y
+// la columna de avisos otro tanto por la izquierda: del mundo quedaba una tira.
+// Un panel lateral es una idea de escritorio; en vertical lo que corresponde
+// es que suba desde abajo y tape media pantalla, no que parta el mapa al medio.
+//
+// El límite en 640 y no en 768 a propósito: una tablet vertical entra bien con
+// paneles laterales —lo medí—, y el que no entra es el teléfono.
+const ANCHO_ANGOSTO = 640;
+const PARTE_HOJA = 0.58;      // cuánto de la pantalla ocupa el panel hecho hoja
+
+// Devuelve píxeles y no «58vh» porque el mapa hace cuentas con estos números
+// —«8 + margenInf»— y una medida en texto ahí no es un margen, es un estilo
+// roto que no se ve hasta que algo queda tapado.
+function useVentana() {
+  const medir = () => {
+    if (typeof window === "undefined") return { ancho: 1400, alto: 900 };
+    return { ancho: window.innerWidth, alto: window.innerHeight };
+  };
+  const [v, setV] = useState(medir);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    // Mirar una sola vez no sirve: el teléfono gira, y girándolo cambia cuál de
+    // los dos diseños tiene que estar puesto.
+    const mirar = () => setV((antes) => {
+      const n = medir();
+      return n.ancho === antes.ancho && n.alto === antes.alto ? antes : n;
+    });
+    mirar();
+    window.addEventListener("resize", mirar);
+    window.addEventListener("orientationchange", mirar);
+    return () => {
+      window.removeEventListener("resize", mirar);
+      window.removeEventListener("orientationchange", mirar);
+    };
+  }, []);
+  return { ...v, estrecho: v.ancho < ANCHO_ANGOSTO,
+           altoHoja: Math.round(v.alto * PARTE_HOJA) };
+}
+
 export default function PaxMundi() {
   const [fase, setFase] = useState("setup");
   const [era, setEra] = useState(null);
@@ -15849,6 +15903,18 @@ export default function PaxMundi() {
   // Dónde se puede guardar en este navegador. Se averigua una sola vez, y se
   // averigua escribiendo: preguntar no alcanza.
   const donde = useMemo(() => dondeSeGuarda(), []);
+  const { estrecho, altoHoja } = useVentana();
+  const altoCab = estrecho ? 96 : ALTO_CAB;   // dos filas en el teléfono
+  // Un panel: columna a la derecha en pantalla ancha, hoja que sube desde abajo
+  // en el teléfono. Lo demás —lo que va adentro— no cambia.
+  const hoja = (ancho) => (estrecho
+    ? { position: "fixed", left: 0, right: 0, bottom: ALTO_PIE, top: "auto",
+        height: altoHoja, borderTop: `1px solid ${C.line}`,
+        borderTopLeftRadius: 14, borderTopRightRadius: 14,
+        boxShadow: "0 -14px 34px rgba(0,0,0,0.6)" }
+    : { position: "fixed", top: ALTO_CAB, right: 0, bottom: ALTO_PIE,
+        width: ancho, borderLeft: `1px solid ${C.line}`,
+        boxShadow: "-12px 0 30px rgba(0,0,0,0.5)" });
   const [deltas, setDeltas] = useState({});
   const [accionLibre, setAccionLibre] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -15881,7 +15947,10 @@ export default function PaxMundi() {
   const [confirmarDev, setConfirmarDev] = useState(false);
   const [facAbierta, setFacAbierta] = useState(null);
   const [provSel, setProvSel] = useState(null);
-  const [avisosAbiertos, setAvisosAbiertos] = useState(true);
+  // En el teléfono los avisos arrancan plegados: abiertos le comen al mapa una
+  // franja que ahí no sobra.
+  const [avisosAbiertos, setAvisosAbiertos] = useState(
+    () => !(typeof window !== "undefined" && window.innerWidth < ANCHO_ANGOSTO));
   // El buscador: lo escrito, cuál está señalado con las flechas, y adónde debe
   // mirar la cámara.
   const [busca, setBusca] = useState("");
@@ -17690,7 +17759,11 @@ export default function PaxMundi() {
           paneles tapaba el mapa y había un botón para apartarla, así que
           gobernar y mirar el mundo eran dos cosas distintas y el jugador
           pasaba la partida entrando y saliendo. */}
-      <div style={{ position: "fixed", inset: 0, zIndex: 0 }}>
+      {/* Con la hoja subida, el mapa no puede seguir ocupando la pantalla
+          entera: se encuadra sobre el centro de lo que ocupa, y el reino le
+          quedaba justo detrás de la hoja. El mapa vale lo que se ve de él. */}
+      <div style={{ position: "fixed", left: 0, right: 0, top: 0,
+        bottom: estrecho && tab ? altoHoja + ALTO_PIE : 0, zIndex: 0 }}>
         <MapaMundi
           anio={s.anio}
           centro={centroMundo}
@@ -17705,8 +17778,12 @@ export default function PaxMundi() {
           onComparar={alComparar}
           onRueda={abrirRueda}
           sitio={sitioMapa}
-          margenSup={ALTO_CAB}
-          margenInf={ALTO_PIE}
+          margenSup={altoCab}
+          /* Con el panel hecho hoja, la ficha de la comarca tiene que quedar
+             por encima de la hoja y no debajo, donde no se ve. */
+          /* Ya no hace falta descontar la hoja: el mapa termina donde ella
+             empieza. Lo que sí se descuenta es la barra de ministerios. */
+          margenInf={estrecho && tab ? 0 : ALTO_PIE}
           /* La ficha de la comarca elegida sale por la izquierda del mapa, que
              es justo donde se apilan los avisos: quedaba debajo de ellos y no
              se leía. Se corre lo que ocupa la columna de avisos. */
@@ -17718,15 +17795,21 @@ export default function PaxMundi() {
           Lo que hay que poder leer sin abrir nada y sin buscarlo. Cada
           indicador se pinta con el semáforo de siempre, así que el color se
           lee antes que el número. */}
-      <header style={{ position: "fixed", top: 0, left: 0, right: 0, height: ALTO_CAB, zIndex: 6,
-        display: "flex", alignItems: "center", gap: 14, padding: "0 12px",
+      {/* En el teléfono la cabecera va en dos filas. En una sola, el tesoro
+          —lo primero que uno mira— quedaba reducido a una astilla de treinta
+          píxeles contra el borde. Arriba lo que se mira de un vistazo; abajo el
+          buscador, que se usa queriendo y puede esperar media línea. */}
+      <header style={{ position: "fixed", top: 0, left: 0, right: 0, height: altoCab, zIndex: 6,
+        display: "flex", alignItems: "center", gap: estrecho ? 8 : 14,
+        flexWrap: estrecho ? "wrap" : "nowrap",
+        alignContent: "center", padding: estrecho ? "0 8px" : "0 12px",
         background: "linear-gradient(180deg, rgba(8,13,19,0.97), rgba(8,13,19,0.86))",
         borderBottom: `1px solid ${C.line}`, backdropFilter: "blur(3px)" }}>
         {/* El nombre del reino no se recorta. Con el degradado recortado a la
             caja del texto y la caja encogida por el buscador, «Francia» salía
             como «F»: un truco de pintura no puede costarle al jugador saber qué
             país está gobernando. */}
-        <div style={{ flex: "0 0 auto", maxWidth: 220 }}>
+        <div style={{ flex: "0 0 auto", maxWidth: estrecho ? 132 : 220, overflow: "hidden", order: estrecho ? 1 : 0 }}>
           <div style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: "nowrap", color: C.gold }}>
             {s.nacion.nombre}</div>
           <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1 }}>
@@ -17740,7 +17823,9 @@ export default function PaxMundi() {
             mapa y los ministerios, que es donde de verdad se pierde el tiempo:
             un buscador que encuentra ciudades pero no encuentra «dónde se ve el
             hambre» resuelve la mitad más fácil del problema. */}
-        <div style={{ position: "relative", flex: "0 1 250px", minWidth: 128 }}>
+        <div style={{ position: "relative", minWidth: 128,
+          flex: estrecho ? "1 1 100%" : "0 1 250px",
+          order: estrecho ? 2 : 0 }}>
           <input ref={buscaRef} value={busca}
             onChange={(ev) => { setBusca(ev.target.value); setBuscaSel(0); }}
             onKeyDown={(ev) => {
@@ -17780,8 +17865,10 @@ export default function PaxMundi() {
           )}
         </div>
 
-        {/* la velocidad del tiempo: cuánto abarca el turno que viene */}
-        <div style={{ display: "flex", gap: 2, flex: "0 0 auto" }}>
+        {/* La velocidad del tiempo: cuánto abarca el turno que viene. En el
+            teléfono no va acá: no entra, y está igual dentro del CONSEJO, que
+            es además donde se decide. Repetirla costaba la cabecera entera. */}
+        <div style={{ display: estrecho ? "none" : "flex", gap: 2, flex: "0 0 auto" }}>
           {PASOS.map((pp) => (
             <button key={pp.id} onClick={() => setPaso(pp.id)} disabled={pensando}
               title={`el turno abarcará ${pp.label}`}
@@ -17794,7 +17881,15 @@ export default function PaxMundi() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 3, marginLeft: "auto", overflow: "hidden" }}>
+        {/* Los indicadores no se recortan en el teléfono: se corren. Cortar el
+            tesoro por la mitad es peor que hacerlo arrastrar. */}
+        <div className="pm-scroll" style={{ display: "flex", gap: 3,
+          /* Con «auto» el margen empuja hasta el borde y, al haber dos filas,
+             se queda la primera entera. En el teléfono ocupa lo que sobra. */
+          marginLeft: estrecho ? 0 : "auto",
+          flex: estrecho ? "1 1 0" : "0 1 auto",
+          overflowX: estrecho ? "auto" : "hidden", overflowY: "hidden",
+          minWidth: 0, scrollbarWidth: "none", order: estrecho ? 1 : 0 }}>
           {mandoDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
             piT, pobTecho: techoOcupado }).map((ind) => (
             <div key={ind.id} title={`${ind.n}: ${ind.pie} · ${DICE[ind.nivel] || ""}`}
@@ -17822,8 +17917,9 @@ export default function PaxMundi() {
             background: donde.dura ? "transparent" : "rgba(224,82,82,0.12)",
             border: `1px solid ${donde.dura ? C.line : C.red}`,
             color: donde.dura ? C.muted : C.red,
-            fontFamily: mono, fontSize: 9.5, letterSpacing: 0.8 }}>
-          {donde.dura ? "💾 PARTIDA" : "⚠ NO SE GUARDA"}
+            fontFamily: mono, fontSize: 9.5, letterSpacing: 0.8, order: estrecho ? 1 : 0 }}>
+          {/* En el teléfono, solo el símbolo: la palabra se comía el buscador. */}
+          {estrecho ? (donde.dura ? "💾" : "⚠") : (donde.dura ? "💾 PARTIDA" : "⚠ NO SE GUARDA")}
         </button>
       </header>
 
@@ -18008,10 +18104,9 @@ export default function PaxMundi() {
           clic en el mapa, y mientras haya alguna comparándose manda sobre el
           ministerio: es lo que el jugador acaba de pedir mirar. */}
       {compara && (
-      <aside className="pm-fade" style={{ position: "fixed", top: ALTO_CAB, right: 0, bottom: ALTO_PIE,
-        width: "min(470px, 46vw)", zIndex: 5, overflowY: "auto", overflowX: "hidden",
-        background: "rgba(12,18,26,0.97)", borderLeft: `1px solid ${C.line}`,
-        boxShadow: "-12px 0 30px rgba(0,0,0,0.5)" }}>
+      <aside className="pm-fade" style={{ ...hoja("min(470px, 46vw)"),
+        zIndex: 5, overflowY: "auto", overflowX: "hidden",
+        background: "rgba(12,18,26,0.97)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
           position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
           background: "rgba(10,16,23,0.99)" }}>
@@ -18073,10 +18168,9 @@ export default function PaxMundi() {
       )}
 
       {tab && MANDO_IDX[tab] && !compara && (
-      <aside className="pm-fade" style={{ position: "fixed", top: ALTO_CAB, right: 0, bottom: ALTO_PIE,
-        width: "min(430px, 44vw)", zIndex: 5, overflowY: "auto", overflowX: "hidden",
-        background: "rgba(12,18,26,0.955)", borderLeft: `1px solid ${C.line}`,
-        boxShadow: "-12px 0 30px rgba(0,0,0,0.5)" }}>
+      <aside className="pm-fade" style={{ ...hoja("min(430px, 44vw)"),
+        zIndex: 5, overflowY: "auto", overflowX: "hidden",
+        background: "rgba(12,18,26,0.955)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
           position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
           background: "rgba(10,16,23,0.99)" }}>
@@ -20761,7 +20855,7 @@ export default function PaxMundi() {
           la partida con una ventana encima: el que gobierna decide qué mira y
           cuándo, y lo que no mire sigue estando cuando vuelva. */}
       {avisos.length > 0 && (
-      <aside className="pm-fade" style={{ position: "fixed", left: 0, top: ALTO_CAB,
+      <aside className="pm-fade" style={{ position: "fixed", left: 0, top: altoCab,
         bottom: ALTO_PIE, width: avisosAbiertos ? "min(292px, 25vw)" : 66, zIndex: 4,
         display: "flex", flexDirection: "column", pointerEvents: "none",
         // La columna no es un panel: es una pila de tarjetas flotando sobre el

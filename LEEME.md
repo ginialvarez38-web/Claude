@@ -83,6 +83,22 @@ Una conexión por pedido: algo más lento y mucho más compatible.
 Y como último recurso, probá con otro navegador, o abrí `http://127.0.0.1:8000`
 a mano en vez de `localhost`.
 
+## En el teléfono
+
+El juego se acomoda solo. En una pantalla angosta —menos de 640 px— el panel
+de la derecha deja de ser una columna y sube desde abajo tapando poco más de la
+mitad: un panel lateral es una idea de escritorio, y en vertical partía el mapa
+al medio. Los avisos arrancan plegados, la cabecera va en dos filas para que el
+tesoro no quede reducido a una astilla, y el mapa se encuadra sobre lo que se
+ve de él y no sobre la pantalla entera, que era como el reino terminaba
+escondido detrás del panel.
+
+Los botones crecen a 36 px donde se toca con el dedo —lo decide el tipo de
+puntero, no el tamaño de la pantalla: un teléfono apaisado mide 844 de ancho y
+el dedo sigue midiendo lo mismo—. Con ratón se quedan compactos.
+
+En apaisado y en tablet no cambia nada: ahí los paneles laterales entran bien.
+
 ## La partida se guarda sola
 
 Al terminar cada turno, y también cuando dejás el juego —cambiás de pestaña,
