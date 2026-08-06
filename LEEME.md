@@ -5,7 +5,17 @@ hasta hoy, con las 4.594 provincias reales del mundo sobre un mapa navegable.
 
 ## Cómo correrlo
 
-Con un solo archivo, sin nada más al lado:
+Lo más simple, y lo que anda en todos lados: abrir `paxmundi.html` en el
+navegador. Doble clic y listo. No hace falta Python, ni servidor, ni internet:
+el juego entero está adentro de esa página.
+
+Es la única manera que funciona en un Python online, en una app de teléfono o
+en cualquier sandbox donde no se pueda abrir un puerto. Lo único que no tiene
+es el motor de IA, porque eso sí necesita un servidor que guarde la clave; el
+motor local hace todo lo demás igual.
+
+Si preferís levantarlo como servidor —y así tener también el motor de IA—, con
+un solo archivo y nada más al lado:
 
 ```
 python3 paxmundi_solo.py
@@ -24,9 +34,13 @@ Si el puerto 8000 está ocupado: `python3 paxmundi.py -p 8080`.
 
 ## Si el navegador no muestra nada
 
-Arranca el servidor pero la pestaña queda en blanco, o dice «localhost no
-envió ningún dato» (`ERR_EMPTY_RESPONSE`). Preguntale al propio archivo qué
-le pasa:
+Antes que nada: si lo que falla es el servidor, probá `paxmundi.html`. Sin
+servidor no hay nada que pueda fallar entre Python y el navegador, que es
+donde están casi todos estos problemas.
+
+Y si querés el servidor igual: arranca pero la pestaña queda en blanco, o dice
+«localhost no envió ningún dato» (`ERR_EMPTY_RESPONSE`). Preguntale al propio
+archivo qué le pasa:
 
 ```
 python3 paxmundi_solo.py --probar
@@ -97,6 +111,11 @@ navegador llamar directamente.
 | `runtime.js`   | El motor de pantalla: lo que el juego usa de React, escrito acá. |
 | `paxmundi.py`  | El servidor local: sirve el juego y hace de intermediario con la API. |
 | `paxmundi_solo.py` | Todo lo anterior en un único archivo: el juego va comprimido dentro. |
+| `paxmundi.html` | El juego en una sola página, sin servidor: se abre a mano. |
+
+`paxmundi.html` no puede ser un módulo ES como el resto: abiertos con `file://`
+los módulos los bloquea el propio navegador por CORS. Por eso se arma aparte,
+como un guion clásico —un IIFE— que sí anda desde un archivo suelto.
 
 `paxmundi.js` está para que arranque al instante sin depender de Babel. Si
 editás `paxmundi.jsx`, el servidor nota por la fecha que el `.js` quedó viejo
