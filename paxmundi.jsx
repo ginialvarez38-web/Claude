@@ -6919,6 +6919,18 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // «transform» —eso lo hace la tarjeta gráfica y no cuesta nada— y no se
 // redibuja ni una provincia. Al pasarse, se asienta el encuadre y se sigue.
 const MARGEN_LIENZO = 0.1;
+// Un valor redondeado a escalones geométricos. Sirve para lo que se recuerda
+// entre cuadros: mientras se acerca el mapa, el ancho de un píxel cambia un
+// pelo en cada cuadro, y con eso solo ya se tiraban a la basura todas las
+// cachés —los trazos de las provincias del mundo, los bosques, las ciudades—
+// y se rehacían sesenta veces por segundo. Redondeado a saltos del 15%, la
+// caché acierta casi siempre y lo que se dibuja no cambia de tamaño de forma
+// perceptible: el error máximo es la mitad de un salto.
+const escalon = (v, paso) => {
+  if (!(v > 0)) return v;
+  const p = paso || 1.15;
+  return Math.pow(p, Math.round(Math.log(v) / Math.log(p)));
+};
 // Puede haber dos mapas a la vez —el del fondo y el de la pestaña— con zoom
 // distinto. Si compartieran los ids del SVG, el rayado de uno se lo llevaría
 // el otro: cada instancia se numera.
@@ -6971,7 +6983,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     // quedaría dibujado dos dedos más allá de donde dice estar.
     if (pendiente.current) {
       pendiente.current = null;
-      if (svgRef.current) svgRef.current.style.transform = "";
+      if (svgRef.current && svgRef.current.style) svgRef.current.style.transform = "";
     }
     vbRef.current = v;
     if (ya) { setVb(v); return; }
@@ -6999,7 +7011,11 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       const w = o.w * Math.pow(d.w / o.w, e);
       const cx = o.x + o.w / 2 + (d.x + d.w / 2 - (o.x + o.w / 2)) * e;
       const cy = o.y + o.h / 2 + (d.y + d.h / 2 - (o.y + o.h / 2)) * e;
-      fijar(limitar({ x: cx - w / 2, y: cy - w / (aspRef.current || 1.62) / 2, w, h: 0 }), true);
+      // El vuelo también se estira en vez de redibujarse cuadro a cuadro. Como
+      // en el camino cambia mucho la escala, se irá asentando por el camino:
+      // aun así son cinco dibujados en vez de treinta y cinco.
+      correr(limitar({ x: cx - w / 2, y: cy - w / (aspRef.current || 1.62) / 2,
+        w, h: w / (aspRef.current || 1.62) }), k >= 1);
       anim.current = k < 1 ? requestAnimationFrame(paso) : 0;
     };
     anim.current = requestAnimationFrame(paso);
@@ -7082,19 +7098,26 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     desliz.current = 0;
     const d = meta.current;
     if (!d) return;
-    const v = vbRef.current;
+    // De dónde parte el paso: de donde el mapa se está enseñando ahora mismo,
+    // que mientras dura el estirón no es lo mismo que el encuadre asentado.
+    const v = pendiente.current || vbRef.current;
     const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
     const dx = d.x + d.w / 2 - cx, dy = d.y + d.h / 2 - cy;
     // se planta cuando ya no queda nada que ver: si no, el lerp persigue una
     // diferencia infinitesimal para siempre y el mapa nunca deja de repintarse
-    if (Math.abs(Math.log(d.w / v.w)) < 0.002 && Math.abs(dx) < d.w * 0.002 && Math.abs(dy) < d.h * 0.002) {
+    if (Math.abs(Math.log(d.w / v.w)) < 0.004 && Math.abs(dx) < d.w * 0.004 && Math.abs(dy) < d.h * 0.004) {
       meta.current = null;
-      fijar(d, true);
+      acercando.current = false;
+      correr(d, true);                                   // el último, dibujado de verdad
       return;
     }
-    const k = 0.3;
+    // Un paso más largo que antes: son menos cuadros para el mismo viaje y
+    // cada cuadro que no se dibuja es un mapa entero que no se rasteriza.
+    const k = 0.42;
     const w = v.w * Math.pow(d.w / v.w, k);
-    fijar(limitar({ x: cx + dx * k - w / 2, y: cy + dy * k - w / (aspRef.current || 1.62) / 2, w, h: 0 }), true);
+    acercando.current = true;
+    correr(limitar({ x: cx + dx * k - w / 2, y: cy + dy * k - w / (aspRef.current || 1.62) / 2,
+      w, h: w / (aspRef.current || 1.62) }));
     desliz.current = requestAnimationFrame(deslizar);
   };
   // Zoom deslizado: en vez de saltar, mueve una meta y el encuadre corre
@@ -7103,7 +7126,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   function zoomSuave(f, sx, sy) {
     detener();
     const r = medirCaja();
-    const v = meta.current || vbRef.current;
+    const v = meta.current || pendiente.current || vbRef.current;
     const w = acotar(v.w * f, 0.4, 440);
     const g = w / v.w;                                          // el factor ya recortado por los topes
     let x, y;
@@ -7198,17 +7221,28 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // es correrlo con un «transform»: eso no vuelve a dibujar nada, lo hace la
   // tarjeta gráfica con lo que ya está pintado. Solo cuando el tirón se sale
   // del margen —o cuando se suelta— se asienta el encuadre de verdad.
-  const correr = (dest) => {
-    const el = svgRef.current, r = medRef.current;
-    if (!el || !r.w) { fijar(dest); return; }
-    const k = vbRef.current.w / r.w;                 // unidades de mapa por píxel
-    const ox = (vbRef.current.x - dest.x) / k, oy = (vbRef.current.y - dest.y) / k;
+  const correr = (dest, ya) => {
+    const el = svgRef.current, r = medRef.current, V = vbRef.current;
+    // Sin lienzo de verdad —o sin sitio donde escribir el estirón— no hay
+    // truco que valga: se asienta y se dibuja, que es lo de siempre.
+    if (!el || !el.style || !r.w || ya) { pendiente.current = dest; asentar(); return; }
+    // Cuánto hay que estirar y correr el lienzo para que enseñe `dest`
+    // estando dibujado para `V`. Con el mismo ancho sale un corrimiento puro
+    // —eso es arrastrar—; con otro, además una escala —eso es acercar—.
+    const s = V.w / dest.w;
+    const kx = r.w / dest.w, ky = r.h / dest.h;
+    const M = MARGEN_LIENZO;
+    const tx = (V.x - dest.x + M * (dest.w - V.w)) * kx;
+    const ty = (V.y - dest.y + M * (dest.h - V.h)) * ky;
     pendiente.current = dest;
-    if (Math.abs(ox) > r.w * MARGEN_LIENZO * 0.92 || Math.abs(oy) > r.h * MARGEN_LIENZO * 0.92) {
-      asentar();
-      return;
-    }
-    el.style.transform = `translate3d(${ox}px, ${oy}px, 0)`;
+    // Se asienta cuando el corrimiento se sale del margen dibujado, o cuando
+    // la escala se aleja tanto que el trazo empezaría a engordar de más. Por
+    // debajo de 0,93 el lienzo ya no cubre el hueco y asomaría el vacío.
+    const fuera = Math.abs(tx) > r.w * M * 0.92 || Math.abs(ty) > r.h * M * 0.92;
+    if (fuera || s < 0.93 || s > 1.6) { asentar(); return; }
+    el.style.transformOrigin = "0 0";
+    el.style.transform = s === 1 ? `translate3d(${tx}px, ${ty}px, 0)`
+      : `translate3d(${tx}px, ${ty}px, 0) scale(${s})`;
   };
   // Deja el mapa donde lo dejó el dedo: se quita el corrimiento y se dibuja de
   // nuevo, una sola vez.
@@ -7216,9 +7250,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     const el = svgRef.current;
     const d = pendiente.current;
     pendiente.current = null;
-    if (el) el.style.transform = "";
+    if (el && el.style) el.style.transform = "";
     if (d) fijar(limitar(d), true);
   };
+  // Y el mismo truco para acercar. Cada cuadro de un acercamiento suave
+  // volvía a rasterizar el mapa entero —cuatro mil provincias, el relieve,
+  // los ríos, las ciudades—: el 88% del trabajo de cada cuadro era eso, y no
+  // el juego. Ahora el lienzo se estira, que es lo que hace la tarjeta
+  // gráfica de balde, y se vuelve a dibujar de verdad una vez por tirón.
+  const acercando = useRef(false);
   function onUp(e) {
     punteros.current.delete(e.pointerId);
     if (punteros.current.size === 0) {
@@ -7334,6 +7374,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // entran de a poco y engordan un punto al acercarse, en vez de aparecer
   // de golpe y con el mismo grosor a cualquier distancia.
   const cerca = acotar((200 - w) / 130, 0, 1);
+  // El píxel y el ancho, a escalones: es lo que se le pasa a lo que guarda
+  // caché. Los grosores de línea siguen usando el valor exacto —eso es un
+  // atributo, no cuesta— así que al acercarse nada da un salto.
+  const pxCapa = escalon(px, 1.15);
+  const wCapa = escalon(w, 1.15);
+  // Lo mismo para lo fino de las líneas: es un atributo y podría ir exacto,
+  // pero va en las dependencias de las capas, y con el valor exacto cada
+  // cuadro del zoom era una capa nueva.
+  const cercaCapa = acotar((200 - wCapa) / 130, 0, 1);
   // El grosor de una línea del mapa. Es uno solo: la costa, el límite de un
   // país y la división entre provincias se dibujan con el mismo hilo. Es lo
   // que hace que las tres sigan el contorno con la misma fidelidad —una línea
@@ -7348,14 +7397,22 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // pelo por encima del píxel es lo mínimo para que una curva se lea como
   // curva.
   const fino = px * (0.62 + 0.46 * cerca);
-  const bloque = Math.max(0.25, w / 6);
+  const finoCapa = pxCapa * (0.62 + 0.46 * cercaCapa);
+  // El recorte del mundo que se dibuja se calcula con el ancho redondeado
+  // hacia arriba —nunca menor que el de verdad, o faltaría mundo en los
+  // bordes— y se ajusta a bloques. Así, mientras se acerca el mapa, el recorte
+  // no cambia en cada cuadro sino cada escalón: antes cada cuadro del zoom
+  // tiraba las cachés de todas las capas y volvía a trazar el mundo entero.
+  const wRej = wCapa * 1.15;
+  const hRej = wRej / (aspRef.current || 1.62);
+  const bloque = Math.max(0.25, wRej / 6);
   // Se dibuja más mundo del que se ve. El sobrante es lo que permite arrastrar
   // corriendo el lienzo con la tarjeta gráfica en vez de volver a dibujarlo:
   // mientras el tirón no se coma el margen, no hay nada que rehacer.
-  const rx = Math.floor((vb.x - w * MARGEN_LIENZO * 1.4) / bloque) * bloque;
-  const ry = Math.floor((vb.y - vb.h * MARGEN_LIENZO * 1.4) / bloque) * bloque;
-  const rw = Math.ceil((vb.w * (1 + MARGEN_LIENZO * 2.8)) / bloque) * bloque + bloque;
-  const rh = Math.ceil((vb.h * (1 + MARGEN_LIENZO * 2.8)) / bloque) * bloque + bloque;
+  const rx = Math.floor((vb.x - wRej * MARGEN_LIENZO * 1.4) / bloque) * bloque;
+  const ry = Math.floor((vb.y - hRej * MARGEN_LIENZO * 1.4) / bloque) * bloque;
+  const rw = Math.ceil((wRej * (1 + MARGEN_LIENZO * 2.8)) / bloque) * bloque + bloque;
+  const rh = Math.ceil((hRej * (1 + MARGEN_LIENZO * 2.8)) / bloque) * bloque + bloque;
   const claveVista = `${rx.toFixed(2)}|${ry.toFixed(2)}|${rw.toFixed(2)}|${rh.toFixed(2)}`;
   const enVista = (x, y) => x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
 
@@ -7393,24 +7450,24 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     <g style={{ pointerEvents: "none" }}>
       <rect x="-90" y="-70" width="560" height="330" fill={`url(#${uid}Hondura)`} />
       {capas.reticula && (
-        <path d={reticula(w > 150 ? 30 : w > 60 ? 10 : w > 20 ? 5 : 1)}
-          fill="none" stroke="#7FB4CE" strokeWidth={px * 0.46} opacity={w > 150 ? 0.16 : 0.11} />
+        <path d={reticula(wCapa > 150 ? 30 : wCapa > 60 ? 10 : wCapa > 20 ? 5 : 1)}
+          fill="none" stroke="#7FB4CE" strokeWidth={pxCapa * 0.46} opacity={wCapa > 150 ? 0.16 : 0.11} />
       )}
       {/* plataforma continental: tres halos que insinúan la profundidad */}
-      <path d={MUNDO_D} fill="none" stroke="#14415C" strokeWidth={px * 50} strokeLinejoin="round" opacity="0.55" />
-      <path d={MUNDO_D} fill="none" stroke="#1B5375" strokeWidth={px * 23} strokeLinejoin="round" opacity="0.6" />
-      <path d={MUNDO_D} fill="none" stroke="#276B8C" strokeWidth={px * 9.2} strokeLinejoin="round" opacity="0.75" />
+      <path d={MUNDO_D} fill="none" stroke="#14415C" strokeWidth={pxCapa * 50} strokeLinejoin="round" opacity="0.55" />
+      <path d={MUNDO_D} fill="none" stroke="#1B5375" strokeWidth={pxCapa * 23} strokeLinejoin="round" opacity="0.6" />
+      <path d={MUNDO_D} fill="none" stroke="#276B8C" strokeWidth={pxCapa * 9.2} strokeLinejoin="round" opacity="0.75" />
       {/* La unión en punta es lo que hace que la línea siga el contorno: con
           unión redonda, cada cabo y cada ría se achatan al grosor del trazo.
           Y el trazo, cuanto más fino, más fiel al dibujo que hay debajo. */}
       <path d={MUNDO_D} fill={`url(#${uid}Tierra)`} stroke="#070C06"
-        strokeWidth={fino * 2.2} strokeLinejoin="miter" strokeMiterlimit="2"
+        strokeWidth={finoCapa * 2.2} strokeLinejoin="miter" strokeMiterlimit="2"
         shapeRendering="geometricPrecision" />
       <path d={MUNDO_D} fill="none" stroke="#D6E2B8" clipPath={`url(#${uid}SinPolo)`}
-        strokeWidth={fino} strokeLinejoin="miter" strokeMiterlimit="2"
+        strokeWidth={finoCapa} strokeLinejoin="miter" strokeMiterlimit="2"
         shapeRendering="geometricPrecision" opacity="0.95" />
     </g>
-  ), [w, px, fino, uid, capas.reticula]);
+  ), [wCapa, pxCapa, finoCapa, uid, capas.reticula]);
 
   // El relieve, aparte y por encima del color de las provincias.
   //
@@ -7429,15 +7486,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             —la luz viene del noroeste— y con polígonos planos es lo único
             que da volumen sin datos de altura. */}
         <path d={FISICO.montes} fill="#1B1710" opacity="0.36"
-          transform={`translate(${px * 1.7},${px * 1.7})`} />
+          transform={`translate(${pxCapa * 1.7},${pxCapa * 1.7})`} />
         <path d={FISICO.montes} fill="#EFE7CC" opacity="0.32"
-          transform={`translate(${-px * 1.5},${-px * 1.5})`} />
+          transform={`translate(${-pxCapa * 1.5},${-pxCapa * 1.5})`} />
         <path d={FISICO.montes} fill="#7B7157" opacity="0.42" />
-        <path d={FISICO.montes} fill="none" stroke="#4E4735" strokeWidth={px * 0.5}
+        <path d={FISICO.montes} fill="none" stroke="#4E4735" strokeWidth={pxCapa * 0.5}
           strokeLinejoin="miter" opacity="0.5" shapeRendering="geometricPrecision" />
       </g>
     );
-  }, [px, capas.fisico]);
+  }, [pxCapa, capas.fisico]);
 
   // Las 4.594 provincias del mundo, agrupadas por país.
   // Las 4.594 provincias del mundo. La división interior es el escalón más
@@ -7449,9 +7506,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     // entero, así que no se apaga al alejarse: la división política sí, porque
     // a esa distancia el hilo se afina hasta desaparecer, pero un mapa de
     // biomas o de lluvia del mundo completo es justo para lo que sirve.
-    if (temat ? !capas.provincias : !capas.provincias || w >= 300) return null;
-    const op = temat ? 1 : acotar((300 - w) / 120, 0, 1);
-    const grupos = trazoProvinciasEn(rx, ry, rw, rh, temat ? vista : null, 100 * px * px);
+    if (temat ? !capas.provincias : !capas.provincias || wCapa >= 300) return null;
+    const op = temat ? 1 : acotar((300 - wCapa) / 120, 0, 1);
+    const grupos = trazoProvinciasEn(rx, ry, rw, rh, temat ? vista : null, 100 * pxCapa * pxCapa);
     return {
       fondo: (
         <g style={{ pointerEvents: "none" }}>
@@ -7462,63 +7519,63 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       lineas: (
         <g style={{ pointerEvents: "none" }}>
           {grupos.map((g) => (
-            <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={fino * 2.4}
+            <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={finoCapa * 2.4}
               strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
-              opacity={op * (0.34 + 0.24 * cerca)} />
+              opacity={op * (0.34 + 0.24 * cercaCapa)} />
           ))}
           {grupos.map((g) => (
-            <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#F2E9D2" strokeWidth={fino}
+            <path key={"pl" + g.pais} d={g.d} fill="none" stroke="#F2E9D2" strokeWidth={finoCapa}
               strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
-              opacity={op * (0.74 + 0.26 * cerca)} />
+              opacity={op * (0.74 + 0.26 * cercaCapa)} />
           ))}
         </g>
       ),
     };
-  }, [w, px, fino, cerca, claveVista, capas.provincias, vista, uid]);
+  }, [wCapa, pxCapa, claveVista, capas.provincias, vista, uid]);
 
   // Fronteras y aguas: por encima de las provincias.
   const capaAguas = useMemo(() => (
     <g style={{ pointerEvents: "none" }}>
-      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={fino * 2.2}
+      <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={finoCapa * 2.2}
         strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
         shapeRendering="geometricPrecision" opacity="0.6" />
       {/* El límite de un país lleva el mismo hilo, un punto más marcado. El
           suelo es para el mundo entero: ahí el hilo se afina tanto que la
           división política desaparecería, y un mapa sin países no sirve. */}
       <path d={FRONT_PAIS} fill="none" stroke="#F7EDD2" clipPath={`url(#${uid}SinPolo)`}
-        strokeWidth={Math.max(fino * 1.45, px * 0.95)}
+        strokeWidth={Math.max(finoCapa * 1.45, pxCapa * 0.95)}
         strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
-        shapeRendering="geometricPrecision" opacity={w > 260 ? 0.85 : 1} />
+        shapeRendering="geometricPrecision" opacity={wCapa > 260 ? 0.85 : 1} />
       {capas.fisico && (
         <>
           {/* Los lagos, con su orilla marcada y una sombra fina por dentro:
               se leen como agua hundida y no como una mancha azul. */}
           <path d={FISICO.lagos} fill="#0E3247" opacity="0.5"
-            transform={`translate(${px * 0.9},${px * 0.9})`} />
-          <path d={FISICO.lagos} fill="#1E5F82" stroke="#7FC0DE" strokeWidth={px * 0.5}
+            transform={`translate(${pxCapa * 0.9},${pxCapa * 0.9})`} />
+          <path d={FISICO.lagos} fill="#1E5F82" stroke="#7FC0DE" strokeWidth={pxCapa * 0.5}
             strokeLinejoin="miter" shapeRendering="geometricPrecision" />
-          {w < 260 && (
+          {wCapa < 260 && (
             <>
-              <path d={FISICO.rios} fill="none" stroke="#0B2A3B" strokeWidth={px * 1.05}
+              <path d={FISICO.rios} fill="none" stroke="#0B2A3B" strokeWidth={pxCapa * 1.05}
                 strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
-                opacity={Math.min(0.75, (260 - w) / 110)} shapeRendering="geometricPrecision" />
-              <path d={FISICO.rios} fill="none" stroke="#5FB0D6" strokeWidth={px * 0.5}
+                opacity={Math.min(0.75, (260 - wCapa) / 110)} shapeRendering="geometricPrecision" />
+              <path d={FISICO.rios} fill="none" stroke="#5FB0D6" strokeWidth={pxCapa * 0.5}
                 strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
-                opacity={Math.min(1, (260 - w) / 80)} shapeRendering="geometricPrecision" />
+                opacity={Math.min(1, (260 - wCapa) / 80)} shapeRendering="geometricPrecision" />
             </>
           )}
         </>
       )}
     </g>
-  ), [w, px, fino, cerca, capas.fisico]);
+  ), [wCapa, pxCapa, capas.fisico]);
 
   // Los picos se marcan pero no se rotulan. Un mapa que escribe el nombre de
   // todo lo que sabe termina siendo una lista de nombres sobre un fondo de
   // mapa; el nombre de una sierra, de un río o de un mar se pregunta tocando,
   // y aparece uno solo: el que se preguntó.
   const capaPicos = useMemo(() => {
-    if (!capas.fisico || w >= 160) return null;
-    const t = px * 7;
+    if (!capas.fisico || wCapa >= 160) return null;
+    const t = pxCapa * 7;
     const ps = FISICO.picos.filter((p) => enVista(p[1], p[2])).slice(0, 40);
     return (
       <g style={{ pointerEvents: "none" }}>
@@ -7528,7 +7585,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         ))}
       </g>
     );
-  }, [w, px, claveVista, capas.fisico]);
+  }, [wCapa, pxCapa, claveVista, capas.fisico]);
 
   // Nombres de país. El rótulo se gana con el tamaño: un país se nombra
   // recién cuando ocupa pantalla suficiente para sostener su nombre, y la
@@ -7538,24 +7595,24 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // mismo cuerpo de letra, así que Rusia y Andorra se anunciaban igual de
   // fuerte y el mapa se leía como una lista y no como un mapa.
   const capaPaises = useMemo(() => {
-    if (!capas.paises || w >= 210 || w <= 6) return null;
+    if (!capas.paises || wCapa >= 210 || wCapa <= 6) return null;
     const cand = [];
     for (const c of centrosPaises()) {                    // vienen del más grande al más chico
       if (!enVista(c.x, c.y)) continue;
       const lado = Math.sqrt(c.a || 0);                   // el lado del cuadrado equivalente, en grados
-      if (lado / px < 108) continue;                      // todavía no da la escala para nombrarlo
-      cand.push({ ...c, fs: acotar(lado * 0.1, px * 9, px * 17) });
+      if (lado / pxCapa < 108) continue;                      // todavía no da la escala para nombrarlo
+      cand.push({ ...c, fs: acotar(lado * 0.1, pxCapa * 9, pxCapa * 17) });
     }
     return (
       <g style={{ pointerEvents: "none" }}>
-        {repartirRotulos(cand, px * 120, px * 46, 22).map((c, i) => (
+        {repartirRotulos(cand, pxCapa * 120, pxCapa * 46, 22).map((c, i) => (
           <text key={"pn" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={c.fs} fill="#EADFC0" opacity="0.45"
             style={{ letterSpacing: `${c.fs * 0.17}px`, textTransform: "uppercase",
               paintOrder: "stroke", stroke: "rgba(0,0,0,0.65)", strokeWidth: c.fs * 0.14 }}>{c.n}</text>
         ))}
       </g>
     );
-  }, [w, px, claveVista, capas.paises]);
+  }, [wCapa, pxCapa, claveVista, capas.paises]);
 
   // Las cordilleras del mundo, escritas. El relieve ya se veía —las manchas
   // pardas con su sombra— pero no decía cómo se llama, y una cordillera sin
@@ -7563,18 +7620,18 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // es como las escribe cualquier atlas físico: se leen si uno las busca y no
   // le disputan el sitio al nombre del país.
   const capaSierras = useMemo(() => {
-    if (!capas.sierras || w <= 5) return null;
+    if (!capas.sierras || wCapa <= 5) return null;
     const cand = [];
     for (const c of sierrasDelMapa()) {
       if (!enVista(c.x, c.y)) continue;
-      if (c.lado / px < 62) continue;                     // todavía no da la escala
-      cand.push({ ...c, fs: acotar(c.lado * 0.085, px * 7.5, px * 13) });
+      if (c.lado / pxCapa < 62) continue;                     // todavía no da la escala
+      cand.push({ ...c, fs: acotar(c.lado * 0.085, pxCapa * 7.5, pxCapa * 13) });
       if (cand.length > 60) break;
     }
     if (!cand.length) return null;
     return (
       <g style={{ pointerEvents: "none" }}>
-        {repartirRotulos(cand, px * 96, px * 30, 18).map((c, i) => (
+        {repartirRotulos(cand, pxCapa * 96, pxCapa * 30, 18).map((c, i) => (
           <text key={"sr" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={c.fs}
             fill="#E6D6AE" opacity="0.7"
             style={{ letterSpacing: `${c.fs * 0.2}px`, textTransform: "uppercase",
@@ -7582,54 +7639,69 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         ))}
       </g>
     );
-  }, [w, px, claveVista, capas.sierras]);
+  }, [wCapa, pxCapa, claveVista, capas.sierras]);
 
   // Las ciudades del mundo.
-  const ciudadesAqui = useMemo(() => (capas.ciudades ? ciudadesVisibles(w, rx, ry, rw, rh) : []),
-    [w, claveVista, capas.ciudades]);
+  const ciudadesAqui = useMemo(() => (capas.ciudades ? ciudadesVisibles(wCapa, rx, ry, rw, rh) : []),
+    [wCapa, claveVista, capas.ciudades]);
   const capaCiudades = useMemo(() => {
     const cs = ciudadesAqui;
     if (!cs.length) return null;
-    const r0 = px * 2.9;
-    const conNombre = new Set(w >= 55 ? []
-      : repartirRotulos(cs.filter((c) => c.rango <= (w < 20 ? 8 : 5)), px * 133, px * 55, 90));
+    const r0 = pxCapa * 2.9;
+    const conNombre = new Set(wCapa >= 55 ? []
+      : repartirRotulos(cs.filter((c) => c.rango <= (wCapa < 20 ? 8 : 5)), pxCapa * 133, pxCapa * 55, 90));
+    // Seiscientas ciudades eran mil ochocientos nodos, cada uno con su
+    // círculo y su borde. Repintarlos al mover el mapa era la mitad del
+    // trabajo del cuadro. Ahora cada clase de disco va en un solo trazo —el
+    // mismo dibujo, un nodo— y solo los nombres siguen siendo cada uno el
+    // suyo, que son cuatro y tienen que poder colocarse.
+    const disco = (x, y, r) => `M${x - r},${y}a${r},${r} 0 1,0 ${r * 2},0a${r},${r} 0 1,0 ${-r * 2},0`;
+    const cuadro = (x, y, r) => `M${x - r},${y - r}h${r * 2}v${r * 2}h${-r * 2}Z`;
+    const halo = [], capitalAro = [], capitalPunto = [], corte = [], puntoG = [], punto = [];
+    for (const c of cs) {
+      const grande = c.pob > 2000 || c.cap === 2;
+      const r = r0 * (c.cap === 2 ? 1.5 : grande ? 1.2 : 0.85);
+      if (c.cap === 2) {
+        halo.push(disco(c.x, c.y, r * 2.2));
+        capitalAro.push(disco(c.x, c.y, r * 1.35));
+        capitalPunto.push(disco(c.x, c.y, r * 0.62));
+      } else if (c.cap === 1) {
+        halo.push(disco(c.x, c.y, r * 1.8));
+        corte.push(cuadro(c.x, c.y, r * 0.72));
+      } else {
+        halo.push(disco(c.x, c.y, r * 1.6));
+        (grande ? puntoG : punto).push(disco(c.x, c.y, r * 0.8));
+      }
+    }
+    const rG = r0 * 1.2 * 0.8, rP = r0 * 0.85 * 0.8, rC = r0 * 1.5;
     return (
       <g style={{ pointerEvents: "none" }}>
+        {halo.length > 0 && <path d={halo.join("")} fill="#0A0F08" opacity="0.45" />}
+        {puntoG.length > 0 && <path d={puntoG.join("")} fill="#D6D2BC" stroke="#241A06"
+          strokeWidth={rG * 0.3} />}
+        {punto.length > 0 && <path d={punto.join("")} fill="#D6D2BC" stroke="#241A06"
+          strokeWidth={rP * 0.3} />}
+        {corte.length > 0 && <path d={corte.join("")} fill="#EBDCA8" stroke="#241A06"
+          strokeWidth={r0 * 1.2 * 0.26} />}
+        {capitalAro.length > 0 && <path d={capitalAro.join("")} fill="none" stroke="#FFE9A8"
+          strokeWidth={rC * 0.34} />}
+        {capitalPunto.length > 0 && <path d={capitalPunto.join("")} fill="#FFE9A8" stroke="#241A06"
+          strokeWidth={rC * 0.2} />}
         {cs.map((c, i) => {
+          if (!conNombre.has(c)) return null;
           const grande = c.pob > 2000 || c.cap === 2;
           const r = r0 * (c.cap === 2 ? 1.5 : grande ? 1.2 : 0.85);
           return (
-            <g key={"ci" + i}>
-              {c.cap === 2 ? (
-                <>
-                  <circle cx={c.x} cy={c.y} r={r * 2.2} fill="#0A0F08" opacity="0.5" />
-                  <circle cx={c.x} cy={c.y} r={r * 1.35} fill="none" stroke="#FFE9A8" strokeWidth={r * 0.34} />
-                  <circle cx={c.x} cy={c.y} r={r * 0.62} fill="#FFE9A8" stroke="#241A06" strokeWidth={r * 0.2} />
-                </>
-              ) : c.cap === 1 ? (
-                <>
-                  <circle cx={c.x} cy={c.y} r={r * 1.8} fill="#0A0F08" opacity="0.45" />
-                  <rect x={c.x - r * 0.72} y={c.y - r * 0.72} width={r * 1.44} height={r * 1.44}
-                    fill="#EBDCA8" stroke="#241A06" strokeWidth={r * 0.26} />
-                </>
-              ) : (
-                <>
-                  <circle cx={c.x} cy={c.y} r={r * 1.6} fill="#0A0F08" opacity="0.4" />
-                  <circle cx={c.x} cy={c.y} r={r * 0.8} fill="#D6D2BC" stroke="#241A06" strokeWidth={r * 0.24} />
-                </>
-              )}
-              {conNombre.has(c) && (
-                <text x={c.x} y={c.y - r * 2.1} textAnchor="middle" fontSize={px * 14.5}
-                  fill={c.cap === 2 ? "#FFF3C6" : "#EDE8D6"}
-                  style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.9)", strokeWidth: px * 4.3,
-                    fontWeight: c.cap === 2 ? 600 : 400, letterSpacing: c.cap === 2 ? `${px * 1.7}px` : "0" }}>{c.n}</text>
-              )}
-            </g>
+            <text key={"cn" + i} x={c.x} y={c.y - r * 2.1} textAnchor="middle" fontSize={pxCapa * 14.5}
+              fill={c.cap === 2 ? "#FFF3C6" : "#EDE8D6"}
+              style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.9)", strokeWidth: pxCapa * 4.3,
+                fontWeight: c.cap === 2 ? 600 : 400,
+                letterSpacing: c.cap === 2 ? `${pxCapa * 1.7}px` : "0" }}>{c.n}</text>
           );
         })}
       </g>
     );
-  }, [w, px, ciudadesAqui]);
+  }, [wCapa, pxCapa, ciudadesAqui]);
 
   // ——— el reino ———
   const mias = useMemo(() => (marcas || []).filter((m) => m && m.x != null), [marcas]);
@@ -7740,7 +7812,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       for (const [tipo, pts] of Object.entries(d)) {
         const P = PINTA[tipo];
         if (!P || P.piso > piso.id || !pts.length) continue;
-        const r = px * P.r * (P.piso >= 3 ? 3.4 : 3.0);
+        const r = pxCapa * P.r * (P.piso >= 3 ? 3.4 : 3.0);
         const trozos = juntos[tipo] || (juntos[tipo] = []);
         for (const [x, y] of pts) { trozos.push(GLIFOS[tipo](x, y, r)); cuantas++; }
       }
@@ -7755,7 +7827,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       <path key={"dt" + t} d={juntos[t].join("")}
         fill={PINTA[t].trazo ? "none" : PINTA[t].col}
         stroke={PINTA[t].trazo ? PINTA[t].col : undefined}
-        strokeWidth={PINTA[t].trazo ? px * 0.5 : undefined}
+        strokeWidth={PINTA[t].trazo ? pxCapa * 0.5 : undefined}
         strokeLinecap={PINTA[t].trazo ? "round" : undefined}
         /* Son cientos de figuras de tres píxeles: suavizarles el borde cuesta
            más que dibujarlas, y a ese tamaño no se nota. */
@@ -7764,7 +7836,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     );
     return { dos: tipos.filter((t) => PINTA[t].piso < 3).map(traza),
       tres: tipos.filter((t) => PINTA[t].piso >= 3).map(traza) };
-  }, [px, mias, anio, capas.detalle, piso.id]);
+  }, [pxCapa, mias, anio, capas.detalle, piso.id]);
 
   // Lo que la vista puesta mide justo donde está el dedo. Un mapa de colores
   // sin número al lado obliga a adivinar entre dos tonos parecidos, y en una
