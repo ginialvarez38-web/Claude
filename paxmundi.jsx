@@ -10688,6 +10688,194 @@ async function callEngine(prompt) {
 let idCounter = 0;
 const nextId = () => `t${++idCounter}`;
 
+// ═══ GUARDAR LA PARTIDA ═══════════════════════════════════════════════════
+//
+// Una campaña son horas. Perderla porque entró una llamada no es un defecto
+// menor: en un teléfono el sistema descarta la página cuando cambiás de app,
+// sin avisar y sin preguntar. Por eso se guarda solo, cada turno, y además
+// cuando la página se va a segundo plano —que es el último momento en que
+// todavía se puede hacer algo—.
+//
+// Se guarda el estado entero tal como está. Podría guardarse la semilla y la
+// lista de órdenes, que ocuparía mil veces menos y permitiría repetir la
+// partida entera; pero cualquier cambio en las reglas convertiría todas las
+// partidas guardadas en basura, y a este juego le falta mucho por cambiar.
+// Una foto del estado sobrevive a que las reglas cambien debajo.
+
+const GUARDADO_V = 1;
+const LLAVE_SEGUIR = "paxmundi.seguir";
+const LLAVE_RANURA = "paxmundi.ranura.";
+const RANURAS = 3;
+
+// Lo que una partida tiene que traer para que el juego pueda seguirla. No es
+// decoración: sin esto, una partida vieja carga, parece bien, y revienta tres
+// turnos después en un sitio que no tiene nada que ver.
+const CLAVES_PARTIDA = ["anio", "turno", "provincias", "stats", "ciencia",
+                        "nacion", "gobierno", "poblacion"];
+
+function almacen() {
+  // En modo privado de algunos navegadores existe pero tira al escribir, así
+  // que no alcanza con preguntar si está: hay que probarlo.
+  try {
+    const a = window.localStorage;
+    a.setItem("paxmundi.prueba", "1");
+    a.removeItem("paxmundi.prueba");
+    return a;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Los ids son "t1", "t2"… y los reparte un contador que arranca en cero cada
+// vez que se abre el juego. Al cargar una partida hay que adelantarlo más allá
+// del último que ya usó, o el próximo consejero que nombres va a tener el
+// mismo id que una sede fundada hace cien años, y el juego va a confundir una
+// con otra.
+// Sin tope de hondura y sin recursión: un id que quede más abajo de lo que
+// alcanzamos a mirar reaparece como choque de nombres semanas después, y no
+// hay manera de atarlo a esto. La partida viene de un JSON, así que es un
+// árbol: se recorre con una pila y se acaba.
+function retomarIds(s) {
+  let mayor = 0;
+  const pila = [s];
+  while (pila.length) {
+    const o = pila.pop();
+    if (!o || typeof o !== "object") continue;
+    if (Array.isArray(o)) { for (const x of o) pila.push(x); continue; }
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (k === "id" && typeof v === "string") {
+        const m = /^t(\d+)$/.exec(v);
+        if (m) mayor = Math.max(mayor, +m[1]);
+      } else if (v && typeof v === "object") pila.push(v);
+    }
+  }
+  if (mayor > idCounter) idCounter = mayor;
+  return mayor;
+}
+
+function empacar(s) {
+  return JSON.stringify({ v: GUARDADO_V, cuando: Date.now(), juego: s });
+}
+
+// Devuelve siempre lo mismo: o la partida, o el motivo por el que no se puede.
+// Nunca lanza y nunca devuelve una partida a medias.
+function desempacar(texto) {
+  let sobre;
+  try {
+    sobre = JSON.parse(texto);
+  } catch (_) {
+    return { porque: "El archivo no se entiende: no es una partida de Pax Mundi." };
+  }
+  if (!sobre || typeof sobre !== "object" || !sobre.juego)
+    return { porque: "El archivo no es una partida de Pax Mundi." };
+  if (sobre.v !== GUARDADO_V)
+    return { porque: "Esta partida es de otra versión del juego (guardada con la " +
+                     sobre.v + ", esta es la " + GUARDADO_V + ") y no se puede seguir." };
+  const faltan = CLAVES_PARTIDA.filter((k) => sobre.juego[k] === undefined);
+  if (faltan.length)
+    return { porque: "A la partida le falta: " + faltan.join(", ") +
+                     ". Es de una versión anterior y no se puede seguir." };
+  return { juego: sobre.juego, cuando: sobre.cuando };
+}
+
+function guardarPartida(llave, s) {
+  const a = almacen();
+  if (!a) return { porque: "Este navegador no deja guardar nada." };
+  try {
+    a.setItem(llave, empacar(s));
+    return { ok: true };
+  } catch (e) {
+    // Se llenó. Decir cuánto ocupa lo que ya hay sirve más que el nombre del
+    // error, porque lo que hay que hacer es borrar una partida vieja.
+    return { porque: /quota|exceeded/i.test(String(e && e.name) + String(e && e.message))
+      ? "No entra: el navegador no da más lugar. Borrá alguna partida guardada."
+      : "No se pudo guardar: " + (e && e.message ? e.message : e) };
+  }
+}
+
+function cargarPartida(llave) {
+  const a = almacen();
+  if (!a) return { porque: "Este navegador no deja guardar nada." };
+  const texto = a.getItem(llave);
+  if (!texto) return { porque: "No hay ninguna partida guardada ahí." };
+  const r = desempacar(texto);
+  if (r.juego) retomarIds(r.juego);
+  return r;
+}
+
+function borrarPartida(llave) {
+  const a = almacen();
+  if (a) try { a.removeItem(llave); } catch (_) {}
+}
+
+// Lo justo para pintar el botón: qué partida es, sin desempacar el mapa entero.
+function resumenDe(llave) {
+  const a = almacen();
+  if (!a) return null;
+  const texto = a.getItem(llave);
+  if (!texto) return null;
+  try {
+    const sobre = JSON.parse(texto);
+    const j = sobre && sobre.juego;
+    if (!j) return null;
+    // «vieja» no es solo otra versión: también lo es la que no trae lo que el
+    // juego de hoy necesita. Si no se mira acá, se ofrece un botón que al
+    // apretarlo no hace nada, y no hay peor manera de decir que algo falló.
+    const sirve = sobre.v === GUARDADO_V
+      && CLAVES_PARTIDA.every((k) => j[k] !== undefined);
+    return { nacion: (j.nacion && j.nacion.nombre) || "sin nombre", anio: j.anio,
+             turno: j.turno, cuando: sobre.cuando, vieja: !sirve,
+             pesa: texto.length };
+  } catch (_) {
+    return null;
+  }
+}
+
+// «hace 3 minutos» dice más que una fecha con hora: lo que se quiere saber es
+// si esto es lo último que jugué o algo de la semana pasada.
+function haceCuanto(cuando) {
+  if (!cuando) return "hace un rato";
+  const seg = Math.max(0, (Date.now() - cuando) / 1000);
+  if (seg < 90) return "recién";
+  const min = seg / 60;
+  if (min < 60) return "hace " + Math.round(min) + " min";
+  const hs = min / 60;
+  if (hs < 24) return "hace " + Math.round(hs) + (Math.round(hs) === 1 ? " hora" : " horas");
+  const d = Math.round(hs / 24);
+  return "hace " + d + (d === 1 ? " día" : " días");
+}
+
+const llaveRanura = (i) => LLAVE_RANURA + i;
+const ranurasGuardadas = () =>
+  Array.from({ length: RANURAS }, (_, i) => ({ i: i + 1, res: resumenDe(llaveRanura(i + 1)) }));
+
+// Un archivo aparte: para llevarse la partida a otro aparato, o para no
+// perderla si el navegador limpia lo suyo. Es el mismo sobre que se guarda
+// adentro, así que uno vale para lo otro.
+function nombreDeArchivo(s) {
+  const n = String((s.nacion && s.nacion.nombre) || "partida")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, "-");
+  return "paxmundi-" + n.toLowerCase() + "-" + s.anio + ".json";
+}
+
+function bajarPartida(s) {
+  try {
+    const b = new Blob([empacar(s)], { type: "application/json" });
+    const u = URL.createObjectURL(b);
+    const a = document.createElement("a");
+    a.href = u;
+    a.download = nombreDeArchivo(s);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 4000);
+    return { ok: true };
+  } catch (e) {
+    return { porque: "No se pudo bajar el archivo: " + (e && e.message ? e.message : e) };
+  }
+}
+
 function initPrompt(era, pais, formaGob) {
   return `Eres el motor de un juego de gran estrategia histórica en español. Responde SOLO con JSON válido, sin markdown, sin texto adicional. Sé conciso.
 
@@ -15614,6 +15802,11 @@ export default function PaxMundi() {
   const [buscaPais, setBuscaPais] = useState("");
   const [formaGob, setFormaGob] = useState(null);
   const [state, setState] = useState(null);
+  // Lo que hay guardado, para no ir a preguntarle al navegador en cada pintada.
+  const [guardado, setGuardado] = useState(() => resumenDe(LLAVE_SEGUIR));
+  const [avisoGuardar, setAvisoGuardar] = useState(null);
+  const [ranuras, setRanuras] = useState([]);
+  const [panelPartida, setPanelPartida] = useState(false);
   const [deltas, setDeltas] = useState({});
   const [accionLibre, setAccionLibre] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -15740,6 +15933,75 @@ export default function PaxMundi() {
     window.addEventListener("keydown", oye);
     return () => window.removeEventListener("keydown", oye);
   }, []);
+
+  // ——— guardar solo ———
+  // Una vez por turno. No en cada cambio de estado: el estado se toca decenas
+  // de veces por turno —cada panel que se abre, cada provincia que se elige— y
+  // guardar 200 KB en cada una se nota al arrastrar el mapa.
+  const estadoRef = useRef(null);
+  useEffect(() => { estadoRef.current = state; }, [state]);
+  useEffect(() => {
+    if (!state || fase !== "jugando") return;
+    const r = guardarPartida(LLAVE_SEGUIR, state);
+    if (r.ok) setGuardado(resumenDe(LLAVE_SEGUIR));
+    else setAvisoGuardar(r.porque);
+  }, [state && state.turno, fase]);
+
+  // Y al irse a segundo plano, que en un teléfono es el último aviso que hay
+  // antes de que el sistema descarte la página. Acá sí se guarda el estado del
+  // momento, aunque el turno no haya terminado.
+  useEffect(() => {
+    const alIrse = () => {
+      if (document.visibilityState !== "hidden") return;
+      const s = estadoRef.current;
+      if (s) guardarPartida(LLAVE_SEGUIR, s);
+    };
+    document.addEventListener("visibilitychange", alIrse);
+    window.addEventListener("pagehide", alIrse);
+    return () => {
+      document.removeEventListener("visibilitychange", alIrse);
+      window.removeEventListener("pagehide", alIrse);
+    };
+  }, []);
+
+  // ——— retomar, guardar a mano, traer de un archivo ———
+  function retomar(llave) {
+    const r = cargarPartida(llave || LLAVE_SEGUIR);
+    if (!r.juego) { setAvisoGuardar(r.porque); return; }
+    empezarPartida(r.juego);
+  }
+
+  function empezarPartida(s) {
+    setState(s);
+    setEra(s.era || null);
+    setPaisSel(s.region || null);
+    setPais((s.nacion && s.nacion.nombre) || "");
+    setFormaGob((s.gobierno && s.gobierno.forma) || null);
+    setDeltas({});
+    setError(null);
+    setAvisoGuardar(null);
+    setFase("jugando");
+  }
+
+  function guardarEnRanura(i) {
+    if (!state) return;
+    const r = guardarPartida(llaveRanura(i), state);
+    setAvisoGuardar(r.ok ? null : r.porque);
+    setRanuras(ranurasGuardadas());
+  }
+
+  function traerDeArchivo(archivo) {
+    if (!archivo) return;
+    const lector = new FileReader();
+    lector.onload = () => {
+      const r = desempacar(String(lector.result || ""));
+      if (!r.juego) { setAvisoGuardar(r.porque); return; }
+      retomarIds(r.juego);
+      empezarPartida(r.juego);
+    };
+    lector.onerror = () => setAvisoGuardar("No se pudo leer el archivo.");
+    lector.readAsText(archivo);
+  }
 
   async function iniciar() {
     if (!era || !pais.trim() || !formaGob) return;
@@ -17076,6 +17338,38 @@ export default function PaxMundi() {
             </p>
           </div>
 
+          {/* Lo primero que uno quiere al abrir es seguir donde estaba, no
+              volver a fundar. Por eso va acá arriba y no escondido en un menú. */}
+          {guardado && !guardado.vieja && (
+            <div className="pm-card" style={{ marginBottom: 26, padding: 16, borderRadius: 12,
+              background: C.panel, border: `1px solid ${C.brass}55` }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
+                color: C.brass, fontFamily: mono, marginBottom: 8 }}>Partida en curso</div>
+              <button className="pm-cta" onClick={() => retomar(LLAVE_SEGUIR)}
+                style={{ width: "100%", padding: "13px 16px", fontSize: 16, cursor: "pointer",
+                  borderRadius: 10, fontFamily: serif, border: `1px solid ${C.brass}`,
+                  background: "rgba(212,175,55,0.16)", color: C.gold }}>
+                ⚜ SEGUIR CON {String(guardado.nacion).toUpperCase()}
+              </button>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 8, fontFamily: mono }}>
+                {fmtAnio(guardado.anio)} · turno {guardado.turno} · guardada {haceCuanto(guardado.cuando)}
+              </div>
+            </div>
+          )}
+          {guardado && guardado.vieja && (
+            <div style={{ marginBottom: 22, padding: 12, borderRadius: 10, fontSize: 12,
+              color: C.muted, background: C.panel, border: `1px solid ${C.line}` }}>
+              Hay una partida guardada de una versión anterior del juego y no se puede
+              seguir. Al fundar una nación nueva se va a reemplazar.
+            </div>
+          )}
+          {avisoGuardar && (
+            <div style={{ marginBottom: 22, padding: 12, borderRadius: 10, fontSize: 12,
+              color: C.red, background: "rgba(224,82,82,0.09)", border: `1px solid ${C.red}44` }}>
+              ⚠ {avisoGuardar}
+            </div>
+          )}
+
           <div style={{ fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.brass, marginBottom: 10, fontFamily: mono }}>I · Elegí la época</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 26 }}>
             {ERAS.map((e) => (
@@ -17194,6 +17488,18 @@ export default function PaxMundi() {
             }}>
             {fase === "cargando" ? "⚗ Forjando el mundo y su gobierno…" : "⚜ Fundar la nación"}
           </button>
+
+          {/* Traer una partida de otro aparato. Va al final y en letra chica
+              porque es lo secundario: el que llega acá viene a fundar. */}
+          <div style={{ textAlign: "center", marginTop: 18 }}>
+            <label style={{ fontSize: 11, color: C.muted, cursor: "pointer",
+              fontFamily: mono, letterSpacing: 0.6, borderBottom: `1px dotted ${C.line}` }}>
+              ↑ traer una partida de un archivo
+              <input type="file" accept="application/json,.json"
+                onChange={(e) => traerDeArchivo(e.target.files && e.target.files[0])}
+                style={{ display: "none" }} />
+            </label>
+          </div>
         </div>
       </div>
     );
@@ -17438,6 +17744,16 @@ export default function PaxMundi() {
             </div>
           ))}
         </div>
+
+        {/* La partida se guarda sola; esto es para lo otro: llevársela a otro
+            aparato, o dejar una copia antes de una guerra que puede salir mal. */}
+        <button onClick={() => { setRanuras(ranurasGuardadas()); setPanelPartida(true); }}
+          title="guardar, cargar o llevarse la partida"
+          style={{ flex: "0 0 auto", padding: "5px 9px", cursor: "pointer", borderRadius: 6,
+            background: "transparent", border: `1px solid ${C.line}`, color: C.muted,
+            fontFamily: mono, fontSize: 9.5, letterSpacing: 0.8 }}>
+          💾 PARTIDA
+        </button>
       </header>
 
       {/* ── DERECHA: lo que se está mirando ───────────────────────────────
@@ -17458,6 +17774,97 @@ export default function PaxMundi() {
           titulo={objRueda.nombre + (objRueda.capital ? " · la corte" : objRueda.ocupada ? " · ocupada" : "")}
           glosa={objRueda.ajena ? "tierra ajena" : `${accRueda.length} cosas que hacer`}
           onElegir={elegirDeRueda} onCerrar={() => setRueda(null)} />
+      )}
+
+      {/* ── LA PARTIDA ────────────────────────────────────────────────
+          Se guarda sola cada turno; acá está lo que el jugador decide: dejar
+          una copia en una ranura, o llevarse la partida a un archivo. */}
+      {panelPartida && (
+        <div onClick={() => setPanelPartida(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 40, display: "flex",
+            alignItems: "center", justifyContent: "center", padding: 16,
+            background: "rgba(4,7,11,0.72)" }}>
+          <div className="pm-card" onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(460px, 100%)", maxHeight: "86vh", overflow: "auto",
+              padding: 18, borderRadius: 14, background: C.panelFlat,
+              border: `1px solid ${C.brass}55`, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+              <div style={{ fontSize: 11, letterSpacing: 2.4, textTransform: "uppercase",
+                color: C.brass, fontFamily: mono }}>La partida</div>
+              <button onClick={() => setPanelPartida(false)}
+                style={{ marginLeft: "auto", background: "transparent", border: "none",
+                  color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
+              Se guarda sola al terminar cada turno y al dejar el juego, así que no
+              hace falta que hagas nada. Esto es para dejar una copia aparte.
+            </div>
+
+            {avisoGuardar && (
+              <div style={{ fontSize: 12, color: C.red, marginBottom: 12,
+                padding: "8px 10px", borderRadius: 8,
+                background: "rgba(224,82,82,0.09)", border: `1px solid ${C.red}44` }}>
+                ⚠ {avisoGuardar}
+              </div>
+            )}
+
+            <div style={{ fontSize: 10, letterSpacing: 1.6, textTransform: "uppercase",
+              color: C.brass, fontFamily: mono, marginBottom: 8 }}>Copias</div>
+            {ranuras.map(({ i, res }) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                <div style={{ flex: 1, minWidth: 0, fontFamily: mono, fontSize: 11,
+                  color: res ? C.ink : C.muted }}>
+                  {res
+                    ? `${i} · ${res.nacion}, ${fmtAnio(res.anio)} · turno ${res.turno}` +
+                      (res.vieja ? " · de otra versión" : "")
+                    : `${i} · vacía`}
+                </div>
+                <button onClick={() => guardarEnRanura(i)}
+                  style={{ padding: "4px 9px", cursor: "pointer", borderRadius: 6,
+                    background: "transparent", border: `1px solid ${C.line}`,
+                    color: C.ink, fontFamily: mono, fontSize: 10 }}>guardar</button>
+                <button onClick={() => retomar(llaveRanura(i))} disabled={!res || res.vieja}
+                  style={{ padding: "4px 9px", cursor: res && !res.vieja ? "pointer" : "default",
+                    borderRadius: 6, background: "transparent",
+                    border: `1px solid ${res && !res.vieja ? C.brass + "77" : C.line}`,
+                    color: res && !res.vieja ? C.gold : C.muted,
+                    fontFamily: mono, fontSize: 10 }}>cargar</button>
+                <button onClick={() => { borrarPartida(llaveRanura(i)); setRanuras(ranurasGuardadas()); }}
+                  disabled={!res} title="borrar esta copia"
+                  style={{ padding: "4px 7px", cursor: res ? "pointer" : "default",
+                    borderRadius: 6, background: "transparent", border: `1px solid ${C.line}`,
+                    color: res ? C.muted : C.line, fontFamily: mono, fontSize: 10 }}>×</button>
+              </div>
+            ))}
+
+            <div style={{ height: 1, background: C.line, margin: "16px 0 14px" }} />
+
+            <div style={{ fontSize: 10, letterSpacing: 1.6, textTransform: "uppercase",
+              color: C.brass, fontFamily: mono, marginBottom: 8 }}>Un archivo aparte</div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 10 }}>
+              Para llevarte la partida a otro aparato, o para que no se pierda si el
+              navegador limpia lo suyo.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => { const r = bajarPartida(s);
+                  if (!r.ok) setAvisoGuardar(r.porque); }}
+                style={{ padding: "8px 12px", cursor: "pointer", borderRadius: 8,
+                  background: "rgba(212,175,55,0.10)", border: `1px solid ${C.brass}77`,
+                  color: C.gold, fontFamily: mono, fontSize: 11 }}>
+                ↓ bajar la partida
+              </button>
+              <label style={{ padding: "8px 12px", cursor: "pointer", borderRadius: 8,
+                background: "transparent", border: `1px solid ${C.line}`,
+                color: C.ink, fontFamily: mono, fontSize: 11 }}>
+                ↑ traer de un archivo
+                <input type="file" accept="application/json,.json"
+                  onChange={(e) => { traerDeArchivo(e.target.files && e.target.files[0]);
+                    setPanelPartida(false); }}
+                  style={{ display: "none" }} />
+              </label>
+            </div>
+          </div>
+        </div>
       )}
 
       {dondeSitio && (

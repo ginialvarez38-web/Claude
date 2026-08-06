@@ -145,7 +145,10 @@ const esEvento = (k, v) => k.length > 2 && k[0] === "o" && k[1] === "n" && typeo
 function nombreEvento(k, el) {
   let ev = k.slice(2).toLowerCase();
   // React llama «change» a cada tecla; el DOM llama «change» a soltar el foco.
-  if (ev === "change" && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT"))
+  // Menos en un campo de archivo: ahí no se escribe nada, y el evento propio
+  // de «se eligió un archivo» es «change».
+  if (ev === "change" && el.type !== "file"
+      && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT"))
     ev = "input";
   return ev;
 }

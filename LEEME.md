@@ -83,6 +83,29 @@ Una conexión por pedido: algo más lento y mucho más compatible.
 Y como último recurso, probá con otro navegador, o abrí `http://127.0.0.1:8000`
 a mano en vez de `localhost`.
 
+## La partida se guarda sola
+
+Al terminar cada turno, y también cuando dejás el juego —cambiás de pestaña,
+de aplicación, o cerrás—. Ese último momento es el que importa en un teléfono:
+el sistema descarta la página sin avisar, y sin eso la campaña se perdería.
+
+Al volver a abrir, arriba de todo aparece **seguir con \<tu nación\>**, con el
+año, el turno y cuánto hace que la dejaste.
+
+Dentro del juego, el botón **💾 PARTIDA** de la barra de arriba tiene lo que
+decidís vos: tres copias aparte —para dejar una antes de una guerra que puede
+salir mal— y bajar la partida a un archivo.
+
+Ese archivo sirve para llevártela a otro aparato: la bajás en uno y la traés en
+el otro con «traer una partida de un archivo», abajo de la pantalla de
+fundación. Es también la manera de que no se pierda si el navegador limpia lo
+suyo.
+
+Una partida ocupa unos 200 KB y se guarda en el navegador, así que es de ese
+navegador y de ese aparato. El juego está en desarrollo: cuando cambia la forma
+de la partida, las guardadas de antes dejan de servir, y el juego lo dice en vez
+de cargarlas a medias y romperse tres turnos después.
+
 ## Para que la IA funcione
 
 La IA es **opcional**. El motor local resuelve los turnos, entiende las órdenes
