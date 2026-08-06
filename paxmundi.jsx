@@ -6914,6 +6914,11 @@ const ROTULO_COL = { mar: "#7FC0DE", río: "#5FB0D6", lago: "#5FB0D6", sierra: "
                      pico: "#E4DCC0", tierra: "#C9A227" };
 const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu reino"],
                       ["🌐", "ver el mundo entero"], ["▤", "leyenda y capas"]];
+// Cuánto mundo se dibuja de más a cada lado del hueco visible. Es el colchón
+// del arrastre: mientras el tirón quepa en él, el mapa se corre entero con un
+// «transform» —eso lo hace la tarjeta gráfica y no cuesta nada— y no se
+// redibuja ni una provincia. Al pasarse, se asienta el encuadre y se sigue.
+const MARGEN_LIENZO = 0.1;
 // Puede haber dos mapas a la vez —el del fondo y el de la pestaña— con zoom
 // distinto. Si compartieran los ids del SVG, el rayado de uno se lo llevaría
 // el otro: cada instancia se numera.
@@ -6943,6 +6948,8 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const arrastre = useRef(null);
   const movido = useRef(false);
   const cuadro = useRef(0);
+  // Adónde va el mapa mientras el dedo lo arrastra, antes de asentarlo.
+  const pendiente = useRef(null);
   const anim = useRef(0);
   const meta = useRef(null);
   const desliz = useRef(0);
@@ -6959,6 +6966,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // El viewBox vive en un ref y se pinta una vez por cuadro: arrastrar deja
   // de disparar un render por cada evento del puntero.
   const fijar = (v, ya) => {
+    // Cualquier otro camino que mueva el mapa —el zoom, un vuelo, la lupa del
+    // buscador— manda sobre el corrimiento del arrastre: se quita, o el mapa
+    // quedaría dibujado dos dedos más allá de donde dice estar.
+    if (pendiente.current) {
+      pendiente.current = null;
+      if (svgRef.current) svgRef.current.style.transform = "";
+    }
     vbRef.current = v;
     if (ya) { setVb(v); return; }
     if (cuadro.current) return;
@@ -7136,6 +7150,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   function onDown(e) {
     detener();
     frenar();
+    if (pendiente.current) asentar();          // si quedaba un tirón a medias, se asienta
     setRotulo(null);
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     // Atrapar el puntero acá parecía lo correcto —así el arrastre sigue aunque
@@ -7171,11 +7186,43 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
     }
     const k = escalaPx();
-    fijar(limitar({ ...vbRef.current, x: a.vx - dx * k, y: a.vy - dy * k }));
+    correr(limitar({ ...vbRef.current, x: a.vx - dx * k, y: a.vy - dy * k }));
   }
+  // ——— arrastrar sin redibujar ———
+  // Mover el mapa era, en cada cuadro, rehacer el encuadre y con él todo lo que
+  // cuelga de él: las provincias del mundo, el relieve, los ríos, las ciudades,
+  // los bosques. Miles de figuras vueltas a trazar sesenta veces por segundo
+  // para enseñar exactamente lo mismo corrido dos dedos. De ahí el tirón.
+  //
+  // Ahora el lienzo ya trae dibujado un margen de mundo alrededor, y arrastrar
+  // es correrlo con un «transform»: eso no vuelve a dibujar nada, lo hace la
+  // tarjeta gráfica con lo que ya está pintado. Solo cuando el tirón se sale
+  // del margen —o cuando se suelta— se asienta el encuadre de verdad.
+  const correr = (dest) => {
+    const el = svgRef.current, r = medRef.current;
+    if (!el || !r.w) { fijar(dest); return; }
+    const k = vbRef.current.w / r.w;                 // unidades de mapa por píxel
+    const ox = (vbRef.current.x - dest.x) / k, oy = (vbRef.current.y - dest.y) / k;
+    pendiente.current = dest;
+    if (Math.abs(ox) > r.w * MARGEN_LIENZO * 0.92 || Math.abs(oy) > r.h * MARGEN_LIENZO * 0.92) {
+      asentar();
+      return;
+    }
+    el.style.transform = `translate3d(${ox}px, ${oy}px, 0)`;
+  };
+  // Deja el mapa donde lo dejó el dedo: se quita el corrimiento y se dibuja de
+  // nuevo, una sola vez.
+  const asentar = () => {
+    const el = svgRef.current;
+    const d = pendiente.current;
+    pendiente.current = null;
+    if (el) el.style.transform = "";
+    if (d) fijar(limitar(d), true);
+  };
   function onUp(e) {
     punteros.current.delete(e.pointerId);
     if (punteros.current.size === 0) {
+      asentar();
       if (!movido.current) sondearYSoltar(e.clientX, e.clientY);
       arrastre.current = null;
       return;
@@ -7302,10 +7349,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // curva.
   const fino = px * (0.62 + 0.46 * cerca);
   const bloque = Math.max(0.25, w / 6);
-  const rx = Math.floor((vb.x - w * 0.08) / bloque) * bloque;
-  const ry = Math.floor((vb.y - vb.h * 0.08) / bloque) * bloque;
-  const rw = Math.ceil((vb.w * 1.16) / bloque) * bloque + bloque;
-  const rh = Math.ceil((vb.h * 1.16) / bloque) * bloque + bloque;
+  // Se dibuja más mundo del que se ve. El sobrante es lo que permite arrastrar
+  // corriendo el lienzo con la tarjeta gráfica en vez de volver a dibujarlo:
+  // mientras el tirón no se coma el margen, no hay nada que rehacer.
+  const rx = Math.floor((vb.x - w * MARGEN_LIENZO * 1.4) / bloque) * bloque;
+  const ry = Math.floor((vb.y - vb.h * MARGEN_LIENZO * 1.4) / bloque) * bloque;
+  const rw = Math.ceil((vb.w * (1 + MARGEN_LIENZO * 2.8)) / bloque) * bloque + bloque;
+  const rh = Math.ceil((vb.h * (1 + MARGEN_LIENZO * 2.8)) / bloque) * bloque + bloque;
   const claveVista = `${rx.toFixed(2)}|${ry.toFixed(2)}|${rw.toFixed(2)}|${rh.toFixed(2)}`;
   const enVista = (x, y) => x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
 
@@ -7646,15 +7696,19 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
 
   // Los caminos del reino. Van debajo de todo lo demás: es lo que enlaza las
   // comarcas y lo que se mira para saber por dónde sale lo que se produce.
+  //
+  // Se dibuja el reino entero y no lo que se ve: son veintiocho comarcas, el
+  // navegador recorta solo lo que sale de la pantalla, y así arrastrar el mapa
+  // no rehace ni un trazo. Antes se recortaba a mano contra la vista y cada
+  // tirón del ratón reconstruía la capa entera —de ahí el tirón—.
   const capaCaminos = useMemo(() => {
     if (!capas.detalle || piso.id < 2 || !mias.length) return null;
-    const red = redDeCaminos(mias).filter((e) =>
-      enVista((e.x1 + e.x2) / 2, (e.y1 + e.y2) / 2) || enVista(e.x1, e.y1) || enVista(e.x2, e.y2));
+    const red = redDeCaminos(mias);
     if (!red.length) return null;
     const porVia = [[], [], [], []];
     for (const e of red) porVia[e.via].push(`M${e.x1},${e.y1}L${e.x2},${e.y2}`);
     return (
-      <g style={{ pointerEvents: "none" }} opacity={entra}>
+      <>
         {porVia.map((ds, v) => ds.length === 0 ? null : (
           <path key={"vi" + v} d={ds.join("")} fill="none" stroke={PINTA_VIA[v].col}
             strokeWidth={px * PINTA_VIA[v].ancho} opacity={PINTA_VIA[v].op}
@@ -7665,11 +7719,11 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         {/* las traviesas del ferrocarril, que es lo que lo hace ferrocarril */}
         {porVia[3].length > 0 && (
           <path d={porVia[3].join("")} fill="none" stroke="#3A3630" strokeWidth={px * 2.6}
-            opacity={0.55 * entra} strokeDasharray={`${px * 0.5} ${px * 2.1}`} />
+            opacity={0.55} strokeDasharray={`${px * 0.5} ${px * 2.1}`} />
         )}
-      </g>
+      </>
     );
-  }, [w, px, claveVista, mias, capas.detalle, piso.id]);
+  }, [px, mias, capas.detalle, piso.id]);
 
   // Y lo que hay dentro de cada comarca. Todo de una clase va en un solo
   // trazo: son cientos de figuras y en cientos de nodos el mapa se arrastra.
@@ -7678,7 +7732,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     const juntos = {};
     let cuantas = 0;
     for (const m of mias) {
-      if (!m.poly || !enVista(m.x, m.y)) continue;
+      if (!m.poly) continue;
       const caja = cajaTrazo(m.poly);
       if (caja && (caja[2] - caja[0]) / px < 26) continue;   // todavía no da la escala
       const d = detalleComarca(m, anio, piso.id);
@@ -7694,19 +7748,23 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     }
     const tipos = Object.keys(juntos);
     if (!tipos.length) return null;
-    return (
-      <g style={{ pointerEvents: "none" }}>
-        {tipos.map((t) => (
-          <path key={"dt" + t} d={juntos[t].join("")}
-            fill={PINTA[t].trazo ? "none" : PINTA[t].col}
-            stroke={PINTA[t].trazo ? PINTA[t].col : undefined}
-            strokeWidth={PINTA[t].trazo ? px * 0.5 : undefined}
-            strokeLinecap={PINTA[t].trazo ? "round" : undefined}
-            opacity={PINTA[t].op * (PINTA[t].piso >= 3 ? entra3 : entra)} />
-        ))}
-      </g>
+    // Sale repartido por piso y sin la opacidad de entrada: esa cambia al
+    // acercarse, y si viviera acá dentro la capa se reharía en cada cuadro del
+    // zoom. Va afuera, en un grupo que solo cambia un número.
+    const traza = (t) => (
+      <path key={"dt" + t} d={juntos[t].join("")}
+        fill={PINTA[t].trazo ? "none" : PINTA[t].col}
+        stroke={PINTA[t].trazo ? PINTA[t].col : undefined}
+        strokeWidth={PINTA[t].trazo ? px * 0.5 : undefined}
+        strokeLinecap={PINTA[t].trazo ? "round" : undefined}
+        /* Son cientos de figuras de tres píxeles: suavizarles el borde cuesta
+           más que dibujarlas, y a ese tamaño no se nota. */
+        shapeRendering="optimizeSpeed"
+        opacity={PINTA[t].op} />
     );
-  }, [w, px, claveVista, mias, anio, capas.detalle, piso.id]);
+    return { dos: tipos.filter((t) => PINTA[t].piso < 3).map(traza),
+      tres: tipos.filter((t) => PINTA[t].piso >= 3).map(traza) };
+  }, [px, mias, anio, capas.detalle, piso.id]);
 
   // Lo que la vista puesta mide justo donde está el dedo. Un mapa de colores
   // sin número al lado obliga a adivinar entre dos tonos parecidos, y en una
@@ -7801,13 +7859,22 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       role="application" aria-label="Mapa del mundo"
       style={{ position: "relative", width: "100%", height: alto || "100%", overflow: "hidden",
         background: "#08131C", outline: "none" }}>
-      <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
+      {/* El lienzo es más grande que el hueco y sobresale por los cuatro
+          lados. Ese sobrante no se ve nunca —el contenedor recorta— y es lo
+          que hace que arrastrar sea gratis: el mapa se corre con un
+          «transform» y aparece mundo ya dibujado, en vez de rehacerlo. */}
+      <svg ref={svgRef}
+        viewBox={`${vb.x - vb.w * MARGEN_LIENZO} ${vb.y - vb.h * MARGEN_LIENZO}`
+          + ` ${vb.w * (1 + MARGEN_LIENZO * 2)} ${vb.h * (1 + MARGEN_LIENZO * 2)}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         onPointerLeave={() => setRotulo(null)}
         onContextMenu={onContexto}
         onDoubleClick={(e) => zoomSuave(e.shiftKey ? 2 : 0.5, e.clientX, e.clientY)}
         onClick={() => { if (movido.current) return; setCiudadSel(null); if (onSeleccion) onSeleccion(null); }}
-        style={{ width: "100%", height: "100%", display: "block", touchAction: "none", cursor: "grab" }}>
+        style={{ position: "absolute",
+          left: `${-MARGEN_LIENZO * 100}%`, top: `${-MARGEN_LIENZO * 100}%`,
+          width: `${(1 + MARGEN_LIENZO * 2) * 100}%`, height: `${(1 + MARGEN_LIENZO * 2) * 100}%`,
+          display: "block", touchAction: "none", cursor: "grab", willChange: "transform" }}>
         {defs}
         {capaMundo}
         {capaProvincias && capaProvincias.fondo}
@@ -7940,9 +8007,17 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         {/* Lo que hay dentro de las comarcas y lo que las enlaza. Va aquí y
             no más arriba porque el relleno del reino es opaco y se lo comía:
             un bosque debajo de su propia provincia no lo ve nadie. Encima van
-            todavía las marcas y los nombres, que son los que mandan. */}
-        {capaDetalle}
-        {capaCaminos}
+            todavía las marcas y los nombres, que son los que mandan.
+
+            La opacidad de entrada va en estos grupos y no en los trazos: así
+            acercarse funde lo que aparece sin rehacer un solo camino. */}
+        {capaDetalle && (
+          <g style={{ pointerEvents: "none" }}>
+            <g opacity={entra}>{capaDetalle.dos}</g>
+            {entra3 > 0 && <g opacity={entra3}>{capaDetalle.tres}</g>}
+          </g>
+        )}
+        {capaCaminos && <g style={{ pointerEvents: "none" }} opacity={entra}>{capaCaminos}</g>}
 
         {capaPicos}
 
