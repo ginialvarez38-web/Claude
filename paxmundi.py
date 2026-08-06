@@ -145,13 +145,23 @@ window.addEventListener("error", (e) => {
   if (document.getElementById("raiz").childElementCount === 0)
     mostrarFallo("No se pudo arrancar el juego", (e.message || e) + "\\n\\nMirá la consola del navegador (F12) para el detalle.");
 });
+// Siete segundos y no treinta: si lo de afuera no llegó, el juego se queda en
+// la pantalla de carga para siempre, y media hora mirando una barra que se
+// mueve no le dice a nadie qué pasó ni qué hacer.
 setTimeout(() => {
   if (document.getElementById("raiz").childElementCount === 0)
-    mostrarFallo("No cargó lo que viene de afuera",
-      "React%(tambien)s se baja de un CDN y hace falta internet la primera vez.\\n" +
-      "Si estás sin conexión, o detrás de un proxy o cortafuegos que lo bloquea,\\n" +
-      "el juego no puede arrancar. En la consola del navegador (F12) se ve qué falló.");
-}, 30000);
+    mostrarFallo("No pude cargar React",
+      "El juego entero está en este archivo menos una cosa: React%(tambien)s, que se\\n" +
+      "baja de un CDN la primera vez y después queda en la caché del navegador.\\n\\n" +
+      "Si estás sin internet, o detrás de un proxy o un cortafuegos que bloquea\\n" +
+      "esm.sh, no hay manera de arrancar.\\n\\n" +
+      "Qué probar:\\n" +
+      "  1. Conectarte a internet un momento y recargar (F5). Con una sola vez\\n" +
+      "     alcanza: después el navegador ya lo tiene guardado.\\n" +
+      "  2. Probar con otro navegador, por si este tiene bloqueado el CDN.\\n" +
+      "  3. Abrir la consola (F12), pestaña Red: ahí se ve qué dirección no\\n" +
+      "     responde.");
+}, 7000);
 </script>
 
 %(cargador)s

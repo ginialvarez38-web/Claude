@@ -64,7 +64,7 @@ def juego():
     return _juego
 
 
-PAGINA = """<!doctype html>
+PAGINA = r"""<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -137,13 +137,23 @@ window.addEventListener("error", function (e) {
     mostrarFallo("No se pudo arrancar el juego",
       (e.message || e) + "\n\nMira la consola del navegador (F12) para el detalle.");
 });
+// Lo unico que se baja de afuera es React. Si no llega, el juego se queda en
+// la pantalla de carga para siempre y sin saber por que: mejor decirlo pronto
+// y decir que hacer.
 setTimeout(function () {
   if (document.getElementById("raiz").childElementCount === 0)
-    mostrarFallo("No cargo React",
-      "React se baja de un CDN y hace falta internet la primera vez.\n" +
-      "Si estas sin conexion, o detras de un proxy o cortafuegos que lo bloquea,\n" +
-      "el juego no puede arrancar. En la consola del navegador (F12) se ve que fallo.");
-}, 30000);
+    mostrarFallo("No pude cargar React",
+      "El juego entero esta dentro de este archivo menos una cosa: React, que se\n" +
+      "baja de un CDN la primera vez y despues queda en la cache del navegador.\n\n" +
+      "Si estas sin internet, o detras de un proxy o un cortafuegos que bloquea\n" +
+      "esm.sh, no hay manera de arrancar.\n\n" +
+      "Que probar:\n" +
+      "  1. Conectarte a internet un momento y recargar (F5). Con una sola vez\n" +
+      "     alcanza: despues el navegador ya lo tiene guardado.\n" +
+      "  2. Probar con otro navegador, por si este tiene bloqueado el CDN.\n" +
+      "  3. Abrir la consola (F12), pestana Red: ahi se ve que direccion no\n" +
+      "     responde.");
+}, 7000);
 </script>
 
 <script type="module">
