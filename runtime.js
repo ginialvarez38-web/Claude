@@ -201,10 +201,7 @@ function plano(n, out) {
   out.push(n);
   return out;
 }
-const claveDe = (v, i) => (v && v.__v
-  ? (v.key != null ? "k" + v.key
-     : "t" + (typeof v.type === "function" ? v.type.name || "f" : String(v.type)) + "|" + i)
-  : "x" + i);
+const claveDe = (v) => (v && v.__v && v.key != null ? "k" + v.key : null);
 
 function llamar(ins, v) {
   const antes = actual;
@@ -285,32 +282,70 @@ function parchear(ins, v, padre, svg) {
   ins.v = v;
   return ins;
 }
+// Emparejar lo nuevo con lo viejo, y dejar cada cosa en su sitio.
+//
+// Los que traen clave se buscan por clave; los que no, por posición —que es lo
+// que hace React—. Antes la clave de los que no la traían era «tipo +
+// posición», y eso parecía más prudente pero costaba carísimo: alcanzaba con
+// que apareciera un panel para que sus hermanos de más abajo corrieran un
+// lugar, no encontraran su clave y se rehicieran enteros.
+//
+// Y lo que costaba todavía más: los nodos nuevos se agregaban al final y
+// después había que reacomodar la fila entera. En ese reacomodo viajaba el
+// mapa —quinientos cincuenta nodos— cada vez que se abría un panel que no
+// tenía nada que ver con él. Mover un subárbol así obliga al navegador a
+// rasterizarlo de nuevo: eso es el parpadeo, y también el tirón.
+//
+// Ahora se recorre de atrás para adelante llevando el ancla —el nodo que tiene
+// que quedar a la derecha— y cada hijo se crea o se mueve directo a su lugar.
+// Lo que ya está donde va, no se toca.
 function parchearLista(viejas, vs, padre, svg) {
   const porClave = new Map();
-  viejas.forEach((ins, i) => { const k = claveDe(ins.v, i); if (!porClave.has(k)) porClave.set(k, ins); });
+  const sinClave = [];
+  viejas.forEach((ins) => {
+    const k = claveDe(ins.v);
+    if (k != null) { if (!porClave.has(k)) porClave.set(k, ins); }
+    else sinClave.push(ins);
+  });
+  // Primero se decide con quién va cada uno, sin tocar el DOM.
   const usadas = new Set();
-  const salida = [];
+  const pares = new Array(vs.length);
+  let n = 0;
   for (let i = 0; i < vs.length; i++) {
-    const v = vs[i];
-    const vieja = porClave.get(claveDe(v, i));
-    if (vieja && !usadas.has(vieja)) {
-      usadas.add(vieja);
-      salida.push(parchear(vieja, v, padre, svg));
+    const k = claveDe(vs[i]);
+    let vieja = null;
+    if (k != null) {
+      const c = porClave.get(k);
+      if (c && !usadas.has(c)) vieja = c;
     } else {
-      salida.push(crear(v, padre, svg, null));
+      while (n < sinClave.length && usadas.has(sinClave[n])) n++;
+      if (n < sinClave.length) vieja = sinClave[n++];
     }
+    if (vieja) usadas.add(vieja);
+    pares[i] = vieja;
   }
+  // Los que sobran se van antes de colocar: así el ancla no apunta a un nodo
+  // que está por desaparecer.
   for (const ins of viejas) if (!usadas.has(ins)) quitar(ins, padre);
-  // Y el orden. Se recorre de atrás para adelante y solo se mueve lo que no
-  // está donde toca: mover un nodo del DOM le quita el foco a lo que tenga
-  // dentro, así que cuanto menos se mueva, mejor.
-  let esperado = null;
-  for (let i = salida.length - 1; i >= 0; i--) {
-    const doms = domsDe(salida[i]);
-    for (let j = doms.length - 1; j >= 0; j--) {
-      const d = doms[j];
-      if (d.nextSibling !== esperado) padre.insertBefore(d, esperado);
-      esperado = d;
+
+  const salida = new Array(vs.length);
+  let ancla = null;
+  for (let i = vs.length - 1; i >= 0; i--) {
+    const vieja = pares[i];
+    const ins = vieja ? parchear(vieja, vs[i], padre, svg)
+                      : crear(vs[i], padre, svg, ancla);
+    salida[i] = ins;
+    const doms = domsDe(ins);
+    if (doms.length) {
+      // Se recolocan de atrás para adelante y solo los que no están en su
+      // sitio: mover un nodo le quita el foco a lo que tenga dentro.
+      let esperado = ancla;
+      for (let j = doms.length - 1; j >= 0; j--) {
+        const d = doms[j];
+        if (d.nextSibling !== esperado) padre.insertBefore(d, esperado);
+        esperado = d;
+      }
+      ancla = doms[0];
     }
   }
   return salida;
