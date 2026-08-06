@@ -7118,15 +7118,24 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   };
   // Acerca o aleja dejando quieto el punto (sx,sy) de la pantalla: el zoom
   // va hacia donde estás mirando, no al centro.
-  function zoomEn(f, sx, sy) {
+  // `vivo` es un gesto en curso —el pellizco—. Ahí el encuadre no se asienta en
+  // cada paso: se estira la capa que ya está dibujada, igual que al arrastrar, y
+  // solo se rehace el mapa cuando el estirón se pasa de lo que se puede
+  // disimular. Sin esto, un pellizco rehacía el mapa veinticuatro veces, una
+  // por cada movimiento de los dedos, y por eso se sentía pesado.
+  function zoomEn(f, sx, sy, vivo) {
     detener();
     frenar();
-    const v = vbRef.current, r = medirCaja();
+    // Con el gesto en curso se parte de lo que se está enseñando, que no es lo
+    // mismo que lo último asentado; si no, cada paso deshace el anterior.
+    const v = (vivo && pendiente.current) || vbRef.current;
+    const r = medirCaja();
+    const poner = (d) => (vivo ? correr(limitar(d)) : fijar(limitar(d)));
     const w = v.w * f, h = v.h * f;
-    if (!r.w) { fijar(limitar({ x: v.x + v.w / 2 - w / 2, y: v.y + v.h / 2 - h / 2, w, h })); return; }
+    if (!r.w) { poner({ x: v.x + v.w / 2 - w / 2, y: v.y + v.h / 2 - h / 2, w, h }); return; }
     const ux = v.x + acotar((sx - r.left) / r.w, 0, 1) * v.w;   // el punto del mundo bajo el dedo
     const uy = v.y + acotar((sy - r.top) / r.h, 0, 1) * v.h;
-    fijar(limitar({ x: ux - (ux - v.x) * f, y: uy - (uy - v.y) * f, w, h }));
+    poner({ x: ux - (ux - v.x) * f, y: uy - (uy - v.y) * f, w, h });
   }
   // Cada cuadro el encuadre recorre una fracción de lo que le falta para
   // llegar a la meta. En escala geométrica: acercarse de 80° a 40° tiene que
@@ -7232,7 +7241,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       const d = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y);
       const previo = arrastre.current && arrastre.current.pinch;
       movido.current = true;
-      if (previo) zoomEn(previo / (d || 1), (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2);
+      if (previo) zoomEn(previo / (d || 1), (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2, true);
       arrastre.current = { ...(arrastre.current || {}), pinch: d };
       return;
     }
@@ -7276,7 +7285,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     // la escala se aleja tanto que el trazo empezaría a engordar de más. Por
     // debajo de 0,93 el lienzo ya no cubre el hueco y asomaría el vacío.
     const fuera = Math.abs(tx) > r.w * M * 0.92 || Math.abs(ty) > r.h * M * 0.92;
-    if (fuera || s < 0.93 || s > 1.6) { asentar(); return; }
+    // Cuánto se deja estirar la capa ya dibujada antes de rehacer el mapa.
+    // Ancho de más tampoco sirve: estirar mucho obliga al navegador a
+    // rasterizarla a más resolución, y ahí el ahorro se da vuelta —con 1.6
+    // aparecían cuadros de dos segundos y medio—. Entre 0.85 y 1.25 un
+    // pellizco entero cuesta cuatro redibujos en vez de veinticuatro.
+    if (fuera || s < 0.85 || s > 1.25) { asentar(); return; }
     el.style.transformOrigin = "0 0";
     el.style.transform = s === 1 ? `translate3d(${tx}px, ${ty}px, 0)`
       : `translate3d(${tx}px, ${ty}px, 0) scale(${s})`;
