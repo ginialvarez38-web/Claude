@@ -10713,17 +10713,58 @@ const RANURAS = 3;
 const CLAVES_PARTIDA = ["anio", "turno", "provincias", "stats", "ciencia",
                         "nacion", "gobierno", "poblacion"];
 
-function almacen() {
-  // En modo privado de algunos navegadores existe pero tira al escribir, así
-  // que no alcanza con preguntar si está: hay que probarlo.
-  try {
-    const a = window.localStorage;
-    a.setItem("paxmundi.prueba", "1");
-    a.removeItem("paxmundi.prueba");
-    return a;
-  } catch (_) {
-    return null;
-  }
+// ——— dónde se puede guardar ———
+//
+// No hay un solo sitio que ande en todos lados. Abriendo el archivo a mano,
+// Safari y las ventanas de navegador que abren otras aplicaciones no dejan
+// guardar nada; algunos navegadores en modo privado dejan pedir el almacén
+// pero revientan al escribir. Así que no se pregunta si está: se prueba
+// escribiendo, y se baja de escalón hasta encontrar algo que funcione.
+//
+// El último escalón es la memoria, que no sobrevive a cerrar la pestaña. No
+// sirve para guardar, pero sirve para que el juego siga andando y —sobre todo—
+// para poder decirle al jugador que baje la partida a un archivo, que es lo
+// único que siempre funciona.
+
+function almacenDeMentira() {
+  const m = {};
+  return { esMentira: true,
+    getItem: (k) => (k in m ? m[k] : null),
+    setItem: (k, v) => { m[k] = String(v); },
+    removeItem: (k) => { delete m[k]; } };
+}
+
+let _almacen = null;
+function almacenDe() {
+  if (_almacen) return _almacen;
+  const fallos = [];
+  const probar = (traer, tipo, dura) => {
+    try {
+      const a = traer();
+      if (!a) return null;
+      a.setItem("paxmundi.prueba", "1");
+      if (a.getItem("paxmundi.prueba") !== "1") throw new Error("no guarda lo que se le da");
+      a.removeItem("paxmundi.prueba");
+      return { a, tipo, dura };
+    } catch (e) {
+      fallos.push(tipo + " → " + ((e && (e.name || e.message)) || e));
+      return null;
+    }
+  };
+  _almacen = probar(() => window.localStorage, "el navegador", true)
+    || probar(() => window.sessionStorage, "esta pestaña", false)
+    || { a: almacenDeMentira(), tipo: "la memoria", dura: false };
+  _almacen.fallos = fallos;
+  return _almacen;
+}
+
+const almacen = () => almacenDe().a;
+// ¿Lo que se guarde va a seguir ahí mañana?
+const guardaDeVerdad = () => almacenDe().dura === true;
+// Para poder contarlo, no para adivinarlo.
+function dondeSeGuarda() {
+  const d = almacenDe();
+  return { tipo: d.tipo, dura: d.dura === true, fallos: d.fallos || [] };
 }
 
 // Los ids son "t1", "t2"… y los reparte un contador que arranca en cero cada
@@ -10781,10 +10822,9 @@ function desempacar(texto) {
 
 function guardarPartida(llave, s) {
   const a = almacen();
-  if (!a) return { porque: "Este navegador no deja guardar nada." };
   try {
     a.setItem(llave, empacar(s));
-    return { ok: true };
+    return { ok: true, dura: guardaDeVerdad() };
   } catch (e) {
     // Se llenó. Decir cuánto ocupa lo que ya hay sirve más que el nombre del
     // error, porque lo que hay que hacer es borrar una partida vieja.
@@ -10796,7 +10836,6 @@ function guardarPartida(llave, s) {
 
 function cargarPartida(llave) {
   const a = almacen();
-  if (!a) return { porque: "Este navegador no deja guardar nada." };
   const texto = a.getItem(llave);
   if (!texto) return { porque: "No hay ninguna partida guardada ahí." };
   const r = desempacar(texto);
@@ -15807,6 +15846,9 @@ export default function PaxMundi() {
   const [avisoGuardar, setAvisoGuardar] = useState(null);
   const [ranuras, setRanuras] = useState([]);
   const [panelPartida, setPanelPartida] = useState(false);
+  // Dónde se puede guardar en este navegador. Se averigua una sola vez, y se
+  // averigua escribiendo: preguntar no alcanza.
+  const donde = useMemo(() => dondeSeGuarda(), []);
   const [deltas, setDeltas] = useState({});
   const [accionLibre, setAccionLibre] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -17370,6 +17412,28 @@ export default function PaxMundi() {
             </div>
           )}
 
+          {/* Si el navegador no deja guardar, decirlo acá y no cuando ya se
+              perdió la campaña. Pasa abriendo el archivo a mano en Safari, y en
+              las ventanas de navegador que abren otras aplicaciones. */}
+          {!donde.dura && (
+            <div style={{ marginBottom: 22, padding: 13, borderRadius: 10, fontSize: 12.5,
+              lineHeight: 1.65, color: C.ink, background: "rgba(224,82,82,0.07)",
+              border: `1px solid ${C.red}55` }}>
+              <b style={{ color: C.red }}>Este navegador no guarda la partida.</b><br />
+              {donde.tipo === "esta pestaña"
+                ? "Se puede guardar mientras esta pestaña siga abierta, pero al cerrarla se pierde."
+                : "No hay dónde: al cerrar, la partida se pierde entera."}
+              {" "}Se puede jugar igual, pero al terminar bajate la partida a un
+              archivo desde <b>💾 PARTIDA</b>, arriba a la derecha, y traela de
+              vuelta la próxima vez.
+              {donde.fallos.length > 0 && (
+                <div style={{ fontFamily: mono, fontSize: 10.5, color: C.muted, marginTop: 7 }}>
+                  {donde.fallos.join(" · ")}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: C.brass, marginBottom: 10, fontFamily: mono }}>I · Elegí la época</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 26 }}>
             {ERAS.map((e) => (
@@ -17746,13 +17810,20 @@ export default function PaxMundi() {
         </div>
 
         {/* La partida se guarda sola; esto es para lo otro: llevársela a otro
-            aparato, o dejar una copia antes de una guerra que puede salir mal. */}
+            aparato, o dejar una copia antes de una guerra que puede salir mal.
+            Y si no se puede guardar, el botón lo grita: enterarse al cerrar es
+            enterarse tarde. */}
         <button onClick={() => { setRanuras(ranurasGuardadas()); setPanelPartida(true); }}
-          title="guardar, cargar o llevarse la partida"
+          title={donde.dura
+            ? (guardado ? `guardada en el turno ${guardado.turno}, ${haceCuanto(guardado.cuando)}`
+                        : "guardar, cargar o llevarse la partida")
+            : "ESTE NAVEGADOR NO GUARDA: bajate la partida a un archivo"}
           style={{ flex: "0 0 auto", padding: "5px 9px", cursor: "pointer", borderRadius: 6,
-            background: "transparent", border: `1px solid ${C.line}`, color: C.muted,
+            background: donde.dura ? "transparent" : "rgba(224,82,82,0.12)",
+            border: `1px solid ${donde.dura ? C.line : C.red}`,
+            color: donde.dura ? C.muted : C.red,
             fontFamily: mono, fontSize: 9.5, letterSpacing: 0.8 }}>
-          💾 PARTIDA
+          {donde.dura ? "💾 PARTIDA" : "⚠ NO SE GUARDA"}
         </button>
       </header>
 
@@ -17795,10 +17866,32 @@ export default function PaxMundi() {
                 style={{ marginLeft: "auto", background: "transparent", border: "none",
                   color: C.muted, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
             </div>
-            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
-              Se guarda sola al terminar cada turno y al dejar el juego, así que no
-              hace falta que hagas nada. Esto es para dejar una copia aparte.
-            </div>
+            {donde.dura ? (
+              <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
+                Se guarda sola al terminar cada turno y al dejar el juego, así que no
+                hace falta que hagas nada.{" "}
+                {guardado
+                  ? `La última quedó en el turno ${guardado.turno}, ${haceCuanto(guardado.cuando)}.`
+                  : ""}{" "}
+                Esto es para dejar una copia aparte.
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, lineHeight: 1.65, marginBottom: 14, padding: 11,
+                borderRadius: 9, color: C.ink, background: "rgba(224,82,82,0.07)",
+                border: `1px solid ${C.red}55` }}>
+                <b style={{ color: C.red }}>Acá la partida no se guarda sola.</b><br />
+                {donde.tipo === "esta pestaña"
+                  ? "Aguanta mientras esta pestaña siga abierta; al cerrarla se pierde."
+                  : "No hay dónde guardarla: al cerrar, se pierde entera."}
+                {" "}Bajala a un archivo antes de irte —el botón de abajo— y la próxima
+                vez traela con «traer de un archivo».
+                {donde.fallos.length > 0 && (
+                  <div style={{ fontFamily: mono, fontSize: 10.5, color: C.muted, marginTop: 7 }}>
+                    {donde.fallos.join(" · ")}
+                  </div>
+                )}
+              </div>
+            )}
 
             {avisoGuardar && (
               <div style={{ fontSize: 12, color: C.red, marginBottom: 12,

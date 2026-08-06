@@ -101,6 +101,15 @@ el otro con «traer una partida de un archivo», abajo de la pantalla de
 fundación. Es también la manera de que no se pierda si el navegador limpia lo
 suyo.
 
+**Si el navegador no deja guardar**, el juego lo dice en la portada y el botón
+de arriba pasa a decir «⚠ NO SE GUARDA» en rojo. Pasa abriendo el archivo a
+mano en Safari, y en las ventanas de navegador que abren otras aplicaciones
+desde un mensaje. Se puede jugar igual: lo que hay que hacer es bajar la
+partida a un archivo antes de irse, y traerla la próxima vez. Cuando el
+almacén del navegador está bloqueado pero el de la pestaña no, la partida
+aguanta mientras esa pestaña siga abierta —sobrevive a recargar, no a cerrar—
+y el aviso lo aclara.
+
 Una partida ocupa unos 200 KB y se guarda en el navegador, así que es de ese
 navegador y de ese aparato. El juego está en desarrollo: cuando cambia la forma
 de la partida, las guardadas de antes dejan de servir, y el juego lo dice en vez
