@@ -36,6 +36,7 @@ import os
 import socketserver
 import sys
 import threading
+import traceback
 import urllib.error
 import urllib.request
 import webbrowser
@@ -146,22 +147,12 @@ window.addEventListener("error", (e) => {
   if (document.getElementById("raiz").childElementCount === 0)
     mostrarFallo("No se pudo arrancar el juego", (e.message || e) + "\\n\\nMirá la consola del navegador (F12) para el detalle.");
 });
-// Siete segundos y no treinta: si lo de afuera no llegó, el juego se queda en
-// la pantalla de carga para siempre, y media hora mirando una barra que se
-// mueve no le dice a nadie qué pasó ni qué hacer.
+// Siete segundos y no treinta: si algo no llegó, el juego se queda en la
+// pantalla de carga para siempre, y media hora mirando una barra que se mueve
+// no le dice a nadie qué pasó ni qué hacer.
 setTimeout(() => {
   if (document.getElementById("raiz").childElementCount === 0)
-    mostrarFallo("No pude cargar React",
-      "El juego entero está en este archivo menos una cosa: React%(tambien)s, que se\\n" +
-      "baja de un CDN la primera vez y después queda en la caché del navegador.\\n\\n" +
-      "Si estás sin internet, o detrás de un proxy o un cortafuegos que bloquea\\n" +
-      "esm.sh, no hay manera de arrancar.\\n\\n" +
-      "Qué probar:\\n" +
-      "  1. Conectarte a internet un momento y recargar (F5). Con una sola vez\\n" +
-      "     alcanza: después el navegador ya lo tiene guardado.\\n" +
-      "  2. Probar con otro navegador, por si este tiene bloqueado el CDN.\\n" +
-      "  3. Abrir la consola (F12), pestaña Red: ahí se ve qué dirección no\\n" +
-      "     responde.");
+    mostrarFallo("El juego no llegó a arrancar", %(fallo)s);
 }, 7000);
 </script>
 
@@ -185,11 +176,37 @@ CARGADOR_BABEL = """<script src="https://unpkg.com/@babel/standalone@7.26.4/babe
 <script type="text/babel" data-type="module" data-presets="react" src="/app.jsx"></script>"""
 
 
+# Qué decir cuando no arranca depende del camino, porque no fallan por lo
+# mismo. Por el camino armado no se baja nada: si no arranca, el problema está
+# de este lado y hay que decir dónde mirar. Por el camino con Babel sí se baja
+# algo, y entonces la conexión vuelve a ser sospechosa.
+FALLO_ARMADO = (
+    '"Todo lo que hace falta sale de esta misma carpeta: no se baja nada de\\n" +\n'
+    '      "internet, así que no es la conexión.\\n\\n" +\n'
+    '      "Qué probar:\\n" +\n'
+    '      "  1. En la terminal donde arrancaste el juego: si algo se rompió del\\n" +\n'
+    '      "     lado de Python, quedó escrito ahí entero.\\n" +\n'
+    '      "  2. Parar el juego (Ctrl+C) y correr:  python3 paxmundi.py --probar\\n" +\n'
+    '      "     Se revisa a sí mismo y dice qué parte falla.\\n" +\n'
+    '      "  3. Abrir la consola (F12), pestaña Consola: si el error es del lado\\n" +\n'
+    '      "     del navegador, aparece ahí."')
+FALLO_BABEL = (
+    '"Por este camino el JSX se traduce en el navegador con Babel, y Babel es lo\\n" +\n'
+    '      "único que se baja de afuera (unpkg.com). Si estás sin internet, o detrás\\n" +\n'
+    '      "de un proxy que lo bloquea, no hay manera de arrancar así.\\n\\n" +\n'
+    '      "Qué probar:\\n" +\n'
+    '      "  1. Regenerar paxmundi.js: con el juego ya traducido no hace falta\\n" +\n'
+    '      "     Babel ni internet. La orden está en el LEEME.\\n" +\n'
+    '      "  2. Parar el juego (Ctrl+C) y correr:  python3 paxmundi.py --probar\\n" +\n'
+    '      "  3. Abrir la consola (F12), pestaña Red: ahí se ve qué dirección no\\n" +\n'
+    '      "     responde."')
+
+
 def pagina():
     if via() == "armado":
-        return PLANTILLA % {"cargador": CARGADOR_ARMADO, "tambien": "",
+        return PLANTILLA % {"cargador": CARGADOR_ARMADO, "fallo": FALLO_ARMADO,
                             "aviso": "Desplegando el mapa del mundo."}
-    return PLANTILLA % {"cargador": CARGADOR_BABEL, "tambien": " —y Babel, que traduce el JSX—",
+    return PLANTILLA % {"cargador": CARGADOR_BABEL, "fallo": FALLO_BABEL,
                         "aviso": "Traduciendo el juego y desplegando el mapa del mundo.<br>"
                                  "Con Babel tarda unos segundos."}
 
@@ -217,7 +234,32 @@ class Manejador(http.server.BaseHTTPRequestHandler):
             sys.stderr.write("  %s\n" % (formato % args))
 
     # ——— rutas ———
+    # Si algo se rompe adentro, sin esto la conexión se cierra sin una sola
+    # letra y el navegador solo sabe decir «localhost no envió ningún dato».
+    # Con esto, dice qué se rompió: en la pantalla y en la terminal.
     def do_GET(self):
+        try:
+            self.servir()
+        except Exception:
+            self.confesar("servir")
+
+    def do_POST(self):
+        try:
+            self.despachar()
+        except Exception:
+            self.confesar("responder a")
+
+    def confesar(self, verbo):
+        detalle = traceback.format_exc()
+        sys.stderr.write("\n  ✗ se rompió al %s %s\n%s\n" % (verbo, self.path, detalle))
+        try:
+            self.responder(500, "Se rompió al %s %s\n\n%s\n"
+                                "Copiá esto entero: dice exactamente qué falló."
+                                % (verbo, self.path, detalle))
+        except Exception:
+            pass
+
+    def servir(self):
         ruta = self.path.split("?")[0]
         if ruta in ("/", "/index.html"):
             return self.responder(200, pagina(), "text/html; charset=utf-8")
@@ -253,7 +295,7 @@ class Manejador(http.server.BaseHTTPRequestHandler):
 
         self.responder(404, "No hay nada en %s" % ruta)
 
-    def do_POST(self):
+    def despachar(self):
         if self.path.split("?")[0] != "/api/mensajes":
             return self.responder(404, "No hay nada en %s" % self.path)
 
@@ -302,12 +344,55 @@ def clave_api():
     return (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 
 
+def revisar(puerto):
+    print("⚜  PAX MUNDI · revisión")
+    print("   python %s en %s" % (sys.version.split()[0], sys.platform))
+    for f in (FUENTE, ARMADO, MOTOR):
+        print("   %-14s %s" % (f.name, "%.0f KB" % (f.stat().st_size / 1024)
+                               if f.exists() else "✗ no está"))
+    try:
+        srv = Servidor(("127.0.0.1", puerto), Manejador)
+    except OSError as e:
+        print("   ✗ no pude abrir el puerto %d: %s" % (puerto, e))
+        print("     si el juego ya está corriendo, pará ese y volvé a probar,")
+        print("     o probá otro puerto: python3 paxmundi.py --probar -p 8080")
+        return
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % puerto
+    malas = 0
+    rutas = ["/", "/runtime.js", "/salud"] + (["/app.js"] if ARMADO.exists() else ["/app.jsx"])
+    for ruta in rutas:
+        try:
+            with urllib.request.urlopen(base + ruta, timeout=20) as r:
+                cuerpo = r.read()
+            print("   %-13s %s  %.0f KB" % (ruta, r.status, len(cuerpo) / 1024))
+        except Exception as e:
+            malas += 1
+            print("   %-13s ✗ %s" % (ruta, e))
+    srv.shutdown()
+    srv.server_close()
+    if malas:
+        print("\n   Algo no sale. Copiá todo esto y mandalo: dice qué ruta falla.")
+    else:
+        print("\n   Todo sale bien desde acá. Si el navegador igual no muestra nada,")
+        print("   probá otro navegador, o abrí %s a mano." % base)
+
+
 def main():
     p = argparse.ArgumentParser(description="Arranca Pax Mundi en el navegador.")
     p.add_argument("-p", "--puerto", type=int, default=8000, help="puerto (por defecto 8000)")
     p.add_argument("--sin-navegador", action="store_true", help="no abrir el navegador solo")
+    p.add_argument("--probar", action="store_true",
+                   help="revisar que cada ruta contesta, y salir")
     p.add_argument("-v", "--verboso", action="store_true", help="mostrar cada pedido")
     args = p.parse_args()
+
+    # ——— revisión ———
+    # Si el navegador dice «localhost no envió ningún dato», esto contesta por
+    # qué: levanta el servidor de verdad, se pide a sí mismo cada cosa y dice
+    # cuál falla y con qué error. Es una sola orden y se puede copiar entera.
+    if args.probar:
+        return revisar(args.puerto)
 
     if not FUENTE.exists() and not ARMADO.exists():
         sys.exit("No encuentro ni paxmundi.jsx ni paxmundi.js.\nAl menos uno tiene que "

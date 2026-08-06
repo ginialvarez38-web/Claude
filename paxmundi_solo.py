@@ -29,11 +29,14 @@ Sin clave el juego funciona igual: el motor local resuelve los turnos, entiende
 las órdenes que escribas y narra sin salir a ninguna red. La IA solo cambia
 quién escribe la crónica, y se elige con el interruptor MOTOR dentro del juego.
 
-Lo único que se baja de afuera es React, desde un CDN, la primera vez. Después
-queda en la caché del navegador.
+No se baja nada de afuera: el motor de pantalla también va adentro. El juego
+arranca sin internet, detrás de un proxy o en una máquina aislada. La única
+llamada a la red posible es a la API de Anthropic, y solo si diste una clave.
 
     python3 paxmundi_solo.py --extraer    escribe paxmundi.js al lado, por si
                                           querés el código suelto
+    python3 paxmundi_solo.py --probar     revisa que todo lo de adentro sale
+                                          bien y dice qué falla, si algo falla
 """
 
 import argparse
@@ -45,6 +48,7 @@ import os
 import socketserver
 import sys
 import threading
+import traceback
 import urllib.error
 import urllib.request
 import webbrowser
@@ -146,22 +150,21 @@ window.addEventListener("error", function (e) {
     mostrarFallo("No se pudo arrancar el juego",
       (e.message || e) + "\n\nMira la consola del navegador (F12) para el detalle.");
 });
-// Lo unico que se baja de afuera es React. Si no llega, el juego se queda en
-// la pantalla de carga para siempre y sin saber por que: mejor decirlo pronto
-// y decir que hacer.
+// Si a los siete segundos no se pinto nada, el juego se quedaria en la
+// pantalla de carga para siempre y sin decir por que. Nada de esto se baja de
+// afuera, asi que si falla, falla acá adentro: hay que decir donde mirar.
 setTimeout(function () {
   if (document.getElementById("raiz").childElementCount === 0)
-    mostrarFallo("No pude cargar React",
-      "El juego entero esta dentro de este archivo menos una cosa: React, que se\n" +
-      "baja de un CDN la primera vez y despues queda en la cache del navegador.\n\n" +
-      "Si estas sin internet, o detras de un proxy o un cortafuegos que bloquea\n" +
-      "esm.sh, no hay manera de arrancar.\n\n" +
+    mostrarFallo("El juego no llego a arrancar",
+      "Todo lo que hace falta esta dentro de este archivo: no se baja nada de\n" +
+      "internet, asi que no es la conexion.\n\n" +
       "Que probar:\n" +
-      "  1. Conectarte a internet un momento y recargar (F5). Con una sola vez\n" +
-      "     alcanza: despues el navegador ya lo tiene guardado.\n" +
-      "  2. Probar con otro navegador, por si este tiene bloqueado el CDN.\n" +
-      "  3. Abrir la consola (F12), pestana Red: ahi se ve que direccion no\n" +
-      "     responde.");
+      "  1. En la terminal donde arrancaste el juego: si algo se rompio del lado\n" +
+      "     de Python, quedo escrito ahi entero.\n" +
+      "  2. Parar el juego (Ctrl+C) y correr:  python3 paxmundi_solo.py --probar\n" +
+      "     Se revisa a si mismo y dice que parte falla.\n" +
+      "  3. Abrir la consola (F12), pestana Consola: si el error es del lado del\n" +
+      "     navegador, aparece ahi.");
 }, 7000);
 </script>
 
@@ -200,7 +203,23 @@ class Manejador(http.server.BaseHTTPRequestHandler):
         if getattr(self.server, "verboso", False):
             sys.stderr.write("  %s\n" % (formato % args))
 
+    # Un fallo al servir dejaba la conexion cerrada sin una sola letra, y el
+    # navegador solo sabe decir "localhost no envio ningun dato". Cualquier
+    # cosa que se rompa acá se cuenta: en la pagina y en la consola.
     def do_GET(self):
+        try:
+            self.servir()
+        except Exception:
+            detalle = traceback.format_exc()
+            sys.stderr.write("\n  x se rompio al servir %s\n%s\n" % (self.path, detalle))
+            try:
+                self.responder(500, "Se rompio al servir %s\n\n%s\n"
+                               "Copiá esto entero: dice exactamente que fallo."
+                               % (self.path, detalle))
+            except Exception:
+                pass
+
+    def servir(self):
         ruta = self.path.split("?")[0]
         if ruta in ("/", "/index.html"):
             return self.responder(200, PAGINA, "text/html; charset=utf-8")
@@ -215,6 +234,18 @@ class Manejador(http.server.BaseHTTPRequestHandler):
         self.responder(404, "No hay nada en %s" % ruta)
 
     def do_POST(self):
+        try:
+            self.despachar()
+        except Exception:
+            detalle = traceback.format_exc()
+            sys.stderr.write("\n  x se rompio en %s\n%s\n" % (self.path, detalle))
+            try:
+                self.responder(500, json.dumps({"error": {"type": "roto", "message": detalle}}),
+                               "application/json; charset=utf-8")
+            except Exception:
+                pass
+
+    def despachar(self):
         if self.path.split("?")[0] != "/api/mensajes":
             return self.responder(404, "No hay nada en %s" % self.path)
         clave = clave_api()
@@ -259,6 +290,8 @@ def main():
     p.add_argument("-p", "--puerto", type=int, default=8000, help="puerto (por defecto 8000)")
     p.add_argument("--sin-navegador", action="store_true", help="no abrir el navegador solo")
     p.add_argument("--extraer", action="store_true", help="escribir paxmundi.js al lado y salir")
+    p.add_argument("--probar", action="store_true",
+                   help="revisar que todo lo de adentro sale bien, y salir")
     p.add_argument("-v", "--verboso", action="store_true", help="mostrar cada pedido")
     args = p.parse_args()
 
@@ -266,6 +299,48 @@ def main():
         destino = Path(__file__).resolve().parent / "paxmundi.js"
         destino.write_bytes(juego())
         print("escrito %s (%.0f KB)" % (destino, destino.stat().st_size / 1024))
+        return
+
+    # ——— revision ———
+    # Si el navegador dice "localhost no envio ningun dato", esto contesta por
+    # que: levanta el servidor de verdad, se pide a si mismo cada cosa y dice
+    # cual falla y con que error. Es una sola orden y se puede copiar entera.
+    if args.probar:
+        print("PAX MUNDI · revision")
+        print("   python %s en %s" % (sys.version.split()[0], sys.platform))
+        try:
+            print("   el juego adentro: %.0f KB" % (len(juego()) / 1024))
+            print("   el motor adentro: %.0f KB" % (len(motor()) / 1024))
+        except Exception as e:
+            print("   x no pude descomprimir lo de adentro: %s" % e)
+            print("     el archivo pudo bajarse a medias. Bajalo de nuevo.")
+            return
+        import urllib.request as ur
+        try:
+            srv = Servidor(("127.0.0.1", args.puerto), Manejador)
+        except OSError as e:
+            print("   x no pude abrir el puerto %d: %s" % (args.puerto, e))
+            print("     si el juego ya esta corriendo, pará ese y volvé a probar,")
+            print("     o probá otro puerto: python3 paxmundi_solo.py --probar -p 8080")
+            return
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % args.puerto
+        malas = 0
+        for ruta in ("/", "/app.js", "/runtime.js", "/salud"):
+            try:
+                with ur.urlopen(base + ruta, timeout=20) as r:
+                    cuerpo = r.read()
+                print("   %-13s %s  %.0f KB" % (ruta, r.status, len(cuerpo) / 1024))
+            except Exception as e:
+                malas += 1
+                print("   %-13s x %s" % (ruta, e))
+        srv.shutdown()
+        srv.server_close()
+        if malas:
+            print("\n   Algo no sale. Copiá todo esto y mandalo: dice que ruta falla.")
+        else:
+            print("\n   Todo sale bien desde acá. Si el navegador igual no muestra nada,")
+            print("   probá otro navegador, o abrí %s a mano." % base)
         return
 
     try:

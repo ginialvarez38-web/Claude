@@ -22,6 +22,25 @@ hay que instalar nada con pip, ni node, ni compilar.
 
 Si el puerto 8000 está ocupado: `python3 paxmundi.py -p 8080`.
 
+## Si el navegador no muestra nada
+
+Arranca el servidor pero la pestaña queda en blanco, o dice «localhost no
+envió ningún dato» (`ERR_EMPTY_RESPONSE`). Preguntale al propio archivo qué
+le pasa:
+
+```
+python3 paxmundi_solo.py --probar
+```
+
+Levanta el servidor de verdad, se pide a sí mismo cada cosa que la página
+necesita y dice cuál falla y con qué error. `paxmundi.py --probar` hace lo
+mismo con los archivos sueltos. Sale una tabla corta que se puede copiar
+entera.
+
+Si la revisión dice que todo sale bien y el navegador igual no muestra nada,
+probá con otro navegador, o abrí `http://127.0.0.1:8000` a mano en vez de
+`localhost`.
+
 ## Para que la IA funcione
 
 La IA es **opcional**. El motor local resuelve los turnos, entiende las órdenes
