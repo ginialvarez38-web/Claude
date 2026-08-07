@@ -6953,7 +6953,7 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // dar con el motivo: la región que se consulta se agranda, así que deberían
 // salir más, no menos. Queda en 0.1, que es lo que funciona, y el 0.3 anotado
 // como lo que hay que retomar cuando se entienda ese cero.
-const MARGEN_LIENZO = 0.1;
+const MARGEN_LIENZO = 0.3;
 // Un valor redondeado a escalones geométricos. Sirve para lo que se recuerda
 // entre cuadros: mientras se acerca el mapa, el ancho de un píxel cambia un
 // pelo en cada cuadro, y con eso solo ya se tiraban a la basura todas las
@@ -8212,9 +8212,14 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             que uno más quiere mirar. El radio es generoso —un disco de tres
             píxeles no se toca con el dedo— pero nunca tanto como para tapar a
             la de al lado. */}
-        {ciudadesAqui.length > 0 && ciudadesAqui.length < 420 && (
+        {/* El tope existe para no llenar el mapa de zonas sensibles, pero antes
+            era todo o nada: pasando de 420 no se podía tocar ni una sola
+            ciudad, y encima en silencio. En una pantalla ancha eso ya pasaba
+            sin que nadie lo notara. Ahora se quedan las primeras, que vienen
+            ordenadas por rango: las que uno querría tocar. */}
+        {ciudadesAqui.length > 0 && (
           <g>
-            {ciudadesAqui.map((c, i) => (
+            {ciudadesAqui.slice(0, 420).map((c, i) => (
               <circle key={"cz" + i} cx={c.x} cy={c.y} r={Math.min(px * 9, w * 0.012)}
                 fill="transparent" pointerEvents="all" style={{ cursor: "pointer" }}
                 aria-label={"ciudad " + c.n}
