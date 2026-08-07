@@ -9287,6 +9287,167 @@ function limiteFuerzas(stats, ciencia, poblacion) {
   return Math.max(2, Math.round(3 + Math.sqrt((poblacion || 0) / 1400) + org * (0.5 + stats.economia / 160)));
 }
 function unidadesTotales(ej) { return RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0), 0); }
+// ═══ LA CAMPAÑA: LOS EJÉRCITOS SOBRE EL MAPA ══════════════════════════════
+//
+// Hasta acá el ejército era un número —tantas de infantería, tantas de
+// caballería—. Servía para saber si aguantabas una guerra, no para hacerla.
+// Una hueste es ese número puesto en un sitio del mapa, con un rumbo y una
+// orden.
+//
+// Todo lo que sigue va por turnos, como el resto del juego: una hueste no
+// aparece en el destino, avanza lo que dan los días del turno. Con turnos de
+// una semana cruzar Iberia lleva varios; con turnos de un año se cruza de una.
+// Esa diferencia no está puesta a mano: sale de los kilómetros por día.
+
+// Lo que caminaba cada rama en un día, en kilómetros. Una hueste va al paso de
+// su pieza más lenta: los cañones no se dejan atrás.
+const PASO_RAMA = { infanteria: 22, caballeria: 38, artilleria: 11, ingenieros: 16, marina: 0 };
+
+// Distancia de verdad entre dos puntos del mapa. Un grado de longitud se
+// acorta al acercarse a los polos: en el mapa se ven iguales, pero caminarlos
+// no lo es, y en Escandinavia la diferencia es de la mitad.
+function leguas(a, b) {
+  const dy = (b.y || 0) - (a.y || 0);
+  const lat = 90 - ((a.y || 0) + (b.y || 0)) / 2;
+  const dx = ((b.x || 0) - (a.x || 0)) * Math.cos((lat * Math.PI) / 180);
+  return Math.hypot(dx, dy) * GRADO_KM;
+}
+
+// Kilómetros por día de una hueste por una provincia dada. El camino
+// multiplica y el terreno divide: una calzada por la llanura y una senda por
+// la montaña se llevan tres a uno.
+function velocidadHueste(h, prov) {
+  const ramas = Object.keys((h && h.ramas) || {})
+    .filter((r) => h.ramas[r] > 0 && PASO_RAMA[r] > 0);
+  if (!ramas.length) return 0;
+  const base = Math.min(...ramas.map((r) => PASO_RAMA[r]));
+  const t = TERRENOS[(prov && prov.terreno) || "llanura"] || TERRENOS.llanura;
+  const via = viaDe(prov || {});
+  return base * (0.75 + via.soc * 0.75) * (t.com || 1);
+}
+
+// Cuánto pesa una hueste en un campo de batalla. No es la cuenta de hombres:
+// una rama vale lo que el saber de la época la hace valer, que es lo que ya
+// calcula el resto del juego.
+function pesoDeHueste(h, s) {
+  let f = 0;
+  for (const r of RAMAS_EJERCITO) {
+    const n = ((h && h.ramas) || {})[r.id] || 0;
+    if (!n) continue;
+    // fuerzaRama ya trae el peso de la rama multiplicado por lo que el saber
+    // de la época le suma: no hay que volver a multiplicar por el peso.
+    f += n * fuerzaRama(r.id, (s && s.ciencia) || {});
+  }
+  // La moral no es un adorno: una hueste rota pesa la mitad aunque tenga los
+  // mismos hombres.
+  return f * (0.55 + 0.45 * acotar((h && h.moral != null ? h.moral : 100) / 100, 0, 1));
+}
+
+// ——— lo que cuesta tomar una plaza ———
+//
+// Se devuelve el número y el desglose. El desglose no es decoración: el que
+// manda tiene que poder ver por qué una plaza es dura antes de perder media
+// hueste averiguándolo.
+function defensaDe(p, s) {
+  const partes = [];
+  const t = TERRENOS[(p && p.terreno) || "llanura"] || TERRENOS.llanura;
+  let base = 12;
+  partes.push({ n: "la guarnición de siempre", v: base });
+
+  // El tamaño de la ciudad. Una plaza grande tiene más brazos que la defiendan
+  // y más muro que cubrir; lo primero pesa más.
+  // Ojo con la unidad: la ciudad de una provincia ya está en su época —sale de
+  // la gente que vive ahí ahora—, mientras que la pob de las ciudades del mapa
+  // del mundo es el censo de hoy y hay que pasarla por poblacionCiudad(). Acá
+  // es lo primero: descontarla otra vez dejaba toda plaza en doscientas almas.
+  const pob = Math.max(0, ((p && p.ciudad && p.ciudad.pob) || 0));
+  if (pob > 0) {
+    const v = Math.round(Math.pow(pob, 0.62) * 3.4);
+    base += v;
+    partes.push({ n: `la ciudad, de ${fmtPob(pob)}`, v });
+  }
+
+  // El terreno. Ya está tabulado para todo lo demás del juego; acá vale igual.
+  const porTerreno = Math.round(base * ((t.def || 1) - 1));
+  if (porTerreno !== 0) {
+    base += porTerreno;
+    partes.push({ n: `el terreno: ${t.n.toLowerCase()}`, v: porTerreno });
+  }
+
+  // La corte se fortifica, y lo que se le tomó al enemigo también: es lo que
+  // el propio mapa ya dibuja con un fuerte.
+  if (p && p.capital) { const v = Math.round(base * 0.5); base += v; partes.push({ n: "es la corte", v }); }
+  else if (p && p.ocupada) { const v = Math.round(base * 0.25); base += v; partes.push({ n: "plaza ocupada y guarnecida", v }); }
+
+  // Y lo que la época sabe de murallas.
+  const muro = murallaDeEpoca(s);
+  const porMuro = Math.round(base * muro.v);
+  if (porMuro) { base += porMuro; partes.push({ n: muro.n, v: porMuro }); }
+
+  return { total: Math.max(1, Math.round(base)), partes };
+}
+
+// Cuánto suma a la defensa lo que la época sabe construir. Una muralla
+// medieval y un baluarte abaluartado no son lo mismo, y un cañón rayado los
+// deja a los dos en nada.
+function murallaDeEpoca(s) {
+  const sab = new Set(((s && s.ciencia && s.ciencia.sabidos) || []));
+  if (sab.has("ingenierias.militar.fortificacion_abaluartada"))
+    return { n: "murallas abaluartadas", v: 0.55 };
+  if (sab.has("ingenierias.militar.fortificacion"))
+    return { n: "murallas de cantería", v: 0.32 };
+  return { n: "una cerca y un foso", v: 0.10 };
+}
+
+// Lo que la hueste trae para derribar ese muro. La artillería y los ingenieros
+// existen para esto, y hasta ahora su papel estaba escrito en la ficha y en
+// ningún otro sitio.
+function zapaDeHueste(h, s) {
+  const a = ((h && h.ramas) || {}).artilleria || 0;
+  const i = ((h && h.ramas) || {}).ingenieros || 0;
+  if (!a && !i) return { v: 0, n: "sin nada con que abrir brecha" };
+  const v = acotar(a * 0.09 + i * 0.07, 0, 0.72);
+  return { v, n: a && i ? "cañones e ingenieros abriendo brecha"
+    : a ? "los cañones abren brecha" : "los ingenieros minan el muro" };
+}
+
+// ——— el asalto ———
+// Se resuelve de una: se entra o no se entra, y se paga.
+function pulsoDeAsalto(h, p, s) {
+  const fuerza = pesoDeHueste(h, s);
+  const d = defensaDe(p, s);
+  const zapa = zapaDeHueste(h, s);
+  // La brecha no suma tropa: quita muro.
+  const defensa = Math.max(1, d.total * (1 - zapa.v));
+  // Al que asalta un muro se le pide bastante más que empatar.
+  const razon = fuerza / (defensa * 1.6);
+  const prob = acotar(razon / (1 + razon), 0.02, 0.95);
+  return { fuerza: Math.round(fuerza), defensa: Math.round(defensa),
+           bruta: d.total, partes: d.partes, zapa, prob };
+}
+
+function asaltar(h, p, s, rnd) {
+  const q = pulsoDeAsalto(h, p, s);
+  const tirada = rnd();
+  const tomada = tirada < q.prob;
+  // El que entra pierde menos que el que rebota, pero nadie asalta gratis.
+  const dureza = acotar(q.defensa / Math.max(1, q.fuerza), 0.1, 3);
+  const parte = acotar((tomada ? 0.12 : 0.28) * dureza, 0.03, 0.62);
+  return { tomada, prob: q.prob, parte, ...q };
+}
+
+// ——— el cerco ———
+// Ni un tiro: se le corta el agua y el pan y se espera. Cuesta tiempo en vez
+// de sangre, y el tiempo también se paga —una hueste sentada se enferma—.
+function aguanteDe(p, s) {
+  const pob = Math.max(1, ((p && p.ciudad && p.ciudad.pob) || 1));   // ya en su época
+  // Una plaza grande tiene más grano guardado, pero también más bocas: aguanta
+  // más que una chica, pero no en proporción.
+  const dias = 25 + Math.pow(pob, 0.45) * 16;
+  const muro = murallaDeEpoca(s);
+  return Math.round(dias * (1 + muro.v * 0.5) * ((p && p.capital) ? 1.4 : 1));
+}
+
 function mantenimientoEjercito(ej) {
   return RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.mant, 0);
 }
