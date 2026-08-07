@@ -6948,14 +6948,12 @@ const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu
 // puede arrastrar antes de tener que rehacer el mapa: cuanto más grande, menos
 // veces se redibuja.
 //
-// Estuvo en 0.1 porque agrandarlo empeoraba las cosas. Y era cierto, pero por
-// un motivo que no era este: el corrimiento se le aplicaba al <svg>, que el
-// navegador no sube a una capa propia, así que rasterizaba el mapa entero en
-// cada cuadro y agrandar el lienzo solo agrandaba ese trabajo. Con el
-// corrimiento en un div —que sí sube— el resultado se da vuelta: con 0.3 el
-// mapa se rehace tres veces en un arrastre largo en vez de siete, y los
-// cuadros lentos bajan del 4,9% al 2%. Más de 0.3 ya no compensa.
-const MARGEN_LIENZO = 0.3;
+// Estuvo en 0.3 un rato y bajaba los cuadros lentos del 4,9% al 2%. Pero con
+// ese valor las ciudades desaparecían del mapa —cero, ni una— y no llegué a
+// dar con el motivo: la región que se consulta se agranda, así que deberían
+// salir más, no menos. Queda en 0.1, que es lo que funciona, y el 0.3 anotado
+// como lo que hay que retomar cuando se entienda ese cero.
+const MARGEN_LIENZO = 0.1;
 // Un valor redondeado a escalones geométricos. Sirve para lo que se recuerda
 // entre cuadros: mientras se acerca el mapa, el ancho de un píxel cambia un
 // pelo en cada cuadro, y con eso solo ya se tiraban a la basura todas las
