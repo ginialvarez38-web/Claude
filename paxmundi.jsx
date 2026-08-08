@@ -7968,8 +7968,16 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     try { a = accidenteEn(mx, my, (v.w / r.w) * 9); } catch (_) { a = null; }
     const mio = a && a.t === "tierra"
       ? mias.find((m) => (a.idx != null && m.idx === a.idx) || m.nombre === a.n) : null;
-    onRueda(mio ? { id: mio.id }
-      : a && a.t === "tierra" ? { ajena: true, nombre: a.n } : null, e.clientX, e.clientY);
+    // Se pasa también el punto del mundo donde se tocó: la tierra ajena no es
+    // una provincia con centro conocido, y sin un punto no hay a dónde marchar.
+    // El nombre que da el accidente es el de la comarca —«Ariège»— y a una
+    // comarca no se le declara la guerra: se le declara a Francia. El país sale
+    // de la geometría del mapa, que ya lo trae.
+    let pais = null;
+    try { const g = provinciaEn(mx, my); pais = g && g.pais; } catch (_) { pais = null; }
+    onRueda(mio ? { id: mio.id, mx, my }
+      : a && a.t === "tierra" ? { ajena: true, nombre: a.n, pais, mx, my } : null,
+      e.clientX, e.clientY);
   }
 
   // ——— las huestes ———
@@ -16064,26 +16072,29 @@ const ACCIONES = [
     puede: (p, s, x) => !p.ajena && !x.hueste && unidadesTotales(ejercitoLibre(s)) > 0,
     hace: (p) => ({ tipo: "desplegar", id: p.id }) },
   { id: "marchar", n: "marchar hasta aquí", ico: "→", col: "cyan",
-    puede: (p, s, x) => !!x.hueste && !p.ajena,
+    puede: (p, s, x) => !!x.hueste && p.x != null,
     rotulo: (p, s, x) => {
       const d = x.hueste ? diasDeMarcha({ ...x.hueste, destino: { x: p.x, y: p.y } }, s.provincias) : 0;
       return Number.isFinite(d) ? `marchar hasta aquí · ${d} días` : "marchar hasta aquí";
     },
-    hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id }) },
+    hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id, x: p.x, y: p.y,
+      nombre: p.comarca || p.nombre }) },
   // Se cerca y se asalta lo que no es tuyo: tierra ajena, o una plaza propia
   // que el enemigo te tomó. Sitiar tu propia comarca leal no es una orden, es
   // un disparate, y la rueda no ofrece disparates.
   { id: "cercar", n: "cercarla", ico: "◍", col: "gold",
-    puede: (p, s, x) => !!x.hueste && (p.ajena || p.ocupada),
+    puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
     rotulo: (p, s) => `cercarla · aguanta ${aguanteDe(p, s)} días`,
-    hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id }) },
+    hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id, x: p.x, y: p.y,
+      nombre: p.comarca || p.nombre }) },
   { id: "asaltar", n: "asaltarla", ico: "⚔", col: "red",
-    puede: (p, s, x) => !!x.hueste && (p.ajena || p.ocupada),
+    puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
     rotulo: (p, s, x) => {
       const q = pulsoDeAsalto(x.hueste, p, s);
       return `asaltarla · ${Math.round(q.prob * 100)} de cada 100`;
     },
-    hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id }) },
+    hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id, x: p.x, y: p.y,
+      nombre: p.comarca || p.nombre }) },
   { id: "ficha", n: "ver la comarca", ico: "◈", col: "gold",
     puede: (p, s, x) => !p.ajena && x.seleccion !== p.id,
     hace: (p) => ({ tipo: "ver", id: p.id }) },
@@ -16127,6 +16138,29 @@ const ACCIONES = [
     puede: (p, s, x) => !!p.ajena && (x.vecino || null) != null,
     rotulo: (p, s, x) => `tratar con ${x.vecino}`,
     hace: () => ({ tipo: "ir", mando: "gob" }) },
+  // Declararle la guerra a un vecino estaba enterrado en un panel, y el vecino
+  // se ve en el mapa: acá es donde uno lo mira cuando lo piensa. Va con el
+  // pulso de fuerzas puesto en el rótulo, para que no sea un salto al vacío.
+  { id: "guerra", n: "declararle la guerra", ico: "⚔", col: "red",
+    // No se exige que el país esté en la lista de vecinos, y ese era el nudo:
+    // los vecinos del juego —Aragón, Navarra— no son los países que se ven en
+    // el mapa —Francia, Marruecos—, así que al tocar el mapa no había con
+    // quién casarlo y la opción no salía nunca. Ahora se le declara la guerra
+    // a lo que se ve, y si no estaba en la lista, entra.
+    puede: (p, s, x) => !!p.ajena && !s.guerra
+      && ((s.vecinos || []).find((v) => v.nombre === (x.vecino || p.nombre)) || {}).estado !== "guerra",
+    rotulo: (p, s, x) => {
+      const quien = x.vecino || p.nombre;
+      const v = (s.vecinos || []).find((q) => q.nombre === quien);
+      let como = "";
+      try {
+        const pm = poderMilitar(s.stats, s.ciencia, s.poblacion, s.presupuesto, s.ejercito).total;
+        const pv = poderVecino(v, s.anio);
+        como = pm > pv * 1.25 ? " · los superás" : pm > pv * 0.8 ? " · parejo" : " · te superan";
+      } catch (_) { como = ""; }
+      return `declararle la guerra a ${quien}${como}`;
+    },
+    hace: (p, s, x) => ({ tipo: "guerra", vecino: x.vecino || p.nombre }) },
 ];
 const ACCION_IDX = Object.fromEntries(ACCIONES.map((a) => [a.id, a]));
 const TOPE_RUEDA = 7;   // más de siete y ya es una lista, que es lo que se venía a evitar
@@ -16799,6 +16833,14 @@ export default function PaxMundi() {
   function declararGuerra(nombre) {
     setState((st) => {
       if (st.guerra) return st;
+      // Si el país no estaba en la lista de vecinos —porque se lo eligió en el
+      // mapa y no en el panel— entra ahora: el resto del juego cuenta con que
+      // el enemigo esté ahí para saber su poder y su humor.
+      const vecinos = (st.vecinos || []).some((v) => v.nombre === nombre)
+        ? st.vecinos
+        : [...(st.vecinos || []),
+           { nombre, poder: 5, estado: "paz", relacion: -20, impulso: 0 }];
+      st = { ...st, vecinos };
       return {
         ...st, guerra: { vecino: nombre, desde: st.anio, frente: 0, agotaProp: 0, agotaEnem: 0 },
         vecinos: (st.vecinos || []).map((v) => v.nombre === nombre ? { ...v, estado: "guerra", relacion: -55 } : v),
@@ -18176,7 +18218,15 @@ export default function PaxMundi() {
       : null };
   const objRueda = !rueda ? null
     : rueda.id ? (s.provincias || []).find((p) => p.id === rueda.id) || null
-    : rueda.ajena ? { ajena: true, nombre: PAIS_ES[rueda.nombre] || rueda.nombre } : null;
+    // Con el punto del mapa donde se hizo clic: sin coordenadas una hueste no
+    // tiene a dónde marchar, y atacar al vecino era imposible desde el mapa.
+    : rueda.ajena ? { ajena: true,
+                      // El nombre para la guerra es el del país; el de la
+                      // comarca queda aparte, para decir dónde se marcha.
+                      nombre: PAIS_ES[rueda.pais] || rueda.pais
+                        || PAIS_ES[rueda.nombre] || rueda.nombre,
+                      comarca: PAIS_ES[rueda.nombre] || rueda.nombre,
+                      id: "ajena:" + rueda.nombre, x: rueda.mx, y: rueda.my } : null;
   const accRueda = objRueda ? accionesDe(objRueda, s, ctxRueda) : [];
   provSelRef.current = provSel;
   abrirRuedaRef.current = abrirRueda;
@@ -18196,6 +18246,7 @@ export default function PaxMundi() {
     if (pedido.tipo === "comparar") { alComparar(pedido.id); return; }
     if (pedido.tipo === "vista") { setProvSel(pedido.id); setVistaPedida({ id: pedido.vista, k: Date.now() }); return; }
     if (pedido.tipo === "sitio") { setProvSel(pedido.id); setSitio(pedido.obra); setTab(null); return; }
+    if (pedido.tipo === "guerra") { declararGuerra(pedido.vecino); return; }
     if (pedido.tipo === "desplegar") {
       setState((st) => {
         const p = (st.provincias || []).find((q) => q.id === pedido.id);
@@ -18211,7 +18262,12 @@ export default function PaxMundi() {
     }
     if (pedido.tipo === "campana") {
       setState((st) => {
-        const p = (st.provincias || []).find((q) => q.id === pedido.id);
+        // El destino puede ser una comarca propia o tierra ajena. La segunda no
+        // está en la lista de provincias —es del vecino— así que viene con sus
+        // coordenadas puestas y se la trata como una plaza más.
+        const p = (st.provincias || []).find((q) => q.id === pedido.id)
+          || (pedido.x != null ? { id: pedido.id, nombre: pedido.nombre, x: pedido.x, y: pedido.y,
+                                   ajena: true, terreno: "llanura", poblacion: 25000 } : null);
         if (!p) return st;
         return { ...st, huestes: (st.huestes || []).map((h) => {
           if (h.id !== huesteSel) return h;
@@ -20733,6 +20789,131 @@ export default function PaxMundi() {
                     </div>
                   )}
                 </div>
+
+                {/* ── la campaña ──────────────────────────────────────
+                    Dónde está cada hueste, qué está haciendo y cuánto le
+                    falta. Antes esto solo se veía en el mapa y había que
+                    saber buscarlo; acá está la lista, y desde la lista se
+                    llega al mapa, que es el orden natural: primero saber qué
+                    tengo, después dónde. */}
+                {(() => {
+                  const libres = ejercitoLibre(s);
+                  const nLibres = unidadesTotales(libres);
+                  const hs = s.huestes || [];
+                  const capital = (s.provincias || []).find((p) => p.capital) || (s.provincias || [])[0];
+                  const verEnMapa = (h) => {
+                    setHuesteSel(h.id);
+                    setMira({ x: h.x, y: h.y, w: 12, k: (mira ? mira.k : 0) + 1 });
+                    setTab(null);
+                  };
+                  return (
+                    <div style={{ padding: "11px 12px", marginBottom: 13, borderRadius: 8,
+                      background: `${C.gold}0C`, border: `1px solid ${C.gold}44` }}>
+                      <div style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4,
+                        color: C.gold, marginBottom: 8 }}>⚑ CAMPAÑA</div>
+
+                      {nLibres > 0 && capital && (
+                        <button onClick={() => {
+                            setState((st) => {
+                              const lib = ejercitoLibre(st);
+                              if (unidadesTotales(lib) <= 0) return st;
+                              const id = "hu" + ((st.huestes || []).length + 1) + "-" + st.turno;
+                              return { ...st, huestes: [...(st.huestes || []),
+                                huesteNueva(id, lib, capital.x, capital.y, `hueste de ${capital.nombre}`)],
+                                cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                  texto: `Se ponen en pie de guerra ${unidadesTotales(lib)} unidades en ${capital.nombre}.` }] };
+                            });
+                            // Se despliega y se va a verlo: desplegar sin ver
+                            // dónde quedó es la mitad de la orden.
+                            setMira({ x: capital.x, y: capital.y, w: 12, k: (mira ? mira.k : 0) + 1 });
+                            setTab(null);
+                          }}
+                          style={{ width: "100%", padding: "9px 11px", marginBottom: 9, borderRadius: 7,
+                            background: `${C.gold}1E`, border: `1px solid ${C.gold}`, color: C.gold,
+                            fontFamily: mono, fontSize: 12, cursor: "pointer", textAlign: "left" }}>
+                          ⚑ poner en pie de guerra {nLibres} {nLibres === 1 ? "unidad" : "unidades"}
+                          <span style={{ float: "right", color: C.muted }}>en {capital.nombre}</span>
+                        </button>
+                      )}
+
+                      {hs.length === 0 && (
+                        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
+                          No tenés ninguna hueste en el mapa. Poné tropas en pie de guerra y van a
+                          aparecer como un escudo: se las toca y se les ordena marchar, cercar o asaltar.
+                        </div>
+                      )}
+
+                      {hs.map((h) => {
+                        const donde = provinciaMasCerca(s.provincias, h.x, h.y);
+                        const o = ORDENES[h.orden] || null;
+                        const dias = h.destino ? diasDeMarcha(h, s.provincias) : 0;
+                        const sel = huesteSel === h.id;
+                        const largo = h.largo || 0;
+                        const hecho = largo > 0 ? acotar((h.recorrido || 0) / largo, 0, 1) : 0;
+                        return (
+                          <div key={h.id} className="pm-card"
+                            style={{ padding: "9px 10px", marginBottom: 7, borderRadius: 7,
+                              background: sel ? `${C.gold}14` : C.panel,
+                              border: `1px solid ${sel ? C.gold : C.line}` }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                              <span style={{ color: C.ink, fontSize: 13 }}>{h.nombre}</span>
+                              <span style={{ fontFamily: mono, fontSize: 11, color: C.muted }}>
+                                {unidadesTotales(h.ramas)} ud · moral {Math.round(h.moral || 100)}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3, lineHeight: 1.5 }}>
+                              {donde ? `cerca de ${donde.nombre}` : "en marcha"}
+                              {o ? ` · ${o.ico} ${o.dice}` : " · sin órdenes"}
+                              {h.orden === "cercar" && h.aguante
+                                ? `: ${Math.round(h.cerco || 0)} de ${Math.round(h.aguante)} días`
+                                : h.destino && Number.isFinite(dias) ? `, ${dias} días más` : ""}
+                            </div>
+                            {largo > 0 && (
+                              <div style={{ height: 4, marginTop: 6, borderRadius: 2,
+                                background: "rgba(0,0,0,0.35)", overflow: "hidden" }}>
+                                <div style={{ width: `${Math.round(hecho * 100)}%`, height: "100%",
+                                  background: C.gold }} />
+                              </div>
+                            )}
+                            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                              <button onClick={() => verEnMapa(h)}
+                                style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+                                  background: "transparent", border: `1px solid ${C.brass}66`,
+                                  color: C.gold, fontFamily: mono, fontSize: 10.5 }}>
+                                ◎ verla en el mapa
+                              </button>
+                              {h.orden && (
+                                <button onClick={() => setState((st) => ({ ...st,
+                                    huestes: (st.huestes || []).map((q) => (q.id === h.id
+                                      ? { ...q, orden: null, destino: null, objetivo: null,
+                                          cerco: 0, aguante: 0, largo: 0, recorrido: 0 } : q)) }))}
+                                  style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+                                    background: "transparent", border: `1px solid ${C.line}`,
+                                    color: C.muted, fontFamily: mono, fontSize: 10.5 }}>
+                                  ✕ cancelar la orden
+                                </button>
+                              )}
+                              <button onClick={() => setState((st) => ({ ...st,
+                                  huestes: (st.huestes || []).filter((q) => q.id !== h.id) }))}
+                                title="vuelve al conteo del reino"
+                                style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+                                  background: "transparent", border: `1px solid ${C.line}`,
+                                  color: C.muted, fontFamily: mono, fontSize: 10.5 }}>
+                                ⌂ licenciarla a casa
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.55 }}>
+                        Las órdenes se dan en el mapa: se toca el escudo y después se hace clic
+                        derecho —o se pulsa <b>M</b>— sobre la comarca. Marchar, cercar o asaltar,
+                        y cada una dice de antemano lo que cuesta.
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* ── de dónde salen los hombres ── */}
                 {brz && (
