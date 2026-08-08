@@ -6971,7 +6971,7 @@ const escalon = (v, paso) => {
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda, huestes, huesteSel, onHueste }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -7971,6 +7971,74 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     onRueda(mio ? { id: mio.id }
       : a && a.t === "tierra" ? { ajena: true, nombre: a.n } : null, e.clientX, e.clientY);
   }
+
+  // ——— las huestes ———
+  //
+  // Una hueste es un escudo con su rama y su número. Si va camino a algún
+  // sitio, se dibuja la línea del viaje entera y encima lo andado, más grueso:
+  // el avance se ve de un vistazo, sin abrir nada. Si está cercando una plaza,
+  // un anillo de trazos alrededor, que es lo que un cerco es.
+  const capaHuestes = useMemo(() => {
+    const hs = (huestes || []).filter((h) => h && h.x != null);
+    if (!hs.length) return null;
+    const r = pxCapa * 7;
+    return (
+      <g>
+        {hs.map((h) => {
+          const d = h.destino;
+          const largo = h.largo || (d ? leguas({ x: h.x, y: h.y }, d) : 0);
+          const hecho = acotar((h.recorrido || 0) / (largo || 1), 0, 1);
+          const rama = RAMAS_EJERCITO.find((x) => (h.ramas || {})[x.id] > 0) || RAMAS_EJERCITO[0];
+          const sel = huesteSel === h.id;
+          return (
+            <g key={"hu" + h.id}>
+              {d && (
+                <g pointerEvents="none">
+                  {/* lo que falta, tenue; lo andado, encima y firme */}
+                  <line x1={h.x} y1={h.y} x2={d.x} y2={d.y} stroke={rama.col}
+                    strokeWidth={pxCapa * 1.1} strokeDasharray={`${pxCapa * 3} ${pxCapa * 3}`} opacity="0.45" />
+                  <circle cx={d.x} cy={d.y} r={pxCapa * 2.4} fill="none"
+                    stroke={rama.col} strokeWidth={pxCapa * 1.1} opacity="0.7" />
+                </g>
+              )}
+              {h.orden === "cercar" && (
+                <circle cx={h.x} cy={h.y} r={r * 1.9} fill="none" stroke="#E8B04B"
+                  strokeWidth={pxCapa * 1.6} strokeDasharray={`${pxCapa * 2.4} ${pxCapa * 2.4}`}
+                  opacity="0.85" pointerEvents="none">
+                  <title>{`cercando: ${Math.round(h.cerco || 0)} de ${Math.round(h.aguante || 0)} días`}</title>
+                </circle>
+              )}
+              {/* el escudo */}
+              <path d={`M${h.x - r},${h.y - r} L${h.x + r},${h.y - r} L${h.x + r},${h.y + r * 0.35} `
+                + `Q${h.x},${h.y + r * 1.5} ${h.x - r},${h.y + r * 0.35} Z`}
+                fill={sel ? rama.col : "rgba(12,18,26,0.88)"} stroke={rama.col}
+                strokeWidth={pxCapa * (sel ? 2.2 : 1.4)}
+                pointerEvents="all" style={{ cursor: "pointer" }}
+                aria-label={"hueste " + h.nombre}
+                onClick={(e) => { e.stopPropagation(); if (!movido.current && onHueste) onHueste(h.id); }}>
+                <title>{`${h.nombre}: ${unidadesTotales(h.ramas)} unidades`}</title>
+              </path>
+              <text x={h.x} y={h.y + r * 0.28} textAnchor="middle" fontSize={r * 1.1}
+                fill={sel ? "#0A0F17" : rama.col} pointerEvents="none"
+                style={{ fontFamily: "monospace", fontWeight: 700 }}>
+                {unidadesTotales(h.ramas)}
+              </text>
+              {/* cuánto lleva andado, en una barra bajo el escudo */}
+              {d && largo > 0 && (
+                <g pointerEvents="none">
+                  <rect x={h.x - r} y={h.y + r * 1.7} width={r * 2} height={pxCapa * 1.6}
+                    fill="rgba(0,0,0,0.55)" rx={pxCapa * 0.8} />
+                  <rect x={h.x - r} y={h.y + r * 1.7} width={r * 2 * hecho} height={pxCapa * 1.6}
+                    fill={rama.col} rx={pxCapa * 0.8} />
+                </g>
+              )}
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [huestes, huesteSel, pxCapa, onHueste]);
+
   const enComparacion = new Set(comparadas || []);
   const entrar = (id) => (e) => { if (e.pointerType !== "touch" && !arrastre.current) setHover(id); };
   const salir = () => setHover(null);
@@ -8229,6 +8297,11 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
             ))}
           </g>
         )}
+
+        {/* Las huestes van al final y no con las demás capas: las zonas sensibles
+            de las provincias se dibujan después, y si el escudo queda debajo se
+            comen el toque. Un ejército tiene que poder tocarse siempre. */}
+        {capaHuestes}
 
         <rect x={vb.x} y={vb.y} width={vb.w} height={vb.h} fill={`url(#${uid}Vinieta)`} style={{ pointerEvents: "none" }} />
       </svg>
@@ -9356,10 +9429,20 @@ function defensaDe(p, s) {
 
   // El tamaño de la ciudad. Una plaza grande tiene más brazos que la defiendan
   // y más muro que cubrir; lo primero pesa más.
+  // Lo que se defiende es la plaza de la provincia: la gente que vive ahí es
+  // la que sube al muro. Si además hay ciudad —que aparece con los turnos, no
+  // desde el primer día— se suma aparte, porque una ciudad amurallada no es lo
+  // mismo que un puñado de aldeas con la misma gente.
+  //
   // Ojo con la unidad: la ciudad de una provincia ya está en su época —sale de
   // la gente que vive ahí ahora—, mientras que la pob de las ciudades del mapa
-  // del mundo es el censo de hoy y hay que pasarla por poblacionCiudad(). Acá
-  // es lo primero: descontarla otra vez dejaba toda plaza en doscientas almas.
+  // del mundo es el censo de hoy y hay que pasarla por poblacionCiudad().
+  const gente = Math.max(0, (p && p.poblacion) || 0) / 1000;   // a miles
+  if (gente > 0) {
+    const v = Math.round(Math.pow(gente, 0.55) * 2.6);
+    base += v;
+    partes.push({ n: `la gente de la comarca, ${fmtPob(gente)}`, v });
+  }
   const pob = Math.max(0, ((p && p.ciudad && p.ciudad.pob) || 0));
   if (pob > 0) {
     const v = Math.round(Math.pow(pob, 0.62) * 3.4);
@@ -9440,12 +9523,140 @@ function asaltar(h, p, s, rnd) {
 // Ni un tiro: se le corta el agua y el pan y se espera. Cuesta tiempo en vez
 // de sangre, y el tiempo también se paga —una hueste sentada se enferma—.
 function aguanteDe(p, s) {
-  const pob = Math.max(1, ((p && p.ciudad && p.ciudad.pob) || 1));   // ya en su época
+  // Una plaza sin ciudad también se cerca: lo que aguanta es su gente y su
+  // grano. La ciudad, si la hay, aguanta bastante más.
+  const pob = Math.max(1, ((p && p.ciudad && p.ciudad.pob) || 0)
+    + Math.max(0, (p && p.poblacion) || 0) / 4000);
   // Una plaza grande tiene más grano guardado, pero también más bocas: aguanta
   // más que una chica, pero no en proporción.
   const dias = 25 + Math.pow(pob, 0.45) * 16;
   const muro = murallaDeEpoca(s);
   return Math.round(dias * (1 + muro.v * 0.5) * ((p && p.capital) ? 1.4 : 1));
+}
+
+// ——— las huestes en el estado ———
+//
+// Una hueste sale del ejército del reino: lo que se despliega deja de estar en
+// el conteo abstracto y pasa a estar en un sitio. No es contabilidad doble, es
+// la misma tropa mirada de otra manera, y por eso desplegar no crea nada.
+const ORDENES = {
+  marchar: { n: "marchar", ico: "→", dice: "camino a" },
+  cercar:  { n: "cercar",  ico: "◍", dice: "sitiando" },
+  asaltar: { n: "asaltar", ico: "⚔", dice: "asaltando" },
+};
+
+function huesteNueva(id, ramas, x, y, nombre) {
+  return { id, nombre: nombre || "hueste", ramas: { ...ramas }, x, y,
+           orden: null, destino: null, objetivo: null, moral: 100,
+           recorrido: 0, largo: 0, cerco: 0, aguante: 0 };
+}
+
+// Lo que queda del ejército del reino después de sacar lo desplegado: sirve
+// para no poder desplegar dos veces la misma tropa.
+function ejercitoLibre(s) {
+  const libre = { ...((s && s.ejercito) || {}) };
+  for (const h of (s && s.huestes) || [])
+    for (const [r, n] of Object.entries(h.ramas || {})) libre[r] = Math.max(0, (libre[r] || 0) - n);
+  return libre;
+}
+
+// ——— el avance ———
+//
+// Cada turno la hueste camina lo que dan sus kilómetros por día. Se guarda
+// cuánto lleva recorrido del total, y de ahí sale sola la barra que el mapa
+// enseña: el avance se ve, no se adivina.
+function avanzarHueste(h, dias, provs, s) {
+  if (!h || !h.destino || h.orden === "cercar") return h;
+  const d = h.destino;
+  const total = h.largo || leguas({ x: h.x, y: h.y }, d) || 1;
+  // Por dónde va: la provincia bajo sus pies manda el terreno y el camino.
+  const bajo = provinciaMasCerca(provs, h.x, h.y);
+  const v = velocidadHueste(h, bajo);
+  if (v <= 0) return h;
+  const anda = v * Math.max(0, dias);
+  const falta = leguas({ x: h.x, y: h.y }, d);
+  if (anda >= falta) {
+    // Llegó. La orden que traía se activa acá, no antes.
+    return { ...h, x: d.x, y: d.y, recorrido: total, llegada: true };
+  }
+  const k = anda / falta;
+  return { ...h, x: h.x + (d.x - h.x) * k, y: h.y + (d.y - h.y) * k,
+           recorrido: (h.recorrido || 0) + anda, largo: total, llegada: false };
+}
+
+const provinciaMasCerca = (provs, x, y) => {
+  let mejor = null, dm = Infinity;
+  for (const p of provs || []) {
+    if (p.x == null) continue;
+    const d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+    if (d < dm) { dm = d; mejor = p; }
+  }
+  return mejor;
+};
+
+// Cuántos días faltan para llegar, con lo que se sabe hoy del camino. Es una
+// estimación honesta: si la hueste entra en montaña tardará más, y lo dirá
+// cuando llegue el momento.
+function diasDeMarcha(h, provs) {
+  if (!h || !h.destino) return 0;
+  const bajo = provinciaMasCerca(provs, h.x, h.y);
+  const v = velocidadHueste(h, bajo);
+  if (v <= 0) return Infinity;
+  return Math.ceil(leguas({ x: h.x, y: h.y }, h.destino) / v);
+}
+
+// ——— el turno de la campaña ———
+//
+// Se resuelve todo lo que las huestes tenían empezado: las que marchan
+// avanzan, las que llegaron ejecutan su orden, las que cercan aprietan.
+// Devuelve las huestes nuevas, las provincias que cambiaron de mano y qué
+// contar en la crónica.
+function correrCampana(s, dias, rnd) {
+  const provs = (s && s.provincias) || [];
+  const hechos = [];
+  const tomadas = [];
+  const huestes = [];
+  for (let h of (s && s.huestes) || []) {
+    const antes = { x: h.x, y: h.y };
+    h = avanzarHueste(h, dias, provs, s);
+    const obj = h.objetivo ? provs.find((p) => p.id === h.objetivo) : null;
+
+    if (h.orden === "cercar" && obj) {
+      const aguante = h.aguante || aguanteDe(obj, s);
+      const cerco = (h.cerco || 0) + dias;
+      if (cerco >= aguante) {
+        tomadas.push(obj.id);
+        hechos.push(`${obj.nombre} se rinde tras ${Math.round(cerco)} días de cerco: se acabó el pan antes que la voluntad.`);
+        h = { ...h, orden: null, objetivo: null, cerco: 0, aguante: 0 };
+      } else {
+        // Sentarse delante de una plaza también cuesta: la enfermedad se lleva
+        // más sitiadores que el muro.
+        h = { ...h, cerco, aguante, moral: acotar((h.moral || 100) - dias * 0.05, 30, 100) };
+      }
+    } else if (h.llegada && h.orden === "asaltar" && obj) {
+      const r = asaltar(h, obj, s, rnd);
+      const ramas = { ...h.ramas };
+      for (const k of Object.keys(ramas)) ramas[k] = Math.max(0, Math.round(ramas[k] * (1 - r.parte)));
+      if (r.tomada) {
+        tomadas.push(obj.id);
+        hechos.push(`${obj.nombre} cae por asalto. ${Math.round(r.parte * 100)} de cada cien no volvieron.`);
+      } else {
+        hechos.push(`El asalto a ${obj.nombre} se estrella contra el muro: ${Math.round(r.parte * 100)} de cada cien quedaron al pie.`);
+      }
+      h = { ...h, ramas, orden: null, objetivo: r.tomada ? null : h.objetivo,
+            moral: acotar((h.moral || 100) - (r.tomada ? 4 : 22), 20, 100) };
+    } else if (h.llegada && h.orden === "marchar") {
+      hechos.push(`La ${h.nombre} llega a su destino.`);
+      h = { ...h, orden: null, destino: null };
+    }
+    // Lo andado de verdad, para que el mapa lo enseñe.
+    h = { ...h, ultimo: leguas(antes, { x: h.x, y: h.y }) };
+    huestes.push(h);
+  }
+  const nuevas = tomadas.length
+    ? provs.map((p) => (tomadas.includes(p.id) ? { ...p, ocupada: false, mia: true } : p))
+    : provs;
+  return { huestes, provincias: nuevas, hechos, tomadas };
 }
 
 function mantenimientoEjercito(ej) {
@@ -15845,6 +16056,34 @@ function mudarCapital(s, id) {
 // cuenta: devuelve lo que hay que hacer, y quien lo pidió decide si abre un
 // panel, pinta el mapa o cambia el reino.
 const ACCIONES = [
+  // ——— la campaña ———
+  // Aparecen solo con una hueste elegida: sin ejército en el mapa no hay nada
+  // que ordenar, y un menú lleno de cosas que no se pueden hacer es peor que
+  // uno corto.
+  { id: "desplegar", n: "desplegar tropas aquí", ico: "⚑", col: "red",
+    puede: (p, s, x) => !p.ajena && !x.hueste && unidadesTotales(ejercitoLibre(s)) > 0,
+    hace: (p) => ({ tipo: "desplegar", id: p.id }) },
+  { id: "marchar", n: "marchar hasta aquí", ico: "→", col: "cyan",
+    puede: (p, s, x) => !!x.hueste && !p.ajena,
+    rotulo: (p, s, x) => {
+      const d = x.hueste ? diasDeMarcha({ ...x.hueste, destino: { x: p.x, y: p.y } }, s.provincias) : 0;
+      return Number.isFinite(d) ? `marchar hasta aquí · ${d} días` : "marchar hasta aquí";
+    },
+    hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id }) },
+  // Se cerca y se asalta lo que no es tuyo: tierra ajena, o una plaza propia
+  // que el enemigo te tomó. Sitiar tu propia comarca leal no es una orden, es
+  // un disparate, y la rueda no ofrece disparates.
+  { id: "cercar", n: "cercarla", ico: "◍", col: "gold",
+    puede: (p, s, x) => !!x.hueste && (p.ajena || p.ocupada),
+    rotulo: (p, s) => `cercarla · aguanta ${aguanteDe(p, s)} días`,
+    hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id }) },
+  { id: "asaltar", n: "asaltarla", ico: "⚔", col: "red",
+    puede: (p, s, x) => !!x.hueste && (p.ajena || p.ocupada),
+    rotulo: (p, s, x) => {
+      const q = pulsoDeAsalto(x.hueste, p, s);
+      return `asaltarla · ${Math.round(q.prob * 100)} de cada 100`;
+    },
+    hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id }) },
   { id: "ficha", n: "ver la comarca", ico: "◈", col: "gold",
     puede: (p, s, x) => !p.ajena && x.seleccion !== p.id,
     hace: (p) => ({ tipo: "ver", id: p.id }) },
@@ -16125,6 +16364,9 @@ export default function PaxMundi() {
   const [avisoGuardar, setAvisoGuardar] = useState(null);
   const [ranuras, setRanuras] = useState([]);
   const [panelPartida, setPanelPartida] = useState(false);
+  // Qué hueste tiene la palabra. Sin una elegida, la rueda no ofrece marchar
+  // ni asaltar: no habría con qué.
+  const [huesteSel, setHuesteSel] = useState(null);
   // Dónde se puede guardar en este navegador. Se averigua una sola vez, y se
   // averigua escribiendo: preguntar no alcanza.
   const donde = useMemo(() => dondeSeGuarda(), []);
@@ -17581,20 +17823,32 @@ export default function PaxMundi() {
         acum, maduros, anomalias, crisis: crisisNuevas, bloqueados: bloqueadosNuevos,
         problemas: problemasNuevos, pi: ci.pi };
 
+      // La campaña se resuelve antes que el resto del turno: lo que una hueste
+      // tomó estos días ya es tuyo cuando se hacen las cuentas de la cosecha y
+      // del tesoro. Y lo que hizo se cuenta en la crónica como todo lo demás.
+      const camp = correrCampana({ ...state, provincias: provs }, lapso,
+        dado(semillaTurno + "|campana"));
+      const provs2 = camp.provincias;
+
       const entradas = [{ anio: anioNuevo, dia: diaNuevo, tipo: "narrativa",
         tramo: `${fmtFecha(state.anio, state.dia)} → ${fmtFecha(anioNuevo, diaNuevo)}`, texto: r.narrativa }];
       if (r.eventoMundial) entradas.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo", texto: r.eventoMundial });
+      for (const t of camp.hechos)
+        entradas.push({ anio: anioNuevo, dia: diaNuevo, tipo: "guerra", texto: t });
       let finLocal = r.fin || null;
       if (!finLocal && nuevosStats.estabilidad <= 0)
         finLocal = { tipo: "derrota", razon: "El colapso interno disolvió tu gobierno." };
+      // La campaña se resuelve antes que nada: lo que las huestes tomaron este
+      // turno ya es tuyo cuando el resto del turno hace sus cuentas.
       setState((s) => correrSecretarios(aplicarEfectos({
         ...s,
+        huestes: camp.huestes,
         anio: anioNuevo, dia: diaNuevo,
         turno: s.turno + 1,
         dia: diaNuevo,
         presupuesto: P,
         poblacion: Math.round(poblacionTotal(provs)),
-        provincias: provs,
+        provincias: provs2,
         reservaGrano: Math.round(reservaNueva),
         soberano: sobNuevo,
         generales: generalesVivos,
@@ -17912,7 +18166,9 @@ export default function PaxMundi() {
   // Sobre qué se abrió, qué se puede hacer con ello y qué pasa al elegir. Todo
   // lo que la rueda ofrece existe en otro sitio: lo único que ahorra es el
   // viaje hasta ese otro sitio.
+  const laHueste = (s.huestes || []).find((h) => h.id === huesteSel) || null;
   const ctxRueda = { oro: Math.floor((s.edu || {}).oro || 0), comparadas, seleccion: provSel,
+    hueste: laHueste, provincias: s.provincias,
     vecino: rueda && rueda.ajena
       ? ((s.vecinos || []).find((v) => v.nombre === rueda.nombre
           || v.nombre === PAIS_ES[rueda.nombre] || PAIS_ES[v.nombre] === rueda.nombre) || {}).nombre
@@ -17940,6 +18196,38 @@ export default function PaxMundi() {
     if (pedido.tipo === "comparar") { alComparar(pedido.id); return; }
     if (pedido.tipo === "vista") { setProvSel(pedido.id); setVistaPedida({ id: pedido.vista, k: Date.now() }); return; }
     if (pedido.tipo === "sitio") { setProvSel(pedido.id); setSitio(pedido.obra); setTab(null); return; }
+    if (pedido.tipo === "desplegar") {
+      setState((st) => {
+        const p = (st.provincias || []).find((q) => q.id === pedido.id);
+        const libre = ejercitoLibre(st);
+        if (!p || unidadesTotales(libre) <= 0) return st;
+        const id = "hu" + ((st.huestes || []).length + 1) + "-" + st.turno;
+        const h = huesteNueva(id, libre, p.x, p.y, `hueste de ${p.nombre}`);
+        return { ...st, huestes: [...(st.huestes || []), h],
+          cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+            texto: `Se despliegan ${unidadesTotales(libre)} unidades en ${p.nombre}.` }] };
+      });
+      return;
+    }
+    if (pedido.tipo === "campana") {
+      setState((st) => {
+        const p = (st.provincias || []).find((q) => q.id === pedido.id);
+        if (!p) return st;
+        return { ...st, huestes: (st.huestes || []).map((h) => {
+          if (h.id !== huesteSel) return h;
+          const destino = { x: p.x, y: p.y };
+          const enSitio = leguas({ x: h.x, y: h.y }, destino) < 12;
+          return { ...h, orden: pedido.orden, objetivo: pedido.id,
+            // Cercar y asaltar se hacen estando ahí: si no lo está, primero va.
+            destino: enSitio ? null : destino,
+            largo: enSitio ? 0 : leguas({ x: h.x, y: h.y }, destino),
+            recorrido: 0, llegada: enSitio,
+            cerco: pedido.orden === "cercar" ? (h.cerco || 0) : 0,
+            aguante: pedido.orden === "cercar" ? aguanteDe(p, st) : 0 };
+        }) };
+      });
+      return;
+    }
     if (pedido.tipo === "obra") {
       setState((st) => {
         const r = pedido.obra === "camino" ? abrirCamino(st, pedido.id) : mudarCapital(st, pedido.id);
@@ -18002,6 +18290,9 @@ export default function PaxMundi() {
           comparadas={comparadas}
           onComparar={alComparar}
           onRueda={abrirRueda}
+          huestes={s.huestes}
+          huesteSel={huesteSel}
+          onHueste={(id) => setHuesteSel((v) => (v === id ? null : id))}
           sitio={sitioMapa}
           margenSup={altoCab}
           /* Con el panel hecho hoja, la ficha de la comarca tiene que quedar
