@@ -116,6 +116,28 @@ manda al levantar el dedo caía sobre el fondo de la rueda recién abierta y la
 cerraba antes de que se viera. El juego estaba entero y no era jugable en un
 teléfono, que es donde se juega.
 
+## Un banco de pruebas para la conquista
+
+`conquista.html` es un archivo aparte, y es solo eso: los Pirineos de verdad
+—72 comarcas con su contorno y su terreno, sacadas del mapa del juego— y un
+ejército que las va tomando. Sin economía, sin turnos, sin nada más. Se abre a
+mano igual que el juego.
+
+Sirve para decidir cómo se ve la conquista antes de meterla en el juego, que
+es donde una cosa así se pierde entre todo lo demás. Trae los dos dibujos uno
+al lado del otro —**palmo a palmo**, la comarca partida en cuadros que van
+cambiando de dueño, y **mancha suave**, un disco que crece— y los mandos para
+mirar de cerca, cambiar el tamaño del palmo, lo irregular del frente y el
+tamaño del ejército.
+
+También sirve para probar la pregunta de fondo: si el ejército **ocupa lo que
+pisa** —cruzar la frontera ya empieza a teñir la comarca donde está parado— o
+si **solo hace lo que se le manda**. Se cambia con un botón y se ve la
+diferencia enseguida.
+
+Lo que ahí se decida es lo que después va al juego. Las reglas están copiadas
+a mano en el propio archivo para que se abra solo, sin nada al lado.
+
 ## Conquistar se ve en el mapa
 
 Una comarca no cambia de dueño de golpe. El ejército entra por un lado y va

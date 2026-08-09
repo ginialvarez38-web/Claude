@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Pax Mundi · cómo se conquista una comarca</title>
+<style>
+  :root {
+    --tinta: #E8DCC0; --apagado: #8A8371; --oro: #D4AF37; --raya: #2A3038;
+    --fondo: #0A0F17; --panel: #101822; --rojo: #D9534F; --cian: #6FB3C9;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--fondo); color: var(--tinta);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overscroll-behavior: none; }
+  #todo { display: flex; height: 100%; flex-direction: row; }
+  #lienzo { flex: 1; position: relative; touch-action: none; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #lado { width: 310px; flex: none; background: var(--panel); border-left: 1px solid var(--raya);
+    padding: 13px; overflow-y: auto; }
+  h1 { font-size: 14px; margin: 0 0 3px; font-family: Georgia, serif; color: var(--oro);
+    letter-spacing: 0.3px; font-weight: 400; }
+  .glosa { font-size: 11px; color: var(--apagado); line-height: 1.5; margin: 0 0 14px; }
+  .caja { border: 1px solid var(--raya); border-radius: 8px; padding: 10px; margin-bottom: 11px; }
+  .rot { font-size: 9px; letter-spacing: 1.4px; color: var(--oro); margin-bottom: 8px; }
+  label { display: block; font-size: 11px; color: var(--apagado); margin: 9px 0 3px; }
+  label:first-of-type { margin-top: 0; }
+  input[type=range] { width: 100%; accent-color: var(--oro); }
+  button { font-family: inherit; font-size: 11.5px; padding: 7px 10px; border-radius: 6px;
+    background: transparent; border: 1px solid var(--raya); color: var(--tinta); cursor: pointer; }
+  button:hover { border-color: var(--oro); }
+  button.on { background: rgba(212,175,55,0.16); border-color: var(--oro); color: var(--oro); }
+  .fila { display: flex; gap: 6px; flex-wrap: wrap; }
+  .fila button { flex: 1; min-width: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  td { padding: 3px 0; vertical-align: top; }
+  td.n { color: var(--apagado); }
+  td.v { text-align: right; color: var(--tinta); }
+  .barra { height: 4px; background: #1A2230; border-radius: 2px; overflow: hidden; margin-top: 2px; }
+  .barra i { display: block; height: 100%; background: var(--oro); }
+  #frentes { font-size: 11px; }
+  #frentes .f { padding: 7px 0; border-top: 1px solid var(--raya); }
+  #frentes .f:first-child { border-top: none; }
+  #reloj { font-size: 20px; font-family: Georgia, serif; color: var(--oro); }
+  #pista { position: absolute; left: 12px; bottom: 12px; font-size: 11px; color: var(--apagado);
+    background: rgba(10,15,23,0.88); border: 1px solid var(--raya); border-radius: 7px;
+    padding: 7px 10px; max-width: 62%; line-height: 1.5; pointer-events: none; }
+  @media (max-width: 820px) {
+    #todo { flex-direction: column; }
+    #lienzo { height: 58%; }
+    #lado { width: auto; height: 42%; border-left: none; border-top: 1px solid var(--raya); }
+    button { padding: 9px 10px; }
+  }
+</style>
+</head>
+<body>
+<div id="todo">
+  <div id="lienzo"><canvas id="c"></canvas><div id="pista">Tocá una comarca de Francia y el ejército marcha hasta ahí y la toma.</div></div>
+  <div id="lado">
+    <h1>Cómo se conquista una comarca</h1>
+    <p class="glosa">Los Pirineos de verdad: 72 comarcas con su contorno y su terreno,
+      sacadas del mapa del juego. Esto es solo la conquista, sin nada más alrededor.</p>
+
+    <div class="caja">
+      <div class="rot">EL TIEMPO</div>
+      <div id="reloj">día 0</div>
+      <div class="fila" style="margin-top:8px">
+        <button id="correr" class="on">▶ correr</button>
+        <button id="volver">↺ de nuevo</button>
+      </div>
+      <label>velocidad · <span id="vVel">7</span> días por segundo</label>
+      <input type="range" id="vel" min="1" max="60" value="7">
+    </div>
+
+    <div class="caja">
+      <div class="rot">LA CÁMARA</div>
+      <div class="fila">
+        <button id="mSigue" class="on">seguir al ejército</button>
+        <button id="mTodo">ver todo</button>
+      </div>
+      <label>de cerca · <span id="vLupa">4.5</span>° de ancho</label>
+      <input type="range" id="lupa" min="15" max="120" value="45">
+    </div>
+
+    <div class="caja">
+      <div class="rot">CÓMO SE PINTA</div>
+      <div class="fila">
+        <button id="mCelda" class="on">palmo a palmo</button>
+        <button id="mSuave">mancha suave</button>
+      </div>
+      <label>tamaño del palmo · <span id="vPalmo">7</span> px</label>
+      <input type="range" id="palmo" min="2" max="18" value="7">
+      <label>lo irregular del frente · <span id="vRuido">55</span>%</label>
+      <input type="range" id="ruido" min="0" max="100" value="55">
+    </div>
+
+    <div class="caja">
+      <div class="rot">QUÉ HACE EL EJÉRCITO</div>
+      <div class="fila">
+        <button id="mPisa" class="on">ocupa lo que pisa</button>
+        <button id="mOrden">solo lo que se le manda</button>
+      </div>
+      <p class="glosa" style="margin:8px 0 0">Con lo primero, cruzar la frontera ya
+        empieza a cambiar el color de la comarca en la que está parado, sin
+        órdenes. Con lo segundo, hay que mandarle tomar cada una.</p>
+    </div>
+
+    <div class="caja">
+      <div class="rot">EL EJÉRCITO</div>
+      <label>unidades · <span id="vTropa">60</span></label>
+      <input type="range" id="tropa" min="5" max="300" value="60">
+      <table>
+        <tr><td class="n">marcha</td><td class="v" id="dVel">—</td></tr>
+        <tr><td class="n">ocupa</td><td class="v" id="dOcupa">—</td></tr>
+      </table>
+    </div>
+
+    <div class="caja">
+      <div class="rot">LO QUE ESTÁ CAYENDO</div>
+      <div id="frentes"><div style="color:var(--apagado);font-size:11px">Nada todavía.</div></div>
+    </div>
+
+    <div class="caja">
+      <div class="rot">GANADO</div>
+      <div id="ganado" style="font-size:11px;color:var(--apagado)">Ninguna comarca.</div>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const COMARCAS = /*DATOS*/[]/*FIN*/;
+
+// ═══ las reglas, las mismas del juego ═══════════════════════════
+// Están acá copiadas a mano y no importadas: este archivo tiene que abrirse
+// solo, sin el juego al lado. Si alguna se cambia allá, hay que cambiarla acá.
+const GRADO_KM = 111.32;
+const TERRENOS = {
+  llanura: { n: "llanura", def: 0.90, com: 1.00, col: "#6E9B4E" },
+  colina:  { n: "colina",  def: 1.15, com: 0.88, col: "#7E8F52" },
+  montana: { n: "montaña", def: 1.55, com: 0.70, col: "#7C7A82" },
+  meseta:  { n: "meseta",  def: 1.05, com: 0.92, col: "#93885E" },
+  bosque:  { n: "bosque",  def: 1.25, com: 0.80, col: "#4E7444" },
+  vega:    { n: "vega",    def: 0.85, com: 1.05, col: "#6FA05C" },
+  delta:   { n: "delta",   def: 0.80, com: 1.10, col: "#5E9A72" },
+  estepa:  { n: "estepa",  def: 0.95, com: 0.95, col: "#A29A63" },
+  desierto:{ n: "desierto",def: 1.10, com: 0.72, col: "#B9A66F" },
+  tundra:  { n: "tundra",  def: 1.20, com: 0.62, col: "#8FA0A6" },
+  costa:   { n: "costa",   def: 0.90, com: 1.08, col: "#5F9A8E" },
+};
+const ter = (t) => TERRENOS[t] || TERRENOS.llanura;
+const acotar = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Distancia de verdad sobre el globo: un grado a lo ancho se acorta hacia el polo.
+function leguas(a, b) {
+  const dy = (a.y - b.y) * GRADO_KM;
+  const dx = (a.x - b.x) * GRADO_KM * Math.cos(((90 - (a.y + b.y) / 2) * Math.PI) / 180);
+  return Math.hypot(dx, dy);
+}
+// Lo que anda una hueste en un día: la rama más lenta manda, y el terreno pesa.
+const velocidadHueste = (p) => 22 * ter(p && p.t).com;
+// Lo que cuesta tomar la plaza: la gente que sube al muro y el terreno.
+const defensaDe = (p) => Math.round((12 + Math.pow(p.pob, 0.55) * 2.6) * ter(p.t).def);
+// Los días que aguanta antes de rendirse.
+const aguanteDe = (p) => Math.round(25 + Math.pow(p.pob / 4, 0.45) * 16);
+// El radio de la comarca: lo que hay que recorrer desde donde se entró.
+const radioDeComarca = (p) => Math.max(0.05, Math.hypot(p.x1 - p.x0, p.y1 - p.y0) / 2);
+// Ocupar no es marchar: parte de la jornada se va en dejar guarnición.
+const OCUPAR_PARTE = 0.25;
+function ritmoDeConquista(fuerza, p) {
+  const d = defensaDe(p);
+  const kmDia = velocidadHueste(p) * OCUPAR_PARTE * (fuerza / (fuerza + d));
+  return kmDia / (radioDeComarca(p) * GRADO_KM);
+}
+// Un cerco solo cuenta mientras la plaza está de verdad rodeada.
+const diasDeCerco = (av, dias) => dias * acotar(av, 0, 1);
+
+// ═══ el estado ═══════════════════════════════════════════════════
+const paisDe = {}; for (const c of COMARCAS) paisDe[c.i] = c.p;
+// La gente de cada comarca, estable: sale de su tamaño, sin azar de por medio.
+for (const c of COMARCAS) {
+  c.pob = Math.round(60 + radioDeComarca(c) * 900);
+  c.ruta = new Path2D(c.d);
+}
+const MIO = "Spain", SUYO = "France";
+const dueno = {};  for (const c of COMARCAS) dueno[c.i] = c.p;
+let frentes = {};  // idx → { av, ex, ey, cerco }
+let ganadas = [];
+let dia = 0;
+let corriendo = true;
+let modo = "celda";
+let pisa = true;
+const cfg = { vel: 7, palmo: 7, ruido: 55, tropa: 60, lupa: 45 };
+
+const arranque = COMARCAS.find((c) => c.p === MIO && c.n === "Navarra") || COMARCAS.find((c) => c.p === MIO);
+let ej = { x: arranque.x, y: arranque.y, dest: null, obj: null };
+
+function reiniciar() {
+  for (const c of COMARCAS) dueno[c.i] = c.p;
+  frentes = {}; ganadas = []; dia = 0;
+  ej = { x: arranque.x, y: arranque.y, dest: null, obj: null };
+  mira = { x: ej.x, y: ej.y };
+  encuadrar();
+}
+
+// ═══ el paso del tiempo ══════════════════════════════════════════
+function unDia() {
+  dia++;
+  const fuerza = cfg.tropa * 1.6;
+  // marchar
+  if (ej.dest) {
+    const bajo = comarcaEn(ej.x, ej.y) || {};
+    const anda = velocidadHueste(bajo);
+    const falta = leguas(ej, ej.dest);
+    if (anda >= falta) { ej.x = ej.dest.x; ej.y = ej.dest.y; ej.dest = null; }
+    else { const k = anda / falta; ej.x += (ej.dest.x - ej.x) * k; ej.y += (ej.dest.y - ej.y) * k; }
+  }
+  // ocupar y cercar la plaza de destino, ya estando encima
+  const obj = ej.obj != null ? COMARCAS.find((c) => c.i === ej.obj) : null;
+  if (obj && !ej.dest && dueno[obj.i] !== MIO) {
+    const f = frentes[obj.i] || (frentes[obj.i] = { av: 0, ex: ej.x, ey: ej.y, cerco: 0 });
+    f.av = Math.min(1, f.av + ritmoDeConquista(fuerza, obj));
+    f.cerco += diasDeCerco(f.av, 1);
+    if (f.cerco >= aguanteDe(obj)) {
+      dueno[obj.i] = MIO;
+      ganadas.push({ n: obj.n, dia });
+      delete frentes[obj.i];
+      ej.obj = null;
+    }
+  }
+  // Y lo que pisa de camino: un ejército que atraviesa una comarca ajena la va
+  // ocupando, aunque no sea a lo que iba. Es lo que uno espera al ver cruzar la
+  // frontera, y sin esto el mapa no cambia hasta llegar al destino.
+  let bajoPie = null;
+  if (pisa) {
+    bajoPie = comarcaEn(ej.x, ej.y);
+    if (bajoPie && dueno[bajoPie.i] !== MIO) {
+      const f = frentes[bajoPie.i]
+        || (frentes[bajoPie.i] = { av: 0, ex: ej.x, ey: ej.y, cerco: 0 });
+      f.av = Math.min(1, f.av + ritmoDeConquista(fuerza, bajoPie));
+      // De paso, no de asiento: sin quedarse, el cerco no aprieta igual.
+      if (!obj || obj.i !== bajoPie.i) f.cerco += diasDeCerco(f.av, 1) * 0.35;
+      if (f.cerco >= aguanteDe(bajoPie)) {
+        dueno[bajoPie.i] = MIO; ganadas.push({ n: bajoPie.n, dia });
+        delete frentes[bajoPie.i];
+        if (obj && obj.i === bajoPie.i) ej.obj = null;
+      }
+    }
+  }
+  // lo que se quedó sin nadie encima se va perdiendo
+  for (const k of Object.keys(frentes)) {
+    if (obj && +k === obj.i && !ej.dest) continue;
+    if (bajoPie && +k === bajoPie.i) continue;
+    frentes[k].av -= 0.008;
+    frentes[k].cerco = Math.max(0, frentes[k].cerco - 0.5);
+    if (frentes[k].av <= 0) delete frentes[k];
+  }
+}
+
+// ═══ el dibujo ═══════════════════════════════════════════════════
+const cv = document.getElementById("c");
+const cx = cv.getContext("2d");
+let W = 0, H = 0, esc = 1, ox = 0, oy = 0, dpr = 1;
+
+// La cámara. Vista de lejos, una comarca mide cien píxeles y por mucho que se
+// pinte no se nota nada: hay que estar cerca para ver el suelo cambiar de
+// dueño. Por eso, por defecto, la cámara va detrás del ejército —que es donde
+// pasan las cosas— y se puede alejar cuando uno quiere ver el conjunto.
+let mira = { x: 0, y: 0 };        // a dónde apunta, suavizado
+let siguiendo = true;
+function extension() {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const c of COMARCAS) { x0 = Math.min(x0, c.x0); y0 = Math.min(y0, c.y0);
+    x1 = Math.max(x1, c.x1); y1 = Math.max(y1, c.y1); }
+  return { x0, y0, x1, y1 };
+}
+function encuadrar() {
+  const caja = cv.parentElement.getBoundingClientRect();
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.round(caja.width); H = Math.round(caja.height);
+  cv.width = W * dpr; cv.height = H * dpr;
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (siguiendo) {
+    const an = cfg.lupa / 10;                       // grados de ancho
+    esc = W / an;
+    // que no se pase de alto: en una pantalla angosta manda la altura
+    const ext = extension();
+    esc = Math.min(esc, Math.max(W / an, H / (an * 0.9)));
+    ox = W / 2 - mira.x * esc;
+    oy = H / 2 - mira.y * esc;
+  } else {
+    const { x0, y0, x1, y1 } = extension();
+    const m = 0.25;
+    esc = Math.min(W / (x1 - x0 + m * 2), H / (y1 - y0 + m * 2));
+    ox = (W - (x1 - x0) * esc) / 2 - x0 * esc;
+    oy = (H - (y1 - y0) * esc) / 2 - y0 * esc;
+  }
+}
+const aPx = (x, y) => [x * esc + ox, y * esc + oy];
+const aMundo = (px, py) => [(px - ox) / esc, (py - oy) / esc];
+
+// Un número estable por celda: el frente tiene que ser irregular pero no
+// temblar. Si el ruido saliera de Math.random, cada cuadro dibujaría otro
+// borde y en vez de un ejército parecería una llama.
+function azarCelda(i, j) {
+  let h = (i * 73856093) ^ (j * 19349663);
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+// Qué comarca hay en un punto del mundo. El contorno está guardado en grados,
+// así que hay que preguntarlo con la misma transformación con la que se
+// dibuja; y el punto va en píxeles del mapa de bits, que no es lo mismo que
+// píxeles de pantalla cuando la pantalla es de las finas.
+let _cacheHit = { x: 1e9, y: 1e9, c: null };
+function comarcaEn(x, y) {
+  if (Math.abs(x - _cacheHit.x) < 1e-6 && Math.abs(y - _cacheHit.y) < 1e-6) return _cacheHit.c;
+  cx.save();
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cx.translate(ox, oy); cx.scale(esc, esc);
+  const [px, py] = aPx(x, y);
+  let hallada = null;
+  for (const c of COMARCAS) if (cx.isPointInPath(c.ruta, px * dpr, py * dpr)) { hallada = c; break; }
+  cx.restore();
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  _cacheHit = { x, y, c: hallada };
+  return hallada;
+}
+
+function dibujar() {
+  cx.clearRect(0, 0, W, H);
+  cx.save();
+  cx.translate(ox, oy); cx.scale(esc, esc);
+  const fino = 1 / esc;
+
+  // Primero el suelo entero de un tono, engordado: los contornos vienen
+  // simplificados y no encajan al milímetro, así que de cerca aparecían cuñas
+  // negras entre comarca y comarca. Con una capa debajo, esas rendijas quedan
+  // tapadas por tierra en vez de por el vacío.
+  cx.lineJoin = "round"; cx.lineCap = "round";
+  cx.fillStyle = "#3F4A3C"; cx.strokeStyle = "#3F4A3C"; cx.lineWidth = 3 / esc;
+  for (const c of COMARCAS) { cx.fill(c.ruta); cx.stroke(c.ruta); }
+
+  // y encima cada comarca con su terreno, y el país en el tono
+  for (const c of COMARCAS) {
+    const mia = dueno[c.i] === MIO;
+    const col = mia ? ter(c.t).col : mezclar(ter(c.t).col, "#6B7E90", 0.55);
+    cx.globalAlpha = mia ? 0.92 : 0.62;
+    cx.fillStyle = col; cx.strokeStyle = col; cx.lineWidth = 1.4 / esc;
+    cx.fill(c.ruta); cx.stroke(c.ruta);
+  }
+  cx.globalAlpha = 1;
+
+  // lo tomado y todavía sin rendirse
+  for (const c of COMARCAS) {
+    const f = frentes[c.i];
+    if (!f || f.av <= 0) continue;
+    cx.save();
+    cx.clip(c.ruta);
+    if (modo === "suave") manchaSuave(c, f);
+    else palmoAPalmo(c, f);
+    cx.restore();
+    // la plaza, que aguanta en medio
+    const [ax, ay] = [c.x, c.y];
+    cx.beginPath(); cx.arc(ax, ay, 6 / esc, 0, 7);
+    cx.fillStyle = "#6B7E90"; cx.fill();
+    cx.lineWidth = fino * 1.6; cx.strokeStyle = "#0B1017"; cx.stroke();
+  }
+
+  // las rayas de las comarcas, y la frontera más gruesa
+  cx.lineJoin = "round";
+  for (const c of COMARCAS) {
+    cx.lineWidth = fino * 0.7;
+    cx.strokeStyle = "rgba(12,18,26,0.55)";
+    cx.stroke(c.ruta);
+  }
+  for (const c of COMARCAS) {
+    if (dueno[c.i] !== MIO) continue;
+    cx.lineWidth = fino * 1.9; cx.strokeStyle = "#D4AF37"; cx.globalAlpha = 0.85;
+    cx.stroke(c.ruta); cx.globalAlpha = 1;
+  }
+
+  // el camino y el ejército
+  if (ej.dest) {
+    cx.beginPath(); cx.moveTo(ej.x, ej.y); cx.lineTo(ej.dest.x, ej.dest.y);
+    cx.setLineDash([fino * 5, fino * 5]); cx.lineWidth = fino * 1.6;
+    cx.strokeStyle = "#6FB3C9"; cx.stroke(); cx.setLineDash([]);
+  }
+  cx.restore();
+  const [ex, ey] = aPx(ej.x, ej.y);
+  cx.beginPath(); cx.arc(ex, ey, 13, 0, 7);
+  cx.fillStyle = "rgba(12,18,26,0.9)"; cx.fill();
+  cx.lineWidth = 2; cx.strokeStyle = "#D4AF37"; cx.stroke();
+  cx.fillStyle = "#D4AF37"; cx.font = "600 11px ui-monospace, monospace";
+  cx.textAlign = "center"; cx.textBaseline = "middle";
+  cx.fillText(String(cfg.tropa), ex, ey + 0.5);
+
+  // los nombres de lo que está cayendo
+  cx.font = "12px Georgia, serif"; cx.textBaseline = "alphabetic";
+  for (const c of COMARCAS) {
+    if (!frentes[c.i]) continue;
+    const [px, py] = aPx(c.x, c.y);
+    cx.lineWidth = 3; cx.strokeStyle = "rgba(6,10,16,0.85)";
+    cx.strokeText(c.n, px, py - 13); cx.fillStyle = "#E8DCC0";
+    cx.fillText(c.n, px, py - 13);
+  }
+}
+
+// Lo que hay hoy en el juego: un disco que crece, translúcido. Se ve el bulto
+// y no se ve el avance, que es justo lo que había que enseñar.
+function manchaSuave(c, f) {
+  const R = Math.max(Math.hypot(c.x0 - f.ex, c.y0 - f.ey), Math.hypot(c.x1 - f.ex, c.y0 - f.ey),
+                     Math.hypot(c.x0 - f.ex, c.y1 - f.ey), Math.hypot(c.x1 - f.ex, c.y1 - f.ey));
+  cx.beginPath(); cx.arc(f.ex, f.ey, R * f.av, 0, 7);
+  cx.fillStyle = "#D4AF37"; cx.globalAlpha = 0.6; cx.fill(); cx.globalAlpha = 1;
+  cx.lineWidth = 2 / esc; cx.strokeStyle = "#D4AF37"; cx.stroke();
+}
+
+// Palmo a palmo: la comarca partida en cuadros, y cada cuadro cambia de dueño
+// cuando el frente le llega. El borde se desordena con un número fijo por
+// cuadro, así que la línea es irregular como una línea de tropas y no un
+// compás. Esto es lo que se ve avanzar.
+function palmoAPalmo(c, f) {
+  const R = Math.max(Math.hypot(c.x0 - f.ex, c.y0 - f.ey), Math.hypot(c.x1 - f.ex, c.y0 - f.ey),
+                     Math.hypot(c.x0 - f.ex, c.y1 - f.ey), Math.hypot(c.x1 - f.ex, c.y1 - f.ey));
+  const lado = cfg.palmo / esc;                    // el palmo, en grados
+  const rd = R * f.av;
+  const desorden = (cfg.ruido / 100) * R * 0.22;
+  const i0 = Math.floor(c.x0 / lado), i1 = Math.ceil(c.x1 / lado);
+  const j0 = Math.floor(c.y0 / lado), j1 = Math.ceil(c.y1 / lado);
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      const x = i * lado, y = j * lado;
+      const d = Math.hypot(x + lado / 2 - f.ex, y + lado / 2 - f.ey);
+      const umbral = rd + (azarCelda(i, j) - 0.5) * 2 * desorden;
+      if (d > umbral) continue;
+      // Lo de atrás está asentado: va lleno y sin huecos, porque ahí ya hay
+      // guarnición y camino propio. Lo del filo va suelto y más claro, que es
+      // lo que se está tomando justo ahora. Así se lee de un vistazo por dónde
+      // avanza, en vez de quedar una cuadrícula pareja de punta a punta.
+      const asiento = acotar((umbral - d) / (lado * 5), 0, 1);
+      const hueco = lado * 0.34 * (1 - asiento);
+      cx.globalAlpha = 0.55 + 0.42 * asiento;
+      cx.fillStyle = asiento > 0.45 ? "#D4AF37" : "#F2DA86";
+      cx.fillRect(x + hueco / 2, y + hueco / 2, lado - hueco, lado - hueco);
+    }
+  }
+  cx.globalAlpha = 1;
+}
+
+function mezclar(a, b, k) {
+  const h = (s) => [1, 3, 5].map((i) => parseInt(s.substr(i, 2), 16));
+  const [r1, g1, b1] = h(a), [r2, g2, b2] = h(b);
+  const m = (u, v) => Math.round(u + (v - u) * k).toString(16).padStart(2, "0");
+  return "#" + m(r1, r2) + m(g1, g2) + m(b1, b2);
+}
+
+// ═══ el panel ════════════════════════════════════════════════════
+function panel() {
+  document.getElementById("reloj").textContent = "día " + dia
+    + (dia >= 365 ? " · año " + (1 + Math.floor(dia / 365)) : "");
+  const fuerza = cfg.tropa * 1.6;
+  const bajo = comarcaEn(ej.x, ej.y);
+  document.getElementById("dVel").textContent = bajo
+    ? velocidadHueste(bajo).toFixed(0) + " km/día · " + ter(bajo.t).n : "—";
+  const obj = ej.obj != null ? COMARCAS.find((c) => c.i === ej.obj) : null;
+  document.getElementById("dOcupa").textContent = obj
+    ? Math.round(1 / ritmoDeConquista(fuerza, obj)) + " días la comarca" : "—";
+
+  const ks = Object.keys(frentes);
+  document.getElementById("frentes").innerHTML = ks.length ? ks.map((k) => {
+    const c = COMARCAS.find((q) => q.i === +k), f = frentes[k];
+    const ag = aguanteDe(c);
+    return `<div class="f"><b>${c.n}</b> · ${ter(c.t).n}, ${c.pob} mil
+      <table>
+        <tr><td class="n">campo tomado</td><td class="v">${Math.round(f.av * 100)}%</td></tr>
+        <tr><td colspan="2"><div class="barra"><i style="width:${f.av * 100}%"></i></div></td></tr>
+        <tr><td class="n">la plaza aguanta</td><td class="v">${Math.round(f.cerco)} de ${ag} días</td></tr>
+        <tr><td colspan="2"><div class="barra"><i style="width:${Math.min(100, 100 * f.cerco / ag)}%;background:var(--rojo)"></i></div></td></tr>
+      </table></div>`;
+  }).join("") : '<div style="color:var(--apagado);font-size:11px">Nada todavía.</div>';
+
+  document.getElementById("ganado").innerHTML = ganadas.length
+    ? ganadas.map((g) => `<div>⚑ <b style="color:var(--tinta)">${g.n}</b> · día ${g.dia}</div>`).join("")
+    : "Ninguna comarca.";
+}
+
+// ═══ el bucle ════════════════════════════════════════════════════
+let resto = 0, antes = performance.now();
+function cuadro(t) {
+  const dt = Math.min(0.25, (t - antes) / 1000); antes = t;
+  if (corriendo) {
+    resto += dt * cfg.vel;
+    let n = 0;
+    while (resto >= 1 && n < 400) { unDia(); resto -= 1; n++; }
+  }
+  if (siguiendo) {
+    // La cámara persigue sin tirones: se acerca al ejército una fracción por
+    // cuadro, así que el mapa se desliza en vez de saltar detrás de él.
+    const k = 1 - Math.pow(0.004, dt);
+    mira.x += (ej.x - mira.x) * k;
+    mira.y += (ej.y - mira.y) * k;
+    encuadrar();
+  }
+  dibujar(); panel();
+  requestAnimationFrame(cuadro);
+}
+
+// ═══ los mandos ══════════════════════════════════════════════════
+cv.addEventListener("pointerdown", (e) => {
+  const r = cv.getBoundingClientRect();
+  const [mx, my] = aMundo(e.clientX - r.left, e.clientY - r.top);
+  const c = comarcaEn(mx, my);
+  if (!c || dueno[c.i] === MIO) return;
+  ej.obj = c.i;
+  ej.dest = leguas(ej, c) < 8 ? null : { x: c.x, y: c.y };
+  document.getElementById("pista").textContent =
+    `Marchando a ${c.n} · ${ter(c.t).n} · ${Math.round(leguas(ej, c))} km`;
+});
+const liga = (id, campo, muestra, tras) => {
+  const el = document.getElementById(id);
+  el.addEventListener("input", () => { cfg[campo] = +el.value;
+    document.getElementById(muestra).textContent = el.value; if (tras) tras(); });
+};
+liga("vel", "vel", "vVel"); liga("palmo", "palmo", "vPalmo");
+liga("ruido", "ruido", "vRuido"); liga("tropa", "tropa", "vTropa");
+{
+  const el = document.getElementById("lupa");
+  el.addEventListener("input", () => { cfg.lupa = +el.value;
+    document.getElementById("vLupa").textContent = (cfg.lupa / 10).toFixed(1);
+    encuadrar(); });
+}
+const bSg = document.getElementById("mSigue"), bTd = document.getElementById("mTodo");
+bSg.onclick = () => { siguiendo = true; bSg.classList.add("on"); bTd.classList.remove("on"); encuadrar(); };
+bTd.onclick = () => { siguiendo = false; bTd.classList.add("on"); bSg.classList.remove("on"); encuadrar(); };
+const bCorrer = document.getElementById("correr");
+bCorrer.onclick = () => { corriendo = !corriendo;
+  bCorrer.textContent = corriendo ? "▶ correr" : "❚❚ quieto";
+  bCorrer.classList.toggle("on", corriendo); };
+document.getElementById("volver").onclick = () => { reiniciar();
+  document.getElementById("pista").textContent = "Tocá una comarca de Francia y el ejército marcha hasta ahí y la toma."; };
+const bC = document.getElementById("mCelda"), bS = document.getElementById("mSuave");
+bC.onclick = () => { modo = "celda"; bC.classList.add("on"); bS.classList.remove("on"); };
+bS.onclick = () => { modo = "suave"; bS.classList.add("on"); bC.classList.remove("on"); };
+const bP = document.getElementById("mPisa"), bO = document.getElementById("mOrden");
+bP.onclick = () => { pisa = true; bP.classList.add("on"); bO.classList.remove("on"); };
+bO.onclick = () => { pisa = false; bO.classList.add("on"); bP.classList.remove("on"); };
+
+window.addEventListener("resize", encuadrar);
+mira = { x: ej.x, y: ej.y };
+encuadrar();
+requestAnimationFrame(cuadro);
+</script>
+</body>
+</html>
