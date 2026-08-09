@@ -7996,17 +7996,22 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           const d = h.destino;
           const largo = h.largo || (d ? leguas({ x: h.x, y: h.y }, d) : 0);
           const hecho = acotar((h.recorrido || 0) / (largo || 1), 0, 1);
+          // Las del enemigo van en gris de ceniza y con el escudo al revés: se
+          // tienen que distinguir de un vistazo y sin leer nada, porque cuando
+          // aparece una lo que importa es verla, no averiguar de quién es.
+          const suya = !!h.de;
           const rama = RAMAS_EJERCITO.find((x) => (h.ramas || {})[x.id] > 0) || RAMAS_EJERCITO[0];
+          const col = suya ? "#9AA3AD" : rama.col;
           const sel = huesteSel === h.id;
           return (
             <g key={"hu" + h.id}>
               {d && (
                 <g pointerEvents="none">
                   {/* lo que falta, tenue; lo andado, encima y firme */}
-                  <line x1={h.x} y1={h.y} x2={d.x} y2={d.y} stroke={rama.col}
+                  <line x1={h.x} y1={h.y} x2={d.x} y2={d.y} stroke={col}
                     strokeWidth={pxCapa * 1.1} strokeDasharray={`${pxCapa * 3} ${pxCapa * 3}`} opacity="0.45" />
                   <circle cx={d.x} cy={d.y} r={pxCapa * 2.4} fill="none"
-                    stroke={rama.col} strokeWidth={pxCapa * 1.1} opacity="0.7" />
+                    stroke={col} strokeWidth={pxCapa * 1.1} opacity="0.7" />
                 </g>
               )}
               {/* Lo que viene después, encadenado y más tenue: el plan entero
@@ -8023,10 +8028,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                   <g pointerEvents="none" opacity="0.5">
                     {pasos.map((t, k) => (
                       <g key={"pl" + k}>
-                        <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={rama.col}
+                        <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={col}
                           strokeWidth={pxCapa * 0.9} strokeDasharray={`${pxCapa * 1.6} ${pxCapa * 4}`} />
                         <circle cx={t.x2} cy={t.y2} r={pxCapa * 1.8} fill="none"
-                          stroke={t.o === "asaltar" ? "#E05252" : t.o === "cercar" ? "#E8B04B" : rama.col}
+                          stroke={t.o === "asaltar" ? "#E05252" : t.o === "cercar" ? "#E8B04B" : col}
                           strokeWidth={pxCapa * 1.1} />
                       </g>
                     ))}
@@ -8041,17 +8046,22 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                 </circle>
               )}
               {/* el escudo */}
-              <path d={`M${h.x - r},${h.y - r} L${h.x + r},${h.y - r} L${h.x + r},${h.y + r * 0.35} `
-                + `Q${h.x},${h.y + r * 1.5} ${h.x - r},${h.y + r * 0.35} Z`}
-                fill={sel ? rama.col : "rgba(12,18,26,0.88)"} stroke={rama.col}
+              <path d={suya
+                ? `M${h.x - r},${h.y + r} L${h.x + r},${h.y + r} L${h.x + r},${h.y - r * 0.35} `
+                  + `Q${h.x},${h.y - r * 1.5} ${h.x - r},${h.y - r * 0.35} Z`
+                : `M${h.x - r},${h.y - r} L${h.x + r},${h.y - r} L${h.x + r},${h.y + r * 0.35} `
+                  + `Q${h.x},${h.y + r * 1.5} ${h.x - r},${h.y + r * 0.35} Z`}
+                fill={sel ? col : "rgba(12,18,26,0.88)"} stroke={col}
                 strokeWidth={pxCapa * (sel ? 2.2 : 1.4)}
                 pointerEvents="all" style={{ cursor: "pointer" }}
                 aria-label={"hueste " + h.nombre}
-                onClick={(e) => { e.stopPropagation(); if (!movido.current && onHueste) onHueste(h.id); }}>
-                <title>{`${h.nombre}: ${unidadesTotales(h.ramas)} unidades`}</title>
+                onClick={(e) => { e.stopPropagation();
+                  if (!movido.current && onHueste && !suya) onHueste(h.id); }}>
+                <title>{`${h.nombre}: ${unidadesTotales(h.ramas)} unidades`
+                  + (suya ? " — del enemigo" : "")}</title>
               </path>
               <text x={h.x} y={h.y + r * 0.28} textAnchor="middle" fontSize={r * 1.1}
-                fill={sel ? "#0A0F17" : rama.col} pointerEvents="none"
+                fill={sel ? "#0A0F17" : col} pointerEvents="none"
                 style={{ fontFamily: "monospace", fontWeight: 700 }}>
                 {unidadesTotales(h.ramas)}
               </text>
@@ -8061,7 +8071,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                   <rect x={h.x - r} y={h.y + r * 1.7} width={r * 2} height={pxCapa * 1.6}
                     fill="rgba(0,0,0,0.55)" rx={pxCapa * 0.8} />
                   <rect x={h.x - r} y={h.y + r * 1.7} width={r * 2 * hecho} height={pxCapa * 1.6}
-                    fill={rama.col} rx={pxCapa * 0.8} />
+                    fill={col} rx={pxCapa * 0.8} />
                 </g>
               )}
             </g>
@@ -9664,13 +9674,135 @@ function diasDeMarcha(h, provs) {
 // avanzan, las que llegaron ejecutan su orden, las que cercan aprietan.
 // Devuelve las huestes nuevas, las provincias que cambiaron de mano y qué
 // contar en la crónica.
+// ——— la batalla a campo abierto ———
+//
+// Hasta acá una hueste solo podía chocar contra un muro. Dos ejércitos en el
+// mismo campo se cruzaban sin mirarse, que es lo único que no puede pasar en
+// una guerra.
+//
+// Cerca quiere decir cerca de verdad: dos huestes a treinta kilómetros no se
+// ven, pero a veinte ya no se pueden evitar. Ese número es lo que un jinete
+// explora en una jornada.
+const RADIO_BATALLA = 22;   // km
+
+// El terreno decide más que en un sitio. La caballería vale en campo abierto y
+// estorba en la montaña, y eso ya lo dice la ficha de la rama desde siempre:
+// «decide en campo abierto». Acá por fin es verdad.
+function pesoEnCampo(h, prov, s) {
+  const base = pesoDeHueste(h, s);
+  const t = TERRENOS[(prov && prov.terreno) || "llanura"] || TERRENOS.llanura;
+  const partes = [{ n: "la hueste", v: Math.round(base) }];
+  // Cuánto de lo que trae es caballería.
+  const jinetes = ((h && h.ramas) || {}).caballeria || 0;
+  const total = unidadesTotales((h && h.ramas) || {}) || 1;
+  const parte = jinetes / total;
+  // Abierto es abierto: llanura, estepa, meseta. Cerrado es lo que rompe una
+  // carga: monte, bosque, marisma.
+  const abierto = { llanura: 0.35, estepa: 0.40, meseta: 0.25, vega: 0.15, delta: 0,
+                    colina: 0, bosque: -0.25, marisma: -0.30, montana: -0.35 };
+  const k = (abierto[(prov && prov.terreno) || "llanura"] || 0) * parte;
+  let f = base * (1 + k);
+  if (Math.abs(k) > 0.01)
+    partes.push({ n: k > 0 ? `la caballería en campo abierto` : `la caballería estorba en ${t.n.toLowerCase()}`,
+                  v: Math.round(base * k) });
+  // Y la artillería, que en campo abierto vale menos que contra un muro.
+  const canones = ((h && h.ramas) || {}).artilleria || 0;
+  if (canones > 0) {
+    const c = -base * 0.10 * (canones / total);
+    f += c;
+    partes.push({ n: "los cañones pesan menos sin muro enfrente", v: Math.round(c) });
+  }
+  return { total: Math.max(1, f), partes };
+}
+
+// El que estaba plantado tiene la ventaja de elegir dónde: el terreno que
+// defiende, lo defiende para él.
+function pulsoDeBatalla(a, b, prov, s) {
+  const A2 = pesoEnCampo(a, prov, s);
+  const B2 = pesoEnCampo(b, prov, s);
+  const t = TERRENOS[(prov && prov.terreno) || "llanura"] || TERRENOS.llanura;
+  // Quien no venía marchando espera; el que llega, llega cansado.
+  const esperaA = !a.destino, esperaB = !b.destino;
+  const vA = A2.total * (esperaA && !esperaB ? (t.def || 1) : 1);
+  const vB = B2.total * (esperaB && !esperaA ? (t.def || 1) : 1);
+  const razon = vA / Math.max(1, vB);
+  return { a: Math.round(vA), b: Math.round(vB), partesA: A2.partes, partesB: B2.partes,
+           terreno: t, esperaA, esperaB, prob: acotar(razon / (1 + razon), 0.04, 0.96) };
+}
+
+function batallar(a, b, prov, s, rnd) {
+  const q = pulsoDeBatalla(a, b, prov, s);
+  const ganaA = rnd() < q.prob;
+  // Lo parejo que estuvo decide lo que costó. Una batalla despareja se resuelve
+  // barata para el que gana; una pareja sangra a los dos.
+  const parejo = 1 - Math.abs(q.prob - 0.5) * 2;
+  const delGana = acotar(0.05 + parejo * 0.16, 0.03, 0.28);
+  const delPierde = acotar(0.18 + parejo * 0.30, 0.12, 0.62);
+  return { ganaA, prob: q.prob, pulso: q,
+           bajasA: ganaA ? delGana : delPierde,
+           bajasB: ganaA ? delPierde : delGana };
+}
+
+const mermar = (ramas, parte) => {
+  const r = { ...ramas };
+  for (const k of Object.keys(r)) r[k] = Math.max(0, Math.round(r[k] * (1 - parte)));
+  return r;
+};
+
+// ——— los ejércitos del enemigo ———
+//
+// Sin un ejército enfrente no hay batalla, y hasta ahora el vecino se defendía
+// con sus plazas y nada más. Cuando hay guerra, el enemigo levanta lo suyo y
+// lo manda: a lo que tengas más cerca de su frontera, o a tu corte.
+function levantarEnemigas(s, rnd) {
+  if (!s || !s.guerra) return [];
+  const yaTiene = (s.huestes || []).some((h) => h.de);
+  if (yaTiene) return [];
+  const v = (s.vecinos || []).find((q) => q.nombre === s.guerra.vecino);
+  const poder = Math.max(2, Math.round(poderVecino(v, s.anio) / 9));
+  // De dónde sale: del borde del reino más lejos de tu corte, que es por donde
+  // uno entra cuando no quiere que lo vean venir.
+  const provs = s.provincias || [];
+  const corte = provs.find((p) => p.capital) || provs[0];
+  if (!corte) return [];
+  let borde = corte, dm = -1;
+  for (const p of provs) {
+    const d = leguas({ x: corte.x, y: corte.y }, { x: p.x, y: p.y });
+    if (d > dm) { dm = d; borde = p; }
+  }
+  const ramas = { infanteria: Math.round(poder * 0.7), caballeria: Math.max(1, Math.round(poder * 0.3)) };
+  const h = huesteNueva("en1", ramas, borde.x + (rnd() - 0.5) * 2, borde.y + (rnd() - 0.5) * 2,
+    `hueste de ${s.guerra.vecino}`);
+  return [{ ...h, de: s.guerra.vecino, orden: "marchar", objetivo: corte.id,
+            destino: { x: corte.x, y: corte.y },
+            largo: leguas({ x: h.x, y: h.y }, { x: corte.x, y: corte.y }) }];
+}
+
 function correrCampana(s, dias, rnd) {
   const provs = (s && s.provincias) || [];
   const hechos = [];
   const tomadas = [];
   const huestes = [];
-  for (let h of (s && s.huestes) || []) {
+  // Si hay guerra y el enemigo todavía no puso nada en el mapa, lo pone ahora.
+  const nacidas = levantarEnemigas(s, rnd);
+  if (nacidas.length)
+    hechos.push(`${nacidas[0].nombre} cruza la raya con ${unidadesTotales(nacidas[0].ramas)} unidades.`);
+  const enPie = [...((s && s.huestes) || []), ...nacidas];
+  for (let h of enPie) {
     const antes = { x: h.x, y: h.y };
+    // El enemigo no camina hacia un punto fijo: va por lo que tenga más cerca.
+    // Un ejército que ignora al que tiene al lado no es un ejército.
+    if (h.de) {
+      let presa = null, dm = Infinity;
+      for (const q of enPie) {
+        if (q.de) continue;
+        const d = leguas({ x: h.x, y: h.y }, { x: q.x, y: q.y });
+        if (d < dm) { dm = d; presa = q; }
+      }
+      if (presa && dm < 600)
+        h = { ...h, orden: "marchar", destino: { x: presa.x, y: presa.y },
+              largo: dm, recorrido: 0 };
+    }
     h = avanzarHueste(h, dias, provs, s);
     const obj = h.objetivo ? provs.find((p) => p.id === h.objetivo) : null;
 
@@ -9712,10 +9844,48 @@ function correrCampana(s, dias, rnd) {
     h = { ...h, ultimo: leguas(antes, { x: h.x, y: h.y }) };
     huestes.push(h);
   }
+  // ——— y ahora las que se cruzaron ———
+  // Se mira después de mover a todas: dos huestes que terminaron el turno en el
+  // mismo campo no pueden seguir de largo como si no se hubieran visto.
+  const vivas = huestes.slice();
+  const caidas = new Set();
+  for (let i = 0; i < vivas.length; i++) {
+    for (let j = i + 1; j < vivas.length; j++) {
+      const a = vivas[i], b = vivas[j];
+      if (!a || !b || caidas.has(a.id) || caidas.has(b.id)) continue;
+      if (!!a.de === !!b.de) continue;                     // del mismo bando no pelean
+      if (leguas({ x: a.x, y: a.y }, { x: b.x, y: b.y }) > RADIO_BATALLA) continue;
+      const campo = provinciaMasCerca(provs, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      const r = batallar(a, b, campo, s, rnd);
+      const gana = r.ganaA ? a : b, pierde = r.ganaA ? b : a;
+      const pg = r.ganaA ? r.bajasA : r.bajasB, pp = r.ganaA ? r.bajasB : r.bajasA;
+      const donde = campo ? ` en ${campo.nombre}` : "";
+      hechos.push(`Batalla${donde}: ${gana.nombre} deshace a ${pierde.nombre}. `
+        + `${Math.round(pp * 100)} de cada cien del vencido quedaron en el campo, `
+        + `${Math.round(pg * 100)} del vencedor.`);
+      const nuevoG = { ...gana, ramas: mermar(gana.ramas, pg),
+        moral: acotar((gana.moral || 100) + 6, 20, 100) };
+      const ramasP = mermar(pierde.ramas, pp);
+      // El que pierde se retira por donde vino, si le queda alguien.
+      const quedan = unidadesTotales(ramasP);
+      const nuevoP = quedan > 0
+        ? { ...pierde, ramas: ramasP, moral: acotar((pierde.moral || 100) - 26, 15, 100),
+            orden: null, destino: null, objetivo: null, cola: [], largo: 0, recorrido: 0,
+            x: pierde.x + (pierde.x - gana.x) * 0.35, y: pierde.y + (pierde.y - gana.y) * 0.35 }
+        : null;
+      if (!nuevoP) {
+        caidas.add(pierde.id);
+        hechos.push(`De ${pierde.nombre} no queda nada.`);
+      }
+      vivas[r.ganaA ? i : j] = nuevoG;
+      vivas[r.ganaA ? j : i] = nuevoP || pierde;
+    }
+  }
+  const finales = vivas.filter((h) => h && !caidas.has(h.id) && unidadesTotales(h.ramas) > 0);
   const nuevas = tomadas.length
     ? provs.map((p) => (tomadas.includes(p.id) ? { ...p, ocupada: false, mia: true } : p))
     : provs;
-  return { huestes, provincias: nuevas, hechos, tomadas };
+  return { huestes: finales, provincias: nuevas, hechos, tomadas };
 }
 
 function mantenimientoEjercito(ej) {
@@ -20865,6 +21035,7 @@ export default function PaxMundi() {
                   const libres = ejercitoLibre(s);
                   const nLibres = unidadesTotales(libres);
                   const hs = s.huestes || [];
+                  const enemigas = hs.filter((h) => h.de);
                   const capital = (s.provincias || []).find((p) => p.capital) || (s.provincias || [])[0];
                   const verEnMapa = (h) => {
                     setHuesteSel(h.id);
@@ -20901,14 +21072,22 @@ export default function PaxMundi() {
                         </button>
                       )}
 
-                      {hs.length === 0 && (
+                      {enemigas.length > 0 && (
+                        <div style={{ padding: "8px 10px", marginBottom: 8, borderRadius: 7,
+                          background: "rgba(224,82,82,0.08)", border: `1px solid ${C.red}55`,
+                          fontSize: 11.5, color: C.ink, lineHeight: 1.5 }}>
+                          ⚠ {enemigas.map((h) => `${h.nombre}, ${unidadesTotales(h.ramas)} unidades`).join(" · ")}
+                          {" "}en el mapa. Si se cruzan con las tuyas, hay batalla.
+                        </div>
+                      )}
+                      {hs.filter((h) => !h.de).length === 0 && (
                         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
                           No tenés ninguna hueste en el mapa. Poné tropas en pie de guerra y van a
                           aparecer como un escudo: se las toca y se les ordena marchar, cercar o asaltar.
                         </div>
                       )}
 
-                      {hs.map((h) => {
+                      {hs.filter((h) => !h.de).map((h) => {
                         const donde = provinciaMasCerca(s.provincias, h.x, h.y);
                         const o = ORDENES[h.orden] || null;
                         const dias = h.destino ? diasDeMarcha(h, s.provincias) : 0;
