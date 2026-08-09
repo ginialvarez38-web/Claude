@@ -116,6 +116,36 @@ manda al levantar el dedo caía sobre el fondo de la rueda recién abierta y la
 cerraba antes de que se viera. El juego estaba entero y no era jugable en un
 teléfono, que es donde se juega.
 
+## Conquistar se ve en el mapa
+
+Una comarca no cambia de dueño de golpe. El ejército entra por un lado y va
+ganando campo, y eso es exactamente lo que el mapa pinta: el color crece desde
+donde entró la hueste, recortado contra el contorno de verdad de la comarca,
+así que se derrama por el valle y se para en la costa como se pararía una
+tropa. Lo que está pintado es lo que está tomado.
+
+En medio queda la plaza, del color de quien todavía la tiene, y ahí es donde
+termina el asunto: la comarca puede estar entera en tus manos y el castillo
+seguir sin rendirse. Cuando cae, la comarca pasa a ser del reino —con su
+contorno real, la mitad de su gente y la lealtad por el suelo, que es como
+entra una comarca conquistada—.
+
+Lo que tarda depende de lo que hay que tomar, no de un número fijo: una comarca
+grande lleva mucho más que una chica, la montaña mucho más que la llanura, y un
+ejército con cañones a rastras avanza al paso de los cañones. Ocupar la Guayana
+lleva más de cien días; París, ocho.
+
+Y el cerco solo cuenta mientras la plaza está de verdad rodeada. Sitiar una
+ciudad por un lado y dejarle el otro abierto no es sitiarla: es acamparle
+enfrente y verla comer. Por eso conviene tomar el campo antes de sentarse
+delante del muro. Si el ejército levanta el campamento y se va, lo tomado se
+va perdiendo solo: el campo vuelve a su dueño, aunque mucho más despacio de lo
+que se ganó.
+
+Con el turno de un año —el que viene puesto— la campaña entera se resuelve
+entre dos pantallas y no hay nada que mirar. Poné el turno en un mes o en una
+semana, arriba en el consejo, y se ve avanzar.
+
 ## La partida se guarda sola
 
 Al terminar cada turno, y también cuando dejás el juego —cambiás de pestaña,

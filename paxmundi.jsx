@@ -6977,7 +6977,7 @@ const escalon = (v, paso) => {
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda, huestes, huesteSel, onHueste }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda, huestes, huesteSel, onHueste, frentes }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -8013,10 +8013,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     // El nombre que da el accidente es el de la comarca —«Ariège»— y a una
     // comarca no se le declara la guerra: se le declara a Francia. El país sale
     // de la geometría del mapa, que ya lo trae.
-    let pais = null;
-    try { const g = provinciaEn(mx, my); pais = g && g.pais; } catch (_) { pais = null; }
+    let pais = null, idx = null;
+    try { const g = provinciaEn(mx, my); pais = g && g.pais; idx = g ? g.i : null; } catch (_) { pais = null; }
     onRueda(mio ? { id: mio.id, mx, my }
-      : a && a.t === "tierra" ? { ajena: true, nombre: a.n, pais, mx, my } : null, cx, cy);
+      : a && a.t === "tierra" ? { ajena: true, nombre: a.n, pais, idx, mx, my } : null, cx, cy);
   }
   function onContexto(e) {
     if (!onRueda) return;
@@ -8025,6 +8025,74 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     movido.current = false;
     abrirRuedaEn(e.clientX, e.clientY);
   }
+
+  // ——— lo conquistado, palmo a palmo ─────────────────────────────────
+  //
+  // Lo que se pinta es exactamente el suelo que se ocupó, con la forma real de
+  // la comarca: el color crece desde donde entró el ejército y se recorta
+  // contra el contorno de verdad, así que se derrama por el valle y se para en
+  // la costa como se pararía una tropa. No es una barra de progreso puesta
+  // encima del mapa, es el mapa cambiando de dueño.
+  //
+  // El disco crece hasta cubrir la esquina más lejana de la comarca: al llegar
+  // a uno, no queda un palmo sin tomar. Y mientras la plaza aguanta, queda su
+  // isla en medio con el color de quien todavía la tiene, que es lo que se ve
+  // desde arriba en un asedio de verdad.
+  const capaFrentes = useMemo(() => {
+    const fs = (frentes || []).filter((f) => f && f.idx != null && f.avance > 0.001);
+    if (!fs.length) return null;
+    // Lo que se gana va en el oro del reino y no en un color de atlas: en este
+    // mapa las comarcas propias se pintan por su terreno y lo que dice «esto es
+    // tuyo» es el borde dorado y la estrella de la corte. Un violeta de paleta
+    // no lo diría. Lo que se pierde va en el rojo de lo ocupado, que ya es el
+    // color con el que el mapa cuenta las malas noticias. Y para saber de quién
+    // era, el color del país queda debajo, que es el que estaba ahí.
+    const mio = C.gold;
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {fs.map((f, i) => {
+          const g = geomProvincia(f.idx);
+          if (!g || !g.d) return null;
+          // hasta la esquina más lejana: con eso, avance 1 no deja nada fuera
+          const R = Math.max(Math.hypot(g.x0 - f.x, g.y0 - f.y), Math.hypot(g.x1 - f.x, g.y0 - f.y),
+                             Math.hypot(g.x0 - f.x, g.y1 - f.y), Math.hypot(g.x1 - f.x, g.y1 - f.y));
+          const r = R * f.avance;
+          const col = f.mia ? mio : C.red;
+          // el dueño de antes, que es lo que queda de isla alrededor de la plaza
+          const suyo = f.mia ? colorDePais(f.pais) : mio;
+          const cid = uid + "fr" + f.idx;
+          return (
+            <g key={"fr" + f.idx}>
+              <clipPath id={cid}><path d={g.d} /></clipPath>
+              <g clipPath={`url(#${cid})`}>
+                <path d={g.d} fill={col} opacity={0.20 * f.avance} />
+                <circle cx={f.x} cy={f.y} r={r} fill={col} opacity="0.6" />
+                {/* la línea del frente: lo tomado tiene un borde, y ese borde
+                    es la noticia —por dónde se está ganando el campo— */}
+                <circle cx={f.x} cy={f.y} r={r} fill="none" stroke={col}
+                  strokeWidth={pxCapa * 1.8} opacity="0.95" />
+                <circle cx={f.x} cy={f.y} r={r} fill="none" stroke="#0B1017"
+                  strokeWidth={pxCapa * 0.7} strokeDasharray={`${pxCapa * 2.6} ${pxCapa * 2.6}`}
+                  opacity="0.6" />
+              </g>
+              {/* La plaza, que aguanta en medio de lo tomado hasta que cae. Va
+                  mientras haya frente y no solo mientras quede campo por tomar:
+                  con la comarca entera ocupada y el castillo sin rendirse, el
+                  mapa tiene que enseñar justamente eso —todo suyo salvo el
+                  torreón—, que es como termina un asedio antes de terminar. */}
+              {f.px != null && (
+                <g>
+                  <circle cx={f.px} cy={f.py} r={pxCapa * 4.6} fill={suyo} opacity="0.92" />
+                  <circle cx={f.px} cy={f.py} r={pxCapa * 4.6} fill="none"
+                    stroke="#0B1017" strokeWidth={pxCapa * 0.8} opacity="0.85" />
+                </g>
+              )}
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [frentes, pxCapa, uid]);
 
   // ——— las huestes ———
   //
@@ -8178,6 +8246,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         {defs}
         {capaMundo}
         {capaProvincias && capaProvincias.fondo}
+        {/* debajo del relieve y de las fronteras: el suelo cambia de dueño,
+            pero las montañas y las rayas siguen ahí encima */}
+        {capaFrentes}
         {capaRelieve}
         {capaProvincias && capaProvincias.lineas}
         {capaAguas}
@@ -9637,6 +9708,133 @@ function aguanteDe(p, s) {
   return Math.round(dias * (1 + muro.v * 0.5) * ((p && p.capital) ? 1.4 : 1));
 }
 
+// ——— la conquista, palmo a palmo ─────────────────────────────────────
+//
+// Una comarca no cambia de dueño de golpe. El ejército entra por un lado y va
+// ganando campo: primero las aldeas y los caminos, y la plaza fuerte aguanta
+// en medio hasta que se rinde o la toman por asalto. Eso es lo que el mapa
+// pinta —el suelo que de verdad se ocupó, con la forma real de la comarca— y
+// por eso el color crece desde donde entró la hueste y no desde el centro.
+//
+// Un frente es esa cuenta: qué comarca, por dónde se entró, cuánto se lleva.
+// Ocupar no es marchar. Una parte de la jornada se va en dejar gente en cada
+// villa, cortar los caminos y sentar la guarnición; el resto del día el
+// ejército no avanza, se queda. Esa parte es la que manda el ritmo.
+const OCUPAR_PARTE = 0.25;         // de la marcha diaria, lo que sirve para ocupar
+const OLVIDO_CONQUISTA = 0.008;    // lo que se recupera sola por día sin nadie encima
+
+// El radio de una comarca en grados: media diagonal de su caja. Es lo que hay
+// que recorrer desde donde se entró para tenerla toda, y por eso una comarca
+// grande tarda más que una chica —que es lo obvio y era lo que faltaba: hasta
+// acá una provincia rusa se ocupaba tan rápido como una holandesa—.
+function radioDeComarca(p) {
+  const g = p && p.idx != null ? geomProvincia(p.idx) : null;
+  if (!g) return 0.6;
+  return Math.max(0.05, Math.hypot(g.x1 - g.x0, g.y1 - g.y0) / 2);
+}
+
+// Cuánto de la comarca se gana en un día. Sale de kilómetros de verdad: los
+// que la hueste puede consolidar en una jornada, contra los que hay que cubrir.
+// La velocidad ya trae el terreno y el camino —una montaña sin calzada se
+// ocupa a paso de mula— y la razón de fuerzas trae lo que cuesta la resistencia.
+function ritmoDeConquista(h, p, s) {
+  const f = pesoDeHueste(h, s);
+  const d = defensaDe(p, s).total;
+  const kmDia = velocidadHueste(h, p) * OCUPAR_PARTE * (f / (f + d));
+  const radioKm = radioDeComarca(p) * GRADO_KM;
+  return radioKm > 0 ? kmDia / radioKm : 0;
+}
+
+// Cuántos días de cerco valen los días que pasaron. Un cerco solo cuenta
+// mientras la plaza está de verdad rodeada: sitiar una ciudad por un lado y
+// dejarle el otro abierto no es sitiarla, es acamparle enfrente y verla comer.
+// Así que los días valen lo que valga el cerco, y el cerco vale cuánto del
+// campo se tiene tomado. Con el campo entero en la mano, un día es un día.
+//
+// Se resuelve entero y no día a día porque un turno puede ser un año: el campo
+// se va ganando mientras corren esos días, y el cerco cuenta más cada día que
+// pasa. Es la integral de lo tomado, que sale en dos cuentas.
+function diasDeCerco(avance0, ritmo, dias) {
+  const a0 = acotar(avance0 || 0, 0, 1);
+  if (!(ritmo > 0)) return dias * a0;
+  const hasta = Math.max(0, Math.min(dias, (1 - a0) / ritmo));   // cuándo se toma entera
+  return a0 * hasta + (ritmo * hasta * hasta) / 2 + (dias - hasta);
+}
+
+// El frente de una comarca, o uno nuevo empezado donde está la hueste. La
+// entrada se guarda una sola vez: si el color naciera cada turno donde esté el
+// ejército, la mancha saltaría por el mapa en vez de crecer.
+function frenteDe(frentes, id) { return (frentes || []).find((f) => f && f.id === id) || null; }
+function frenteNuevo(id, p, h, mia) {
+  return { id, idx: p && p.idx != null ? p.idx : null,
+    nombre: (p && p.nombre) || "", pais: (p && p.pais) || null,
+    // por dónde entró; si no se sabe, por el centro de la comarca
+    x: h ? h.x : (p && p.x), y: h ? h.y : (p && p.y),
+    px: p && p.x, py: p && p.y, avance: 0, mia: !!mia };
+}
+// Con los frentes puestos al día: los que tienen a alguien encima crecen, los
+// que se quedaron solos se van borrando —el campo vuelve a su dueño en cuanto
+// el ejército levanta el campamento—, y los que llegaron a cero se van.
+function frentesTrasElDia(frentes, empujes, dias) {
+  const vistos = new Set();
+  const salen = [];
+  for (const f of frentes || []) {
+    const e = empujes.get(f.id);
+    vistos.add(f.id);
+    const av = e ? Math.min(1, f.avance + e.ritmo * dias)
+                 : f.avance - OLVIDO_CONQUISTA * dias;
+    if (av > 0.001) salen.push({ ...f, avance: av });
+  }
+  for (const [id, e] of empujes)
+    if (!vistos.has(id)) salen.push({ ...e.nuevo, avance: Math.min(1, e.ritmo * dias) });
+  return salen;
+}
+
+// Una comarca del vecino, mirada como plaza: lo que hace falta para saber
+// cuánto cuesta tomarla. El terreno y el contorno son los de verdad —los
+// mismos que el mapa dibuja— y la gente se estima como la de una comarca
+// parecida del propio reino, que es la única vara honesta que hay a mano: sin
+// esto toda tierra ajena era «llanura con 25.000 almas», y daba igual invadir
+// los Alpes que la Beauce.
+function plazaAjena(idx, s) {
+  const g = idx == null ? null : geomProvincia(idx);
+  if (!g) return null;
+  const at = attrProvincia(idx);
+  const base = { id: "ajena:" + idx, idx, ajena: true, nombre: g.n, pais: g.pais,
+    terreno: at.terreno, costera: at.costera, rio: at.rio,
+    x: g.x, y: g.y, lon: g.x - 180, lat: 90 - g.y, poly: g.d };
+  const provs = (s && s.provincias) || [];
+  const fMed = provs.length ? provs.reduce((a, p) => a + fertProv(p), 0) / provs.length : 1;
+  const pMed = provs.length ? provs.reduce((a, p) => a + (p.poblacion || 0), 0) / provs.length : 20;
+  base.poblacion = Math.max(1, Math.round(pMed * (fertProv(base) / (fMed || 1))));
+  return base;
+}
+
+// ——— de tierra ajena a comarca propia ———
+//
+// Tomar una plaza que no figura en el reino tiene que darte la comarca: si no,
+// la guerra no gana nada y el mapa miente. Sale de la geometría real —el mismo
+// contorno que ya se pintaba— y entra maltrecha, que es como entra una comarca
+// recién conquistada: la mitad de la gente que le tocaría y la lealtad por el
+// suelo.
+function comarcaConquistada(plaza, s) {
+  const g = plaza && plaza.idx != null ? geomProvincia(plaza.idx) : null;
+  if (!g) return null;
+  const provs = (s && s.provincias) || [];
+  if (provs.some((p) => p.idx === plaza.idx)) return null;      // ya es tuya
+  const q = plazaAjena(plaza.idx, s);
+  if (!q) return null;
+  const base = { ...q, id: "cq" + plaza.idx, ajena: false, capital: false, ady: [],
+    // La gente que queda: la guerra y la huida se llevaron su parte.
+    poblacion: Math.max(1, Math.round(q.poblacion * 0.62)),
+    lealtad: 18 };                       // conquistada, no convencida
+  // Vecina de lo que tenga al lado en el mapa: sin esto queda suelta y las
+  // cuentas que caminan el reino de comarca en comarca la saltan.
+  const cerca = provs.filter((p) => p.x != null && Math.hypot(p.x - base.x, p.y - base.y) < 6);
+  base.ady = cerca.map((p) => p.id);
+  return { comarca: base, pegar: cerca.map((p) => p.id) };
+}
+
 // ——— las huestes en el estado ———
 //
 // Una hueste sale del ejército del reino: lo que se despliega deja de estar en
@@ -9650,7 +9848,7 @@ const ORDENES = {
 
 function huesteNueva(id, ramas, x, y, nombre) {
   return { id, nombre: nombre || "hueste", ramas: { ...ramas }, x, y,
-           orden: null, destino: null, objetivo: null, moral: 100,
+           orden: null, destino: null, objetivo: null, plaza: null, moral: 100,
            recorrido: 0, largo: 0, cerco: 0, aguante: 0,
            // Lo que hay que hacer después de lo de ahora. Va aparte de la
            // orden en curso a propósito: así una partida guardada antes de que
@@ -9663,12 +9861,13 @@ function huesteNueva(id, ramas, x, y, nombre) {
 function siguienteOrden(h, s) {
   const cola = (h.cola || []).slice();
   const n = cola.shift();
-  if (!n) return { ...h, orden: null, destino: null, objetivo: null,
+  if (!n) return { ...h, orden: null, destino: null, objetivo: null, plaza: null,
                    cerco: 0, aguante: 0, largo: 0, recorrido: 0, cola: [] };
   const destino = { x: n.x, y: n.y };
   const enSitio = leguas({ x: h.x, y: h.y }, destino) < 12;
   const p = ((s && s.provincias) || []).find((q) => q.id === n.id) || n.prov || null;
   return { ...h, orden: n.orden, objetivo: n.id, cola,
+    plaza: p && p.ajena ? p : null,
     destino: enSitio ? null : destino,
     largo: enSitio ? 0 : leguas({ x: h.x, y: h.y }, destino),
     recorrido: 0, llegada: enSitio,
@@ -9690,7 +9889,10 @@ function ejercitoLibre(s) {
 // cuánto lleva recorrido del total, y de ahí sale sola la barra que el mapa
 // enseña: el avance se ve, no se adivina.
 function avanzarHueste(h, dias, provs, s) {
-  if (!h || !h.destino || h.orden === "cercar") return h;
+  // Cercar tampoco se hace a distancia: primero se llega y después se sienta
+  // uno delante. Mientras haya destino se camina, sea cual sea la orden; sin
+  // destino no hay nada que andar y la hueste ya está donde tiene que estar.
+  if (!h || !h.destino) return h;
   const d = h.destino;
   const total = h.largo || leguas({ x: h.x, y: h.y }, d) || 1;
   // Por dónde va: la provincia bajo sus pies manda el terreno y el camino.
@@ -9820,7 +10022,10 @@ function levantarEnemigas(s, rnd) {
   const yaTiene = (s.huestes || []).some((h) => h.de);
   if (yaTiene) return [];
   const v = (s.vecinos || []).find((q) => q.nombre === s.guerra.vecino);
-  const poder = Math.max(2, Math.round(poderVecino(v, s.anio) / 9));
+  // Guerra contra alguien que no está en la lista de vecinos: pasa cuando la
+  // guerra se declaró desde el mapa a un país que no era vecino de la ficha.
+  // Sin esto, el turno entero reventaba al ir a buscarle el poder.
+  const poder = Math.max(2, Math.round(poderVecino(v || { poder: 12 }, s.anio) / 9));
   // De dónde sale: del borde del reino más lejos de tu corte, que es por donde
   // uno entra cuando no quiere que lo vean venir.
   const provs = s.provincias || [];
@@ -9844,6 +10049,14 @@ function correrCampana(s, dias, rnd) {
   const hechos = [];
   const tomadas = [];
   const huestes = [];
+  // Lo que cada hueste está ganando de suelo este turno, por comarca. Se junta
+  // primero y se aplica al final: dos huestes sobre la misma plaza empujan el
+  // mismo frente, no uno cada una.
+  const empujes = new Map();
+  const conquistadas = [];
+  // Quién tomó qué. Sin esta distinción, una plaza que te tomaba el enemigo
+  // quedaba marcada como recién conquistada por vos: la guerra al revés.
+  const porElEnemigo = [];
   // Si hay guerra y el enemigo todavía no puso nada en el mapa, lo pone ahora.
   const nacidas = levantarEnemigas(s, rnd);
   if (nacidas.length)
@@ -9865,13 +10078,34 @@ function correrCampana(s, dias, rnd) {
               largo: dm, recorrido: 0 };
     }
     h = avanzarHueste(h, dias, provs, s);
-    const obj = h.objetivo ? provs.find((p) => p.id === h.objetivo) : null;
+    // La plaza puede ser una comarca del reino o tierra ajena. La segunda no
+    // está en la lista —es del vecino— y viaja con la propia hueste; sin este
+    // respaldo, cercar y asaltar fuera de casa no hacían absolutamente nada.
+    const obj = h.objetivo ? (provs.find((p) => p.id === h.objetivo) || h.plaza || null) : null;
+    // Estar encima de una plaza enemiga es ir ganándole el campo, se la esté
+    // cercando o asaltando. Eso es lo que el mapa pinta.
+    // Estar en el sitio es haber llegado, o no tener a dónde ir: una hueste sin
+    // destino está donde está. Mirar solo `llegada` dejaba fuera a las que
+    // nacen ya delante de la plaza, y esas se quedaban sitiando para siempre.
+    const alPie = !!h.llegada || !h.destino;
+    let ritmoAqui = 0, tomadoYa = 0;
+    if (obj && alPie && (h.orden === "cercar" || h.orden === "asaltar")) {
+      ritmoAqui = ritmoDeConquista(h, obj, s);
+      const f0 = frenteDe(s && s.frentes, obj.id);
+      tomadoYa = f0 ? f0.avance : 0;
+      const ya = empujes.get(obj.id);
+      if (!ya || ya.ritmo < ritmoAqui)
+        empujes.set(obj.id, { ritmo: ritmoAqui, nuevo: frenteNuevo(obj.id, obj, h, !h.de) });
+    }
 
-    if (h.orden === "cercar" && obj) {
+    if (h.orden === "cercar" && obj && alPie) {
       const aguante = h.aguante || aguanteDe(obj, s);
-      const cerco = (h.cerco || 0) + dias;
+      // Los días valen lo que valga el cerco: mientras el campo esté a medias,
+      // la plaza sigue recibiendo grano por donde no hay nadie.
+      const cerco = (h.cerco || 0) + diasDeCerco(tomadoYa, ritmoAqui, dias);
       if (cerco >= aguante) {
         tomadas.push(obj.id);
+        if (h.de) porElEnemigo.push(obj.id); else if (obj.ajena) conquistadas.push(obj);
         hechos.push(`${obj.nombre} se rinde tras ${Math.round(cerco)} días de cerco: se acabó el pan antes que la voluntad.`);
         h = siguienteOrden({ ...h, cerco: 0, aguante: 0 }, s);
       } else {
@@ -9879,12 +10113,13 @@ function correrCampana(s, dias, rnd) {
         // más sitiadores que el muro.
         h = { ...h, cerco, aguante, moral: acotar((h.moral || 100) - dias * 0.05, 30, 100) };
       }
-    } else if (h.llegada && h.orden === "asaltar" && obj) {
+    } else if (alPie && h.orden === "asaltar" && obj) {
       const r = asaltar(h, obj, s, rnd);
       const ramas = { ...h.ramas };
       for (const k of Object.keys(ramas)) ramas[k] = Math.max(0, Math.round(ramas[k] * (1 - r.parte)));
       if (r.tomada) {
         tomadas.push(obj.id);
+        if (h.de) porElEnemigo.push(obj.id); else if (obj.ajena) conquistadas.push(obj);
         hechos.push(`${obj.nombre} cae por asalto. ${Math.round(r.parte * 100)} de cada cien no volvieron.`);
       } else {
         hechos.push(`El asalto a ${obj.nombre} se estrella contra el muro: ${Math.round(r.parte * 100)} de cada cien quedaron al pie.`);
@@ -9943,10 +10178,29 @@ function correrCampana(s, dias, rnd) {
     }
   }
   const finales = vivas.filter((h) => h && !caidas.has(h.id) && unidadesTotales(h.ramas) > 0);
-  const nuevas = tomadas.length
-    ? provs.map((p) => (tomadas.includes(p.id) ? { ...p, ocupada: false, mia: true } : p))
+  let nuevas = tomadas.length
+    ? provs.map((p) => (!tomadas.includes(p.id) ? p
+        : porElEnemigo.includes(p.id) ? { ...p, ocupada: true }
+        : { ...p, ocupada: false, mia: true }))
     : provs;
-  return { huestes: finales, provincias: nuevas, hechos, tomadas };
+  // La tierra ajena que cayó pasa a ser comarca del reino, con su contorno de
+  // verdad. Es lo que hace que la guerra sirva para algo.
+  const ganadas = [];
+  for (const q of conquistadas) {
+    const r = comarcaConquistada(q, { ...s, provincias: nuevas });
+    if (!r) continue;
+    // vecina por los dos lados: si no, el reino queda partido en dos islas
+    nuevas = nuevas.map((p) => (r.pegar.includes(p.id)
+      ? { ...p, ady: [...(p.ady || []), r.comarca.id] } : p));
+    nuevas = [...nuevas, r.comarca];
+    ganadas.push(r.comarca);
+    hechos.push(`${r.comarca.nombre} pasa a ser del reino: ${fmtPob(r.comarca.poblacion)} de gente que no eligió serlo.`);
+  }
+  // Y los frentes al día. Lo tomado queda entero —la comarca ya es tuya, no
+  // hay media comarca que pintar— y lo demás crece o se va borrando.
+  const frentes = frentesTrasElDia(s && s.frentes, empujes, dias)
+    .filter((f) => !tomadas.includes(f.id));
+  return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas };
 }
 
 function mantenimientoEjercito(ej) {
@@ -12988,6 +13242,14 @@ function aplicarEfectos(n, ef, rnd) {
       }
       return p;
     });
+    // Lo que la campaña sumó después de que el mundo hiciera sus cuentas. El
+    // mundo trabaja sobre la lista con la que empezó el turno; una comarca
+    // conquistada esta misma vuelta no está en ella, y quedarse solo con la
+    // del mundo borraba la conquista en silencio: la crónica la cantaba, el
+    // mapa no la pintaba y el reino seguía teniendo las mismas comarcas.
+    const enElMundo = new Set(e.provincias.map((w) => w.id));
+    const sumadas = (n.provincias || []).filter((p) => !enElMundo.has(p.id));
+    if (sumadas.length) e.provincias = [...e.provincias, ...sumadas];
     e.reservas = ef.vivo.reservas;
     e.mundo = ef.vivo.mundo;
     if (ef.vivo.lenguas) e.lenguas = ef.vivo.lenguas;
@@ -16366,7 +16628,7 @@ const ACCIONES = [
       if (luego) return "…y después marchar hasta aquí";
       return Number.isFinite(d) ? `marchar hasta aquí · ${d} días` : "marchar hasta aquí";
     },
-    hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id, x: p.x, y: p.y,
+    hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id, idx: p.idx, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
   // Se cerca y se asalta lo que no es tuyo: tierra ajena, o una plaza propia
   // que el enemigo te tomó. Sitiar tu propia comarca leal no es una orden, es
@@ -16376,7 +16638,7 @@ const ACCIONES = [
     rotulo: (p, s, x) => (x.hueste && x.hueste.orden
       ? `…y después cercarla · aguanta ${aguanteDe(p, s)} días`
       : `cercarla · aguanta ${aguanteDe(p, s)} días`),
-    hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id, x: p.x, y: p.y,
+    hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id, idx: p.idx, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
   { id: "asaltar", n: "asaltarla", ico: "⚔", col: "red",
     puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
@@ -16385,7 +16647,7 @@ const ACCIONES = [
       const luego = !!(x.hueste && x.hueste.orden);
       return `${luego ? "…y después asaltarla" : "asaltarla"} · ${Math.round(q.prob * 100)} de cada 100`;
     },
-    hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id, x: p.x, y: p.y,
+    hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id, idx: p.idx, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
   { id: "ficha", n: "ver la comarca", ico: "◈", col: "gold",
     puede: (p, s, x) => !p.ajena && x.seleccion !== p.id,
@@ -18185,6 +18447,7 @@ export default function PaxMundi() {
       setState((s) => correrSecretarios(aplicarEfectos({
         ...s,
         huestes: camp.huestes,
+        frentes: camp.frentes,
         anio: anioNuevo, dia: diaNuevo,
         turno: s.turno + 1,
         dia: diaNuevo,
@@ -18520,13 +18783,18 @@ export default function PaxMundi() {
     : rueda.id ? (s.provincias || []).find((p) => p.id === rueda.id) || null
     // Con el punto del mapa donde se hizo clic: sin coordenadas una hueste no
     // tiene a dónde marchar, y atacar al vecino era imposible desde el mapa.
-    : rueda.ajena ? { ajena: true,
+    // La comarca del vecino con sus datos de verdad —terreno, contorno,
+    // gente—: de ahí salen lo que cuesta cercarla y lo que se pinta cuando
+    // empieza a caer. Si el mapa no supo decir cuál es, queda el punto pelado,
+    // que al menos deja marchar hasta ahí.
+    : rueda.ajena ? { ...(plazaAjena(rueda.idx, s) || {}), ajena: true, idx: rueda.idx,
                       // El nombre para la guerra es el del país; el de la
                       // comarca queda aparte, para decir dónde se marcha.
                       nombre: PAIS_ES[rueda.pais] || rueda.pais
                         || PAIS_ES[rueda.nombre] || rueda.nombre,
                       comarca: PAIS_ES[rueda.nombre] || rueda.nombre,
-                      id: "ajena:" + rueda.nombre, x: rueda.mx, y: rueda.my } : null;
+                      id: rueda.idx != null ? "ajena:" + rueda.idx : "ajena:" + rueda.nombre,
+                      x: rueda.mx, y: rueda.my } : null;
   const accRueda = objRueda ? accionesDe(objRueda, s, ctxRueda) : [];
   provSelRef.current = provSel;
   abrirRuedaRef.current = abrirRueda;
@@ -18563,11 +18831,15 @@ export default function PaxMundi() {
     if (pedido.tipo === "campana") {
       setState((st) => {
         // El destino puede ser una comarca propia o tierra ajena. La segunda no
-        // está en la lista de provincias —es del vecino— así que viene con sus
-        // coordenadas puestas y se la trata como una plaza más.
+        // está en la lista de provincias —es del vecino— y se arma con la
+        // geometría real del mapa: su terreno y su gente son los que deciden
+        // cuánto cuesta tomarla.
+        const ajena = plazaAjena(pedido.idx, st);
         const p = (st.provincias || []).find((q) => q.id === pedido.id)
-          || (pedido.x != null ? { id: pedido.id, nombre: pedido.nombre, x: pedido.x, y: pedido.y,
-                                   ajena: true, terreno: "llanura", poblacion: 25000 } : null);
+          || (ajena ? { ...ajena, id: pedido.id, nombre: pedido.nombre || ajena.nombre,
+                        x: pedido.x, y: pedido.y }
+             : pedido.x != null ? { id: pedido.id, nombre: pedido.nombre, x: pedido.x, y: pedido.y,
+                                    ajena: true, terreno: "llanura", poblacion: 25000 } : null);
         if (!p) return st;
         return { ...st, huestes: (st.huestes || []).map((h) => {
           if (h.id !== huesteSel) return h;
@@ -18578,6 +18850,10 @@ export default function PaxMundi() {
           const destino = { x: p.x, y: p.y };
           const enSitio = leguas({ x: h.x, y: h.y }, destino) < 12;
           return { ...h, orden: pedido.orden, objetivo: pedido.id,
+            // La plaza ajena viaja con la hueste: cuando llegue el turno,
+            // correrCampana no puede buscarla en la lista del reino porque no
+            // está. Sin esto, cercar fuera de casa no hacía nada.
+            plaza: p.ajena ? p : null,
             // Cercar y asaltar se hacen estando ahí: si no lo está, primero va.
             destino: enSitio ? null : destino,
             largo: enSitio ? 0 : leguas({ x: h.x, y: h.y }, destino),
@@ -18652,6 +18928,7 @@ export default function PaxMundi() {
           onRueda={abrirRueda}
           huestes={s.huestes}
           huesteSel={huesteSel}
+          frentes={s.frentes}
           onHueste={(id) => setHuesteSel((v) => (v === id ? null : id))}
           sitio={sitioMapa}
           margenSup={altoCab}
