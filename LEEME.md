@@ -99,6 +99,23 @@ el dedo sigue midiendo lo mismo—. Con ratón se quedan compactos.
 
 En apaisado y en tablet no cambia nada: ahí los paneles laterales entran bien.
 
+### Mandar el ejército con el dedo
+
+Tocás el escudo de la hueste y queda elegida —abajo aparece de cuál se trata y
+qué se espera de vos—; tocás en el mapa a dónde tiene que ir y salen las
+órdenes que caben ahí: marchar, cercar la plaza, asaltarla. Tocás el escudo de
+nuevo y la soltás.
+
+Todo lo demás del mapa —declararle la guerra al vecino, mirar una comarca,
+mudar la corte— sale dejando el dedo apretado medio segundo sobre el sitio. Es
+la misma rueda que con ratón abre el clic derecho.
+
+Durante un tiempo nada de esto se podía hacer con el dedo: la rueda solo se
+abría con el clic derecho o con la tecla `M`, y encima el clic que el navegador
+manda al levantar el dedo caía sobre el fondo de la rueda recién abierta y la
+cerraba antes de que se viera. El juego estaba entero y no era jugable en un
+teléfono, que es donde se juega.
+
 ## La partida se guarda sola
 
 Al terminar cada turno, y también cuando dejás el juego —cambiás de pestaña,

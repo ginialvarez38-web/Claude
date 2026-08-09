@@ -6528,6 +6528,12 @@ const GRADO_KM = 111.32;
 const enRad = (g) => (g * Math.PI) / 180;
 const acotar = (v, a, b) => Math.max(a, Math.min(b, v));
 
+// Si se juega con el dedo o con el ratón. Cambia lo que se le dice al jugador:
+// «clic derecho» en un teléfono no existe, y una ayuda que nombra un gesto
+// imposible es peor que no decir nada.
+const conDedo = () => typeof window !== "undefined" && !!window.matchMedia
+  && window.matchMedia("(pointer: coarse)").matches;
+
 // Hasta dónde se puede correr el mapa en un eje. Antes eran cuarenta grados de
 // holgura a cada lado, un número fijo. Con una pantalla apaisada anda; con una
 // vertical, no: para mostrar 130° de ancho hay que mostrar 250° de alto —el
@@ -7214,9 +7220,34 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     clearTimeout(borrarRotulo.current);
     borrarRotulo.current = setTimeout(() => setRotulo(null), 2600);
   };
+  // Con el dedo no hay clic derecho ni tecla M, así que la rueda —donde están
+  // TODAS las órdenes— era inalcanzable en un teléfono. Dejar el dedo apretado
+  // medio segundo la abre: es el gesto que todo el mundo ya conoce.
+  const largo = useRef(0);
+  const dedo = useMemo(conDedo, []);
+  // Qué hay justo debajo del dedo. El mapa es un solo lienzo y el navegador ya
+  // sabe la respuesta: preguntársela sale más barato y más exacto que rehacer
+  // la geometría a mano.
+  const sobreHueste = (cx, cy) => {
+    if (typeof document === "undefined") return false;
+    const el = document.elementFromPoint(cx, cy);
+    const et = el && el.getAttribute && el.getAttribute("aria-label");
+    return !!et && (et.startsWith("tocar ") || et.startsWith("hueste "));
+  };
+  const cancelarLargo = () => { if (largo.current) { clearTimeout(largo.current); largo.current = 0; } };
   function onDown(e) {
     detener();
     frenar();
+    cancelarLargo();
+    if (e.pointerType === "touch" && onRueda) {
+      const { clientX, clientY } = e;
+      largo.current = setTimeout(() => {
+        largo.current = 0;
+        if (movido.current || punteros.current.size !== 1) return;
+        movido.current = true;                 // que el soltar no cuente como toque
+        abrirRuedaEn(clientX, clientY);
+      }, 450);
+    }
     if (pendiente.current) asentar();          // si quedaba un tirón a medias, se asienta
     setRotulo(null);
     punteros.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -7248,6 +7279,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     const dx = e.clientX - a.x, dy = e.clientY - a.y;
     if (Math.abs(dx) + Math.abs(dy) > 4 && !movido.current) {
       movido.current = true;
+      cancelarLargo();
       // ahora sí: de aquí en más el gesto es un arrastre y el mapa se queda con
       // el puntero hasta que se suelte, salga por donde salga
       try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
@@ -7309,10 +7341,20 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // gráfica de balde, y se vuelve a dibujar de verdad una vez por tirón.
   const acercando = useRef(false);
   function onUp(e) {
+    cancelarLargo();
     punteros.current.delete(e.pointerId);
     if (punteros.current.size === 0) {
       asentar();
-      if (!movido.current) sondearYSoltar(e.clientX, e.clientY);
+      // Con una hueste elegida, tocar el mapa es darle destino: es el gesto que
+      // uno espera —toco el ejército, toco a dónde va— y evita tener que
+      // descubrir que existe un menú.
+      if (!movido.current) {
+        // …salvo que el dedo haya caído sobre otra hueste: ahí lo que se quiere
+        // es cambiar de ejército, no mandar a éste encima del otro. Si se abre
+        // la rueda, su fondo se traga el clic y el escudo no llega a elegirse.
+        if (huesteSel && onRueda && !sobreHueste(e.clientX, e.clientY)) abrirRuedaEn(e.clientX, e.clientY);
+        else sondearYSoltar(e.clientX, e.clientY);
+      }
       arrastre.current = null;
       return;
     }
@@ -7946,24 +7988,22 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     if (!onSeleccion) return;
     onSeleccion(seleccion === id ? null : id);
   };
-  // El clic derecho abre la rueda sobre lo que haya debajo. Se sondea el punto
-  // igual que para el rótulo: si cae en comarca propia, va la comarca; si cae
-  // en tierra ajena, va el país; si cae en el mar, no va nada y la rueda no se
-  // abre. El navegador se queda sin su menú, que acá no sirve para nada.
-  function onContexto(e) {
-    if (!onRueda) return;
-    e.preventDefault();
-    // La rueda se abre encima del mapa y se queda con el «soltar» del botón,
-    // así que el gesto se cierra acá a mano. Sin esto el mapa se quedaba
-    // creyendo que el dedo seguía apoyado y el clic siguiente no elegía nada.
+  // La rueda se abre sobre lo que haya debajo del punto, venga el gesto de
+  // donde venga: clic derecho, tecla, dedo apretado, o toque en el destino con
+  // una hueste elegida. Se sondea igual que para el rótulo: si cae en comarca
+  // propia, va la comarca; si cae en tierra ajena, va el país; si cae en el
+  // mar, no va nada y la rueda no se abre.
+  function abrirRuedaEn(cx, cy) {
+    // La rueda se abre encima del mapa y se queda con el «soltar» del dedo, así
+    // que el gesto se cierra acá a mano. Sin esto el mapa se quedaba creyendo
+    // que el dedo seguía apoyado y el toque siguiente no elegía nada.
     punteros.current.clear();
     arrastre.current = null;
-    movido.current = false;
     setRotulo(null);
     const r = medRef.current, v = vbRef.current;
     if (!r || !r.w) return;
-    const mx = v.x + ((e.clientX - r.left) / r.w) * v.w;
-    const my = v.y + ((e.clientY - r.top) / r.h) * v.h;
+    const mx = v.x + ((cx - r.left) / r.w) * v.w;
+    const my = v.y + ((cy - r.top) / r.h) * v.h;
     let a = null;
     try { a = accidenteEn(mx, my, (v.w / r.w) * 9); } catch (_) { a = null; }
     const mio = a && a.t === "tierra"
@@ -7976,8 +8016,14 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     let pais = null;
     try { const g = provinciaEn(mx, my); pais = g && g.pais; } catch (_) { pais = null; }
     onRueda(mio ? { id: mio.id, mx, my }
-      : a && a.t === "tierra" ? { ajena: true, nombre: a.n, pais, mx, my } : null,
-      e.clientX, e.clientY);
+      : a && a.t === "tierra" ? { ajena: true, nombre: a.n, pais, mx, my } : null, cx, cy);
+  }
+  function onContexto(e) {
+    if (!onRueda) return;
+    e.preventDefault();
+    cancelarLargo();                   // si el dedo ya la había pedido, no dos veces
+    movido.current = false;
+    abrirRuedaEn(e.clientX, e.clientY);
   }
 
   // ——— las huestes ———
@@ -7989,7 +8035,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const capaHuestes = useMemo(() => {
     const hs = (huestes || []).filter((h) => h && h.x != null);
     if (!hs.length) return null;
-    const r = pxCapa * 7;
+    // El escudo medía catorce píxeles en pantalla y el dedo no acierta eso.
+    // Se agranda, y encima se le pone una zona de toque invisible del tamaño
+    // que pide un dedo —unos cuarenta píxeles— porque agrandar el dibujo hasta
+    // ahí taparía el mapa.
+    const r = pxCapa * 10;
+    const rToque = pxCapa * 21;
     return (
       <g>
         {hs.map((h) => {
@@ -8044,6 +8095,15 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                   opacity="0.85" pointerEvents="none">
                   <title>{`cercando: ${Math.round(h.cerco || 0)} de ${Math.round(h.aguante || 0)} días`}</title>
                 </circle>
+              )}
+              {/* La zona de toque va debajo del escudo y es mucho más grande
+                  que él: se toca donde uno apunta, no donde el dibujo termina. */}
+              {!suya && (
+                <circle cx={h.x} cy={h.y} r={rToque} fill="transparent"
+                  pointerEvents="all" style={{ cursor: "pointer" }}
+                  aria-label={"tocar " + h.nombre}
+                  onClick={(e) => { e.stopPropagation();
+                    if (!movido.current && onHueste) onHueste(h.id); }} />
               )}
               {/* el escudo */}
               <path d={suya
@@ -8400,8 +8460,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           <div style={{ fontFamily: mono, fontSize: 9, letterSpacing: 1.3, marginTop: 3,
             color: sel.ocupada ? C.red : sel.capital ? C.gold : C.brass }}>
             {sel.ocupada ? "EN MANOS AJENAS" : sel.capital ? "CAPITAL DEL REINO" : "PROVINCIA"}
-            {onComparar && <span style={{ color: C.cyan, opacity: 0.75 }}>{" · CTRL+CLIC: COMPARAR"}</span>}
-            {onRueda && <span style={{ color: C.brass, opacity: 0.75 }}>{" · DERECHO O M: QUÉ HACER"}</span>}
+            {onComparar && !dedo && <span style={{ color: C.cyan, opacity: 0.75 }}>{" · CTRL+CLIC: COMPARAR"}</span>}
+            {onRueda && <span style={{ color: C.brass, opacity: 0.75 }}>
+              {dedo ? " · APRETÁ Y SOSTENÉ: QUÉ HACER" : " · DERECHO O M: QUÉ HACER"}</span>}
           </div>
           {/* Si se está buscando sitio para una obra, el veredicto de esta
               comarca va arriba del todo: es lo que se vino a mirar. */}
@@ -16530,9 +16591,17 @@ function RuedaAcciones({ x, y, titulo, glosa, acciones, onElegir, onCerrar }) {
   }, [n, sobre, acciones, onElegir, onCerrar]);
   const mostrada = acciones[sobre];
   return (
-    <div onClick={onCerrar} onContextMenu={(e) => { e.preventDefault(); onCerrar(); }}
+    // El fondo cierra con el dedo apoyado y no con el clic. Parece un detalle y
+    // era el motivo de que en un teléfono no hubiera manera de dar una orden: la
+    // rueda se abre a mitad de un toque —al dejar el dedo apretado, o al soltar
+    // sobre el destino—, y el clic que el navegador manda después de ese mismo
+    // toque caía ya sobre este fondo recién puesto y la cerraba antes de verla.
+    // Con «pointerdown» el gesto que la abrió no puede cerrarla: su apoyo pasó
+    // cuando el fondo todavía no existía.
+    <div onPointerDown={onCerrar} onContextMenu={(e) => { e.preventDefault(); onCerrar(); }}
       style={{ position: "fixed", inset: 0, zIndex: 20 }}>
       <div className="pm-fade" role="menu" aria-label={titulo}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         style={{ position: "absolute", left: x, top: y, width: 0, height: 0 }}>
         {/* el disco del medio: de qué se trata y qué hace lo que se está señalando */}
@@ -18748,6 +18817,33 @@ export default function PaxMundi() {
           titulo={objRueda.nombre + (objRueda.capital ? " · la corte" : objRueda.ocupada ? " · ocupada" : "")}
           glosa={objRueda.ajena ? "tierra ajena" : `${accRueda.length} cosas que hacer`}
           onElegir={elegirDeRueda} onCerrar={() => setRueda(null)} />
+      )}
+
+      {/* Con una hueste elegida hay que decir qué se espera del jugador. Sin
+          esto el gesto existe pero no se descubre, que es lo mismo que no
+          existir. */}
+      {laHueste && (
+        <div className="pm-fade" style={{ position: "fixed", zIndex: 7,
+          left: "50%", transform: "translateX(-50%)", bottom: ALTO_PIE + 12,
+          padding: "9px 14px", borderRadius: 10, maxWidth: "min(460px, 92vw)",
+          background: "rgba(10,16,23,0.96)", border: `1px solid ${C.gold}88`,
+          boxShadow: "0 8px 26px rgba(0,0,0,0.55)", display: "flex",
+          alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 15 }}>⚑</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, color: C.gold, fontFamily: mono }}>
+              {laHueste.nombre} · {unidadesTotales(laHueste.ramas)} ud
+            </div>
+            <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.45 }}>
+              Tocá en el mapa a dónde querés que vaya
+              {laHueste.orden ? " y se suma al plan." : "."}
+            </div>
+          </div>
+          <button onClick={() => setHuesteSel(null)}
+            style={{ marginLeft: "auto", padding: "5px 9px", borderRadius: 6,
+              background: "transparent", border: `1px solid ${C.line}`, color: C.muted,
+              fontFamily: mono, fontSize: 10.5, cursor: "pointer" }}>soltar</button>
+        </div>
       )}
 
       {/* ── LA PARTIDA ────────────────────────────────────────────────
