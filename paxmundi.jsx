@@ -8009,6 +8009,30 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                     stroke={rama.col} strokeWidth={pxCapa * 1.1} opacity="0.7" />
                 </g>
               )}
+              {/* Lo que viene después, encadenado y más tenue: el plan entero
+                  se lee del mapa sin abrir nada. */}
+              {(h.cola || []).length > 0 && (() => {
+                const pasos = [];
+                let px2 = d ? d.x : h.x, py2 = d ? d.y : h.y;
+                for (const q of h.cola) {
+                  if (q.x == null) continue;
+                  pasos.push({ x1: px2, y1: py2, x2: q.x, y2: q.y, o: q.orden });
+                  px2 = q.x; py2 = q.y;
+                }
+                return (
+                  <g pointerEvents="none" opacity="0.5">
+                    {pasos.map((t, k) => (
+                      <g key={"pl" + k}>
+                        <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={rama.col}
+                          strokeWidth={pxCapa * 0.9} strokeDasharray={`${pxCapa * 1.6} ${pxCapa * 4}`} />
+                        <circle cx={t.x2} cy={t.y2} r={pxCapa * 1.8} fill="none"
+                          stroke={t.o === "asaltar" ? "#E05252" : t.o === "cercar" ? "#E8B04B" : rama.col}
+                          strokeWidth={pxCapa * 1.1} />
+                      </g>
+                    ))}
+                  </g>
+                );
+              })()}
               {h.orden === "cercar" && (
                 <circle cx={h.x} cy={h.y} r={r * 1.9} fill="none" stroke="#E8B04B"
                   strokeWidth={pxCapa * 1.6} strokeDasharray={`${pxCapa * 2.4} ${pxCapa * 2.4}`}
@@ -9556,7 +9580,28 @@ const ORDENES = {
 function huesteNueva(id, ramas, x, y, nombre) {
   return { id, nombre: nombre || "hueste", ramas: { ...ramas }, x, y,
            orden: null, destino: null, objetivo: null, moral: 100,
-           recorrido: 0, largo: 0, cerco: 0, aguante: 0 };
+           recorrido: 0, largo: 0, cerco: 0, aguante: 0,
+           // Lo que hay que hacer después de lo de ahora. Va aparte de la
+           // orden en curso a propósito: así una partida guardada antes de que
+           // esto existiera sigue cargando, con la cola vacía.
+           cola: [] };
+}
+
+// Pasar a lo siguiente del plan. Si no hay nada más, la hueste queda quieta
+// donde está, que es lo que corresponde: nadie sigue marchando sin órdenes.
+function siguienteOrden(h, s) {
+  const cola = (h.cola || []).slice();
+  const n = cola.shift();
+  if (!n) return { ...h, orden: null, destino: null, objetivo: null,
+                   cerco: 0, aguante: 0, largo: 0, recorrido: 0, cola: [] };
+  const destino = { x: n.x, y: n.y };
+  const enSitio = leguas({ x: h.x, y: h.y }, destino) < 12;
+  const p = ((s && s.provincias) || []).find((q) => q.id === n.id) || n.prov || null;
+  return { ...h, orden: n.orden, objetivo: n.id, cola,
+    destino: enSitio ? null : destino,
+    largo: enSitio ? 0 : leguas({ x: h.x, y: h.y }, destino),
+    recorrido: 0, llegada: enSitio,
+    cerco: 0, aguante: n.orden === "cercar" && p ? aguanteDe(p, s) : 0 };
 }
 
 // Lo que queda del ejército del reino después de sacar lo desplegado: sirve
@@ -9635,7 +9680,7 @@ function correrCampana(s, dias, rnd) {
       if (cerco >= aguante) {
         tomadas.push(obj.id);
         hechos.push(`${obj.nombre} se rinde tras ${Math.round(cerco)} días de cerco: se acabó el pan antes que la voluntad.`);
-        h = { ...h, orden: null, objetivo: null, cerco: 0, aguante: 0 };
+        h = siguienteOrden({ ...h, cerco: 0, aguante: 0 }, s);
       } else {
         // Sentarse delante de una plaza también cuesta: la enfermedad se lleva
         // más sitiadores que el muro.
@@ -9651,11 +9696,17 @@ function correrCampana(s, dias, rnd) {
       } else {
         hechos.push(`El asalto a ${obj.nombre} se estrella contra el muro: ${Math.round(r.parte * 100)} de cada cien quedaron al pie.`);
       }
-      h = { ...h, ramas, orden: null, objetivo: r.tomada ? null : h.objetivo,
-            moral: acotar((h.moral || 100) - (r.tomada ? 4 : 22), 20, 100) };
+      const tras = { ...h, ramas, moral: acotar((h.moral || 100) - (r.tomada ? 4 : 22), 20, 100) };
+      // Si entró, se pasa a lo siguiente del plan; si rebotó, se queda con la
+      // plaza delante y sin orden: volver a lanzarla es decisión del que manda.
+      h = r.tomada ? siguienteOrden(tras, s)
+                   : { ...tras, orden: null, destino: null, llegada: true };
     } else if (h.llegada && h.orden === "marchar") {
-      hechos.push(`La ${h.nombre} llega a su destino.`);
-      h = { ...h, orden: null, destino: null };
+      const sigue = siguienteOrden({ ...h, destino: null }, s);
+      hechos.push(sigue.orden
+        ? `La ${h.nombre} llega y pasa a ${ORDENES[sigue.orden].n} lo que sigue del plan.`
+        : `La ${h.nombre} llega a su destino.`);
+      h = sigue;
     }
     // Lo andado de verdad, para que el mapa lo enseñe.
     h = { ...h, ultimo: leguas(antes, { x: h.x, y: h.y }) };
@@ -16071,10 +16122,17 @@ const ACCIONES = [
   { id: "desplegar", n: "desplegar tropas aquí", ico: "⚑", col: "red",
     puede: (p, s, x) => !p.ajena && !x.hueste && unidadesTotales(ejercitoLibre(s)) > 0,
     hace: (p) => ({ tipo: "desplegar", id: p.id }) },
+  // Si la hueste ya tiene algo entre manos, la orden nueva no la pisa: se
+  // encola. Es como se piensa una campaña —«andá hasta ahí y después cercá»— y
+  // el rótulo lo dice, así nadie da una orden creyendo que da otra. Para
+  // empezar de cero está «cancelar la orden», en la sección de campaña.
   { id: "marchar", n: "marchar hasta aquí", ico: "→", col: "cyan",
     puede: (p, s, x) => !!x.hueste && p.x != null,
     rotulo: (p, s, x) => {
-      const d = x.hueste ? diasDeMarcha({ ...x.hueste, destino: { x: p.x, y: p.y } }, s.provincias) : 0;
+      const luego = !!(x.hueste && x.hueste.orden);
+      const d = x.hueste && !luego
+        ? diasDeMarcha({ ...x.hueste, destino: { x: p.x, y: p.y } }, s.provincias) : 0;
+      if (luego) return "…y después marchar hasta aquí";
       return Number.isFinite(d) ? `marchar hasta aquí · ${d} días` : "marchar hasta aquí";
     },
     hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id, x: p.x, y: p.y,
@@ -16084,14 +16142,17 @@ const ACCIONES = [
   // un disparate, y la rueda no ofrece disparates.
   { id: "cercar", n: "cercarla", ico: "◍", col: "gold",
     puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
-    rotulo: (p, s) => `cercarla · aguanta ${aguanteDe(p, s)} días`,
+    rotulo: (p, s, x) => (x.hueste && x.hueste.orden
+      ? `…y después cercarla · aguanta ${aguanteDe(p, s)} días`
+      : `cercarla · aguanta ${aguanteDe(p, s)} días`),
     hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
   { id: "asaltar", n: "asaltarla", ico: "⚔", col: "red",
     puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
     rotulo: (p, s, x) => {
       const q = pulsoDeAsalto(x.hueste, p, s);
-      return `asaltarla · ${Math.round(q.prob * 100)} de cada 100`;
+      const luego = !!(x.hueste && x.hueste.orden);
+      return `${luego ? "…y después asaltarla" : "asaltarla"} · ${Math.round(q.prob * 100)} de cada 100`;
     },
     hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
@@ -18271,6 +18332,10 @@ export default function PaxMundi() {
         if (!p) return st;
         return { ...st, huestes: (st.huestes || []).map((h) => {
           if (h.id !== huesteSel) return h;
+          // Con algo entre manos, la orden nueva va al final del plan.
+          if (h.orden) return { ...h, cola: [...(h.cola || []),
+            { orden: pedido.orden, id: pedido.id, x: p.x, y: p.y,
+              nombre: p.nombre, prov: p.ajena ? p : null }] };
           const destino = { x: p.x, y: p.y };
           const enSitio = leguas({ x: h.x, y: h.y }, destino) < 12;
           return { ...h, orden: pedido.orden, objetivo: pedido.id,
@@ -20868,6 +20933,13 @@ export default function PaxMundi() {
                                 ? `: ${Math.round(h.cerco || 0)} de ${Math.round(h.aguante)} días`
                                 : h.destino && Number.isFinite(dias) ? `, ${dias} días más` : ""}
                             </div>
+                            {(h.cola || []).length > 0 && (
+                              <div style={{ fontSize: 11, color: C.brass, marginTop: 3, lineHeight: 1.5 }}>
+                                después: {(h.cola || []).map((q, k) =>
+                                  `${(ORDENES[q.orden] || {}).ico || "→"} ${(ORDENES[q.orden] || {}).n || q.orden}`
+                                  + (q.nombre ? ` ${q.nombre}` : "")).join(" · ")}
+                              </div>
+                            )}
                             {largo > 0 && (
                               <div style={{ height: 4, marginTop: 6, borderRadius: 2,
                                 background: "rgba(0,0,0,0.35)", overflow: "hidden" }}>
@@ -20886,11 +20958,11 @@ export default function PaxMundi() {
                                 <button onClick={() => setState((st) => ({ ...st,
                                     huestes: (st.huestes || []).map((q) => (q.id === h.id
                                       ? { ...q, orden: null, destino: null, objetivo: null,
-                                          cerco: 0, aguante: 0, largo: 0, recorrido: 0 } : q)) }))}
+                                          cerco: 0, aguante: 0, largo: 0, recorrido: 0, cola: [] } : q)) }))}
                                   style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
                                     background: "transparent", border: `1px solid ${C.line}`,
                                     color: C.muted, fontFamily: mono, fontSize: 10.5 }}>
-                                  ✕ cancelar la orden
+                                  ✕ cancelar el plan
                                 </button>
                               )}
                               <button onClick={() => setState((st) => ({ ...st,
