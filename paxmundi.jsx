@@ -8053,7 +8053,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // provincias en el mapa, meter cuarenta mil rectángulos más era garantizado
   // que el arrastre volviera a costar lo que costaba.
   const frenteVivo = teatroVivo(frente);
-  const selloFrente = frente ? frente.due : null;
+  const selloFrente = frente ? frente.due + "|" + (frente.visto || "") : null;
   const capaFrente = useMemo(() => {
     const t = frenteVivo;
     if (!t || typeof document === "undefined") return null;
@@ -8068,16 +8068,25 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     let algo = false;
     for (let k = 0; k < n; k++) {
       const o = k * 4;
-      const due = t.due[k];
-      if (t.prov[k] < 0 || due < 0) { d[o + 3] = 0; continue; }
+      // Lo que se pinta es lo que el reino cree, no lo que hay. Un palmo que
+      // nadie miró nunca no se pinta de ninguna manera —no se sabe—, y uno que
+      // se miró hace meses se pinta desvaído: se ve que ahí hubo frente y que
+      // desde entonces no fue nadie.
+      const due = t.mem[k];
+      const sabe = t.visto[k] / 255;
+      if (t.prov[k] < 0 || due < 0 || sabe <= 0) { d[o + 3] = 0; continue; }
       // Solo se pinta lo que está en disputa: lo que cambió de manos, lo que
       // está cambiando ahora, y el palmo de al lado —para que la línea del
       // frente tenga filo—. La comarca que sigue siendo de quien dice el mapa
       // no necesita que nadie la tiña: el color del reino ya lo cuenta. Sin
       // esto el mapa aparecía con la frontera teñida hasta en tiempos de paz.
       const cambiada = due !== t.nat[k];
-      const disputa = t.pres[k] > 0.05;
-      const filo = !cambiada && !disputa && vecinoRevuelto(t, k);
+      // La disputa es de ahora: solo se ve donde hay alguien mirando ahora.
+      const disputa = t.pres[k] > 0.05 && sabe > 0.9;
+      // El filo también es de ahora: marcar el borde de un frente con lo que
+      // hay al lado hoy, en un palmo del que hace meses que no se sabe nada,
+      // sería contarle al que juega algo que nadie le contó.
+      const filo = !cambiada && !disputa && sabe > 0.9 && vecinoRevuelto(t, k);
       if (!cambiada && !disputa && !filo) { d[o + 3] = 0; continue; }
       algo = true;
       const c = due === 1 ? oro : rojo;
@@ -8091,13 +8100,16 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       else op = 120;
       // lo cercado y sin socorro se apaga hacia el gris según se le acaba el
       // pan: se ve de lejos qué bolsa está viva y cuál ya está para caer
-      const ham = t.hambre[k];
+      const ham = sabe > 0.5 ? t.hambre[k] : 0;
       if (ham > 0.02) {
         const m = (r + v + a) / 3;
         r += (m - r) * ham * 0.85; v += (m - v) * ham * 0.85; a += (m - a) * ham * 0.85;
         op = Math.max(op, 130 + 80 * ham);
       }
-      d[o] = r; d[o + 1] = v; d[o + 2] = a; d[o + 3] = op;
+      // Y lo vieja que es la noticia se ve en lo apagado del color: el frente
+      // de la semana pasada está firme, el de hace tres meses es un recuerdo.
+      d[o] = r; d[o + 1] = v; d[o + 2] = a;
+      d[o + 3] = Math.round(op * (0.28 + 0.72 * sabe));
     }
     if (!algo) return null;
     g.putImageData(img, 0, 0);
@@ -8122,6 +8134,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const capaHuestes = useMemo(() => {
     const hs = (huestes || []).filter((h) => h && h.x != null);
     if (!hs.length) return null;
+    // Un parte no es una hueste: es lo que alguien dijo hace un rato. Cuanto
+    // más viejo, más desvaído, hasta que deja de dibujarse. Lo que el jugador
+    // tiene que poder leer del mapa no es «hay un ejército ahí» sino «hace
+    // cuarenta días había un ejército ahí», que no es lo mismo.
+    const desvaido = (h) => (h.parte
+      ? acotar(1 - (h.edad || 0) / OLVIDO_DIAS, 0.22, 1) * (h.fresco ? 1 : 0.8) : 1);
     // El escudo medía catorce píxeles en pantalla y el dedo no acierta eso.
     // Se agranda, y encima se le pone una zona de toque invisible del tamaño
     // que pide un dedo —unos cuarenta píxeles— porque agrandar el dibujo hasta
@@ -8141,8 +8159,9 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
           const rama = RAMAS_EJERCITO.find((x) => (h.ramas || {})[x.id] > 0) || RAMAS_EJERCITO[0];
           const col = suya ? "#9AA3AD" : rama.col;
           const sel = huesteSel === h.id;
+          const nitido = desvaido(h);
           return (
-            <g key={"hu" + h.id}>
+            <g key={"hu" + h.id} opacity={nitido}>
               {d && (
                 <g pointerEvents="none">
                   {/* lo que falta, tenue; lo andado, encima y firme */}
@@ -8212,12 +8231,17 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                   + `Q${h.x},${h.y + r * 1.5} ${h.x - r},${h.y + r * 0.35} Z`}
                 fill={sel ? col : "rgba(12,18,26,0.88)"} stroke={col}
                 strokeWidth={pxCapa * (sel ? 2.2 : 1.4)}
+                strokeDasharray={h.parte && !h.fresco ? `${pxCapa * 2.2} ${pxCapa * 1.8}` : undefined}
                 pointerEvents="all" style={{ cursor: "pointer" }}
                 aria-label={"hueste " + h.nombre}
                 onClick={(e) => { e.stopPropagation();
                   if (!movido.current && onHueste && !suya) onHueste(h.id); }}>
-                <title>{`${h.nombre}: ${unidadesTotales(h.ramas)} unidades`
-                  + (suya ? " — del enemigo" : "")}</title>
+                <title>{h.parte
+                  ? `${h.nombre} — del enemigo: ${h.fresco ? "" : "unas "}${unidadesTotales(h.ramas)} unidades`
+                    + (h.edad < 2 ? ", a la vista ahora mismo"
+                       : h.edad < 30 ? `, según el parte de hace ${h.edad} días`
+                       : `, y de eso hace ${Math.round(h.edad / 30)} meses: puede estar en cualquier parte`)
+                  : `${h.nombre}: ${unidadesTotales(h.ramas)} unidades`}</title>
               </path>
               <text x={h.x} y={h.y + r * 0.28} textAnchor="middle" fontSize={r * 1.1}
                 fill={sel ? "#0A0F17" : col} pointerEvents="none"
@@ -9856,17 +9880,54 @@ function zapaDeHueste(h, s) {
 
 // ——— el asalto ———
 // Se resuelve de una: se entra o no se entra, y se paga.
-function pulsoDeAsalto(h, p, s) {
+// Cuánto se sabe de una plaza ajena antes de asaltarla. Lo que la vuelve
+// conocida es haber estado ahí: un cerco es, entre otras cosas, un
+// reconocimiento largo. De lejos se sabe que hay un muro y poco más, y por eso
+// tantas campañas se estrellaron contra una plaza que resultó ser el doble de
+// dura de lo que decía el informe.
+function certezaDePlaza(s, p) {
+  if (!p || p.x == null) return 1;
+  if (!p.ajena && !p.ocupada) return 1;                 // en tu casa no hay niebla
+  const t = teatroVivo(s && s.teatro);
+  let c = 0;
+  if (t) {
+    const gkm = t.paso * GRADO_KM;
+    const r = Math.max(1, Math.round(CERCO_KM / gkm));
+    const ci = Math.floor((p.x - t.gx0) / t.paso), cj = Math.floor((p.y - t.gy0) / t.paso);
+    let suma = 0, cuenta = 0;
+    for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+      if (di * di + dj * dj > r * r) continue;
+      const i = ci + di, j = cj + dj;
+      if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+      const k = j * t.GW + i;
+      if (t.prov[k] < 0) continue;
+      suma += t.visto[k] / 255; cuenta++;
+    }
+    if (cuenta) c = suma / cuenta;
+  }
+  // Y sentarse delante enseña lo que no enseña mirar de lejos.
+  for (const h of (s && s.huestes) || []) {
+    if (h.de) continue;
+    const dias = h.objetivo && (h.objetivo === p.id) ? (h.cerco || 0) : 0;
+    if (dias > 0) c = Math.max(c, acotar(0.55 + dias / 90, 0, 1));
+  }
+  return acotar(c, 0, 1);
+}
+function pulsoDeAsalto(h, p, s, certeza) {
   const fuerza = pesoDeHueste(h, s);
   const d = defensaDe(p, s);
   const zapa = zapaDeHueste(h, s);
-  // La brecha no suma tropa: quita muro.
-  const defensa = Math.max(1, d.total * (1 - zapa.v));
+  // La brecha no suma tropa: quita muro. Y si esto es lo que se le va a
+  // enseñar a quien manda, no es el muro que hay: es el que le contaron.
+  const bruto = d.total * (1 - zapa.v);
+  const defensa = Math.max(1, certeza != null && certeza < 1
+    ? estimaDe(bruto, certeza, (p && p.id) || "plaza") : bruto);
   // Al que asalta un muro se le pide bastante más que empatar.
   const razon = fuerza / (defensa * 1.6);
   const prob = acotar(razon / (1 + razon), 0.02, 0.95);
   return { fuerza: Math.round(fuerza), defensa: Math.round(defensa),
-           bruta: d.total, partes: d.partes, zapa, prob };
+           bruta: d.total, partes: d.partes, zapa, prob,
+           certeza: certeza == null ? 1 : certeza };
 }
 
 function asaltar(h, p, s, rnd) {
@@ -10063,10 +10124,16 @@ function armarTeatro(s, fija) {
     prov: new Int32Array(n), ter: new Uint8Array(n), due: new Int8Array(n),
     nat: new Int8Array(n), pres: new Float32Array(n), azar: new Float32Array(n),
     hambre: new Float32Array(n), aisla: new Uint8Array(n), pie: new Int8Array(n),
+    // Lo que el reino sabe, que no es lo que hay. `visto` es cuán fresca es la
+    // noticia de cada palmo —255 ahora mismo, 0 nunca o hace demasiado— y
+    // `mem` es de quién se lo creía la última vez que alguien miró. El mapa
+    // pinta esto y no la verdad: por eso una comarca puede caer sin que nadie
+    // se entere hasta que va alguien a ver.
+    visto: new Uint8Array(n), mem: new Int8Array(n),
     hueMio: new Float32Array(n), hueSuyo: new Float32Array(n),
     plaMio: new Float32Array(n), plaSuyo: new Float32Array(n),
     abaMio: new Float32Array(n), abaSuyo: new Float32Array(n) };
-  t.prov.fill(-1); t.due.fill(-1); t.nat.fill(-1);
+  t.prov.fill(-1); t.due.fill(-1); t.nat.fill(-1); t.mem.fill(-1);
 
   const mias = new Set();
   for (const p of (s && s.provincias) || []) if (p.idx != null) mias.add(p.idx);
@@ -10149,27 +10216,33 @@ const celdaTeatro = (t, x, y) => {
 // ——— guardar y traer ———
 // De todo el teatro solo hace falta guardar quién tiene cada palmo, y eso se
 // comprime muy bien porque son manchas grandes: por tramos, en base 36.
-function empacarDuenos(t) {
+function empacarTira(arr, corre) {
   const out = [];
-  let v = t.due[0], n = 1;
-  for (let k = 1; k < t.due.length; k++) {
-    if (t.due[k] === v) { n++; continue; }
-    out.push((v + 1) + "." + n.toString(36)); v = t.due[k]; n = 1;
+  const val = corre || ((x) => x + 1);
+  let v = val(arr[0]), n = 1;
+  for (let k = 1; k < arr.length; k++) {
+    const w = val(arr[k]);
+    if (w === v) { n++; continue; }
+    out.push(v + "." + n.toString(36)); v = w; n = 1;
   }
-  out.push((v + 1) + "." + n.toString(36));
+  out.push(v + "." + n.toString(36));
   return out.join(",");
 }
-function desempacarDuenos(t, txt) {
+function desempacarTira(arr, txt, vuelve) {
   if (!txt) return false;
+  const val = vuelve || ((x) => x - 1);
   let k = 0;
   for (const tramo of txt.split(",")) {
     const [a, b] = tramo.split(".");
-    const v = Number(a) - 1, n = parseInt(b, 36);
+    const v = Number(a), n = parseInt(b, 36);
     if (!Number.isFinite(v) || !Number.isFinite(n)) return false;
-    for (let i = 0; i < n && k < t.due.length; i++, k++) t.due[k] = v;
+    const w = val(v);
+    for (let i = 0; i < n && k < arr.length; i++, k++) arr[k] = w;
   }
-  return k === t.due.length;
+  return k === arr.length;
 }
+function empacarDuenos(t) { return empacarTira(t.due); }
+function desempacarDuenos(t, txt) { return desempacarTira(t.due, txt); }
 
 // El teatro que corresponde a esta partida: el que ya está en memoria si sirve,
 // o uno nuevo. Si el guardado trae dueños de un teatro del mismo tamaño, se
@@ -10183,7 +10256,13 @@ function teatroDe(s) {
   if (g && g.GW) {
     const viejo = _teatro && _teatro.firma === g.firma ? _teatro : armarTeatro(s, g);
     if (viejo) {
-      if (!(_teatro && _teatro.firma === g.firma)) desempacarDuenos(viejo, g.due);
+      if (!(_teatro && _teatro.firma === g.firma)) {
+        desempacarDuenos(viejo, g.due);
+        // Partidas de antes de que existiera la niebla no traen nada: entonces
+        // se sabe lo que se ve hoy y nada más, que es como empezar de cero.
+        if (g.mem) desempacarTira(viejo.mem, g.mem);
+        if (g.visto) desempacarTira(viejo.visto, g.visto, (x) => (x - 1) << 4);
+      }
       if (cajaAlcanza(viejo, s)) { _teatro = viejo; return viejo; }
       // la guerra se salió del teatro: uno más grande, con lo ganado puesto
       const nuevo = armarTeatro(s, null);
@@ -10193,7 +10272,10 @@ function teatroDe(s) {
         const x = nuevo.gx0 + ((k % nuevo.GW) + 0.5) * nuevo.paso;
         const y = nuevo.gy0 + (Math.floor(k / nuevo.GW) + 0.5) * nuevo.paso;
         const q = celdaTeatro(viejo, x, y);
-        if (q >= 0 && viejo.prov[q] >= 0) nuevo.due[k] = viejo.due[q];
+        if (q >= 0 && viejo.prov[q] >= 0) {
+          nuevo.due[k] = viejo.due[q];
+          nuevo.mem[k] = viejo.mem[q]; nuevo.visto[k] = viejo.visto[q];
+        }
       }
       _teatro = nuevo;
       return nuevo;
@@ -10203,8 +10285,271 @@ function teatroDe(s) {
   return _teatro;
 }
 function guardarTeatro(t) {
-  return t ? { firma: t.firma, paso: t.paso, gx0: t.gx0, gy0: t.gy0,
-               GW: t.GW, GH: t.GH, due: empacarDuenos(t) } : null;
+  if (!t) return null;
+  return { firma: t.firma, paso: t.paso, gx0: t.gx0, gy0: t.gy0,
+           GW: t.GW, GH: t.GH, due: empacarDuenos(t),
+           // La niebla también se guarda: si al cargar una partida se supiera
+           // otra vez todo, la niebla no serviría de nada. Lo fresco de la
+           // noticia va en dieciseisavos —no hace falta más y así los tramos
+           // siguen siendo largos y el guardado, corto—.
+           mem: empacarTira(t.mem), visto: empacarTira(t.visto, (x) => (x >> 4) + 1) };
+}
+
+// ═══ LA NIEBLA: LO QUE SE SABE NO ES LO QUE HAY ═══════════════════════════
+//
+// Hasta acá el que jugaba veía la guerra desde arriba y desde afuera, con la
+// hueste enemiga puesta en el mapa con su nombre y su número exacto desde el
+// primer día. Eso no es un juego de guerra: es un juego de ajedrez con
+// terreno. Todo lo que hace difícil mandar un ejército —no saber dónde está el
+// otro, enterarse tarde, creer que una comarca sigue siendo tuya cuando cayó
+// hace un mes— desaparecía de un plumazo.
+//
+// Lo que NO se esconde es el mundo. La geografía no es un secreto: los mapas
+// existían, y un rey de Castilla sabía perfectamente dónde queda Burdeos. Lo
+// que es secreto es lo de hoy: dónde está el ejército del otro, cuánto trae, y
+// hasta dónde llegó el frente esta semana.
+//
+// Son dos cosas distintas y el juego las separa porque la historia las separó:
+//
+//   · VER. Hasta dónde alcanza la vista de una tropa. Lo que la estira no es
+//     el número de soldados sino la caballería ligera —para eso servía—, y
+//     después el catalejo, el globo, el aeroplano y el radar.
+//   · ENTERARSE. Cuánto tarda lo que alguien vio en llegar a quien manda. Con
+//     un jinete son días; con el telégrafo, minutos. Esa diferencia es la
+//     mitad de lo que cambió en la guerra entre Austerlitz y el Marne.
+
+// Lo que ve cada rama, en kilómetros. Una hueste ve lo que ve su mejor ojo, no
+// su peor pie: alcanza con mandar a los jinetes por delante.
+const VISTA_RAMA = { caballeria: 48, marina: 34, infanteria: 17, ingenieros: 13, artilleria: 7 };
+const VISTA_TIERRA = 26;          // lo que se ve más allá del propio suelo
+// Lo que se desdibuja una noticia por día. Con esto, lo que se vio del otro
+// lado y no se volvió a mirar se pierde del todo en unos tres meses: una
+// estación. Es lo que dura útil un parte de dónde estaba el frente, y por eso
+// hay que volver a mandar a mirar.
+const NIEBLA_DIA = 2.8;
+const VISTA_CIEGA = 9;            // lo que ve una hueste sin nadie que explore
+// Lo que estira la vista. Casi todo lo de la lista es un aparato para mirar
+// más lejos, y están en el orden en que aparecieron.
+const VER_SABER = {
+  "tierra_espacio.cartografia.mapa_local": 0.08,
+  "fisica.optica.lente_simple": 0.10,
+  "tierra_espacio.cartografia.triangulacion": 0.12,
+  "fisica.optica.telescopio": 0.28,
+  "tierra_espacio.cartografia.levantamiento": 0.14,
+  "organizacion.militar_org.cuadro_oficiales": 0.12,
+  "ingenierias.aeronautica.globo": 0.50,
+  "tierra_espacio.cartografia.aerofotografia": 0.40,
+  "ingenierias.aeronautica.aeroplano": 1.20,
+  "ingenierias.militar.radar": 1.50,
+};
+// Y lo que acelera la noticia, en kilómetros por día. Un jinete de posta hace
+// sesenta; el telégrafo óptico cubre Francia en horas cuando no hay niebla; el
+// eléctrico y la radio, a esta escala, son instantáneos.
+const AVISO_SABER = {
+  "organizacion.militar_org.cuadro_oficiales": 40,
+  "organizacion.logistica.horario_coordinado": 60,
+  "organizacion.militar_org.estado_mayor": 90,
+  "ingenierias.telecom.telegrafo_optico": 700,
+  "ingenierias.telecom.telegrafo": 9000,
+  "ingenierias.telecom.radio": 60000,
+};
+const AVISO_BASE = 55;            // lo que camina un correo, en km por día
+
+function alcanceDeVista(h, s) {
+  let base = VISTA_CIEGA;
+  for (const [r, v] of Object.entries(VISTA_RAMA))
+    if (((h && h.ramas) || {})[r] > 0 && v > base) base = v;
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let m = 0;
+  for (const [id, v] of Object.entries(VER_SABER)) if (sab.has(id)) m += v;
+  // Y la tropa que sabe lo que hace explora; la que no, se pierde. Un
+  // reconocimiento es la cosa más difícil que se le puede pedir a un bisoño.
+  return base * (1 + m) * (0.72 + 0.5 * templeDe(h));
+}
+function velocidadDelAviso(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let v = AVISO_BASE;
+  for (const [id, k] of Object.entries(AVISO_SABER)) if (sab.has(id) && k > v) v = k;
+  return v;
+}
+// Cuántos días de retraso trae una noticia según de dónde venga. Antes del
+// telégrafo, lo que pasa en la frontera se sabe en la corte una semana después,
+// y a esa distancia se manda un ejército a un sitio donde ya no hay nadie.
+function retrasoDelAviso(s, x, y) {
+  const provs = (s && s.provincias) || [];
+  const corte = provs.find((p) => p.capital) || provs[0];
+  if (!corte || x == null) return 0;
+  return leguas(corte, { x, y }) / velocidadDelAviso(s);
+}
+
+// ——— quién está mirando ———
+//
+// Se ve lo que se pisa y lo que se alcanza a mirar desde donde se pisa. No hay
+// más regla que esa, y de ella sale todo lo demás: el suelo propio se conoce
+// —ahí vive gente que avisa—, alrededor de cada hueste hay un círculo de
+// tierra sabida, y el resto es niebla.
+function mirarElTeatro(t, s, huestes, dias) {
+  if (!t) return;
+  const n = t.GW * t.GH;
+  // Primero se desdibuja lo de antes: una noticia vieja deja de servir.
+  const baja = Math.min(255, Math.round(NIEBLA_DIA * Math.max(0, dias || 0)));
+  if (baja > 0) for (let k = 0; k < n; k++) if (t.visto[k]) t.visto[k] = Math.max(0, t.visto[k] - baja);
+  const gkm = t.paso * GRADO_KM;
+  const ver = (cx, cy, km) => {
+    const r = Math.max(1, Math.round(km / gkm));
+    const ci = Math.floor((cx - t.gx0) / t.paso), cj = Math.floor((cy - t.gy0) / t.paso);
+    for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+      if (di * di + dj * dj > r * r) continue;
+      const i = ci + di, j = cj + dj;
+      if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+      const k = j * t.GW + i;
+      if (t.prov[k] < 0) continue;
+      t.visto[k] = 255; t.mem[k] = t.due[k];
+    }
+  };
+  // El propio suelo: lo que se tiene, se sabe. Y el que vive en la raya ve la
+  // polvareda del otro lado, así que la vista se derrama un poco más allá.
+  const halo = Math.max(1, Math.round(VISTA_TIERRA / gkm));
+  const mio = [];
+  for (let k = 0; k < n; k++) {
+    if (t.prov[k] < 0 || t.due[k] !== 1) continue;
+    t.visto[k] = 255; t.mem[k] = 1;
+    mio.push(k);
+  }
+  for (const k of mio) {
+    const ci = k % t.GW, cj = Math.floor(k / t.GW);
+    for (let dj = -halo; dj <= halo; dj++) for (let di = -halo; di <= halo; di++) {
+      if (di * di + dj * dj > halo * halo) continue;
+      const i = ci + di, j = cj + dj;
+      if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+      const q = j * t.GW + i;
+      if (t.prov[q] < 0 || t.visto[q] === 255) continue;
+      t.visto[q] = 255; t.mem[q] = t.due[q];
+    }
+  }
+  // Y lo que cada hueste alcanza a mirar desde donde está.
+  for (const h of huestes || []) {
+    if (h.de || h.x == null) continue;
+    ver(h.x, h.y, alcanceDeVista(h, s));
+  }
+}
+
+// ——— el parte que llega a la corte ———
+//
+// De cada hueste enemiga se guarda lo último que se supo: dónde estaba, cuánta
+// era y cuándo. Mientras alguien la tenga a la vista el parte se refresca todos
+// los días; en cuanto se pierde de vista, el parte se queda quieto y el
+// ejército sigue andando. Ahí está todo: el mapa enseña un fantasma en el sitio
+// donde estaba, y el que manda decide sobre eso, que es lo que siempre se hizo.
+const OLVIDO_DIAS = 420;          // pasado esto, ya no se sabe nada de nadie
+// Lo que se cuenta no es lo que se contó. Un parte de lejos redondea, exagera y
+// se equivoca; uno de un explorador encima, no. La cuenta es siempre la misma
+// para el mismo parte —no tiembla cada vez que se dibuja el mapa— porque el
+// error se saca del identificador y no de un dado nuevo.
+function estimaDe(v, certeza, semilla) {
+  const c = acotar(certeza, 0, 1);
+  if (c >= 0.995) return Math.round(v);
+  let h = 2166136261;
+  for (let i = 0; i < String(semilla).length; i++) {
+    h ^= String(semilla).charCodeAt(i); h = Math.imul(h, 16777619);
+  }
+  const sesgo = (((h >>> 0) % 2000) / 1000 - 1);            // −1 … 1
+  const yerro = (1 - c) * 0.55;
+  const bruto = Math.max(1, v * (1 + sesgo * yerro));
+  // y se redondea a lo grueso, que es como se cuentan las tropas de lejos
+  const grano = c > 0.8 ? 1 : c > 0.5 ? 5 : c > 0.25 ? 10 : 25;
+  return Math.max(grano, Math.round(bruto / grano) * grano);
+}
+// Cuánto se sabe de una hueste enemiga: quién la está mirando y desde qué
+// cerca. Encima de ella se le cuentan los estandartes; a media legua se
+// estima; más allá no se sabe que existe.
+function certezaSobre(h, s, mias) {
+  let mejor = 0;
+  for (const q of mias || []) {
+    if (q.de || q.x == null) continue;
+    const alcance = alcanceDeVista(q, s);
+    const d = leguas({ x: q.x, y: q.y }, { x: h.x, y: h.y });
+    if (d > alcance) continue;
+    const c = acotar(1 - (d / alcance) * 0.85, 0.15, 1);
+    if (c > mejor) mejor = c;
+  }
+  // Y la propia tierra: un ejército metido en tu reino no pasa desapercibido.
+  // Se mira el suelo y no el centro de la comarca a propósito: una comarca son
+  // cien kilómetros de largo, y midiendo desde su punto medio un ejército
+  // acampado en su mitad norte quedaba invisible dentro de tu propio país.
+  const t = teatroVivo(s && s.teatro) || (_teatro && _teatro.prov ? _teatro : null);
+  if (t) {
+    const k = celdaTeatro(t, h.x, h.y);
+    if (k >= 0 && t.prov[k] >= 0 && t.due[k] === 1) mejor = Math.max(mejor, 0.9);
+    else if (k >= 0) {
+      // y en la raya se ve la polvareda del otro lado
+      const r = Math.max(1, Math.round(VISTA_TIERRA / (t.paso * GRADO_KM)));
+      const ci = k % t.GW, cj = Math.floor(k / t.GW);
+      for (let dj = -r; dj <= r && mejor < 0.6; dj++)
+        for (let di = -r; di <= r && mejor < 0.6; di++) {
+          if (di * di + dj * dj > r * r) continue;
+          const i = ci + di, j = cj + dj;
+          if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+          const q = j * t.GW + i;
+          if (t.prov[q] >= 0 && t.due[q] === 1) mejor = Math.max(mejor, 0.55);
+        }
+    }
+  }
+  return mejor;
+}
+// El parte de guerra de este turno: se refresca lo que se ve y se deja
+// envejecer lo que no.
+function partesDeGuerra(s, huestes, dias) {
+  const antes = (s && s.avistados) || {};
+  const mias = (huestes || []).filter((h) => !h.de);
+  const salida = {};
+  // El parte se fecha al terminar el turno, que es cuando el que manda lo lee.
+  const cuando = ((s && s.anio) || 0) * 365 + ((s && s.dia) || 0) + Math.max(0, dias || 0);
+  for (const h of huestes || []) {
+    if (!h.de) continue;
+    const c = certezaSobre(h, s, mias);
+    const viejo = antes[h.id];
+    if (c > 0) {
+      const uds = unidadesTotales(h.ramas);
+      const tarde = retrasoDelAviso(s, h.x, h.y);
+      salida[h.id] = { id: h.id, nombre: h.nombre, de: h.de,
+        x: h.x, y: h.y, uds: estimaDe(uds, c, h.id + "|" + Math.round(cuando / 30)),
+        certeza: +c.toFixed(2), cuando, tarde: +tarde.toFixed(1),
+        rama: (RAMAS_EJERCITO.find((r) => (h.ramas || {})[r.id] > 0) || RAMAS_EJERCITO[0]).id };
+    } else if (viejo && cuando - viejo.cuando < OLVIDO_DIAS) {
+      salida[h.id] = viejo;                       // lo último que se supo
+    }
+  }
+  // Y los partes de huestes que ya no existen: alguien las vio y nadie las vio
+  // deshacerse. Se guardan hasta que se olvidan solas, porque enterarse de que
+  // el ejército que temías ya no está también cuesta.
+  for (const [id, v] of Object.entries(antes))
+    if (!salida[id] && cuando - v.cuando < OLVIDO_DIAS) salida[id] = v;
+  return salida;
+}
+// Los días que hace que se sabe de esta hueste, contando lo que tardó la
+// noticia en llegar.
+function edadDelParte(v, s) {
+  if (!v) return 0;
+  const cuando = ((s && s.anio) || 0) * 365 + ((s && s.dia) || 0);
+  return Math.max(0, cuando - (v.cuando || 0)) + (v.tarde || 0);
+}
+// Lo que el mapa tiene que dibujar: las huestes propias tal cual son, y del
+// otro lado no huestes sino partes, en el sitio donde se las vio por última vez
+// y con el número que alguien dijo. Un parte viejo se dibuja desvaído, y uno
+// muy viejo no se dibuja: se olvidó.
+function huestesQueSeVen(s) {
+  const propias = ((s && s.huestes) || []).filter((h) => !h.de);
+  const partes = [];
+  for (const v of Object.values((s && s.avistados) || {})) {
+    const edad = edadDelParte(v, s);
+    if (edad > OLVIDO_DIAS) continue;
+    partes.push({ id: "p:" + v.id, nombre: v.nombre, de: v.de, x: v.x, y: v.y,
+      ramas: { [v.rama || "infanteria"]: Math.max(1, v.uds || 1) },
+      parte: true, edad: Math.round(edad), certeza: v.certeza || 0,
+      fresco: edad < 12 && (v.certeza || 0) > 0.55 });
+  }
+  return [...propias, ...partes];
 }
 
 // ——— el campo de cada bando ———
@@ -10658,15 +11003,19 @@ function correrFrente(t, s, huestes, dias) {
 // Cuánto de cada comarca tiene cada bando. Es lo que la ficha enseña y lo que
 // aprieta el cerco: un cerco solo cuenta mientras la plaza está rodeada de
 // verdad, y «rodeada» quiere decir que el campo alrededor ya es del que sitia.
-function repartoDelTeatro(t) {
+// El reparto se puede mirar de dos maneras: por la verdad —que es la que usa
+// el juego para resolver— o por lo que el reino cree, que es la que se le
+// enseña al jugador. Son la misma cuenta sobre dos tiras distintas.
+function repartoDelTeatro(t, campo) {
   const por = new Map();
   if (!t) return por;
+  const due = campo || t.due;
   for (let k = 0; k < t.prov.length; k++) {
-    const i = t.prov[k]; if (i < 0 || t.due[k] < 0) continue;
+    const i = t.prov[k]; if (i < 0 || due[k] < 0) continue;
     let o = por.get(i);
     if (!o) { o = { mio: 0, suyo: 0, hambre: 0 }; por.set(i, o); }
-    if (t.due[k] === 1) o.mio++; else o.suyo++;
-    if (t.hambre[k] > 0.05) o.hambre++;
+    if (due[k] === 1) o.mio++; else o.suyo++;
+    if (t.hambre[k] > 0.05 && (!campo || t.visto[k] > 0)) o.hambre++;
   }
   return por;
 }
@@ -11014,6 +11363,10 @@ function correrCampana(s, dias, rnd) {
   const enPie = [...((s && s.huestes) || []), ...nacidas];
   correrFrente(teatro, s, enPie, dias);
   const reparto = repartoDelTeatro(teatro);
+  // Y ahora se mira. Va acá, con el frente ya corrido y las huestes todavía en
+  // el sitio donde empezaron el turno: lo que el reino sabe es lo que sus
+  // tropas alcanzaron a ver desde donde estaban, no lo que va a pasar después.
+  mirarElTeatro(teatro, s, enPie, dias);
 
   // ——— el abasto, antes que nada ———
   // Lo que le llegue a cada hueste decide lo que puede hacer este turno: con
@@ -11071,10 +11424,16 @@ function correrCampana(s, dias, rnd) {
       // frente era una ola que avanzaba y no volvía nunca. Va al desgarrón más
       // grande que tenga a mano.
       const roto = desgarronMasGrande(teatro, s, h);
+      // Y va por lo que ve, no por lo que hay. Un ejército que sale derecho a
+      // buscar una hueste que está a cuatrocientos kilómetros y de la que nadie
+      // le dijo nada no es un ejército, es un buscador de tesoros. La niebla
+      // vale para los dos lados, que es lo único que la hace justa.
+      const ojo = alcanceDeVista(h, s);
       let presa = null, dm = Infinity;
       for (const q of enPie) {
         if (q.de) continue;
         const d = leguas({ x: h.x, y: h.y }, { x: q.x, y: q.y });
+        if (d > ojo * 1.6) continue;
         if (d < dm) { dm = d; presa = q; }
       }
       if (roto) h = { ...h, orden: "marchar", destino: { x: roto.x, y: roto.y },
@@ -11255,14 +11614,22 @@ function correrCampana(s, dias, rnd) {
     const volcar = (clave, due) => {
       if (clave == null) return;
       for (let k = 0; k < teatro.prov.length; k++)
-        if (teatro.prov[k] === clave) { teatro.due[k] = due; teatro.pres[k] = 0; teatro.hambre[k] = 0; }
+        if (teatro.prov[k] === clave) {
+          teatro.due[k] = due; teatro.pres[k] = 0; teatro.hambre[k] = 0;
+          // Una plaza que cambia de manos no es un secreto para nadie: la
+          // toma tu ejército, o te la toman a vos y te llega la noticia.
+          teatro.mem[k] = due; teatro.visto[k] = 255;
+        }
     };
     for (const q of conquistadas) volcar(claveTeatro(q, s), 1);
     for (const id of porElEnemigo) volcar(claveTeatro(provs.find((q) => q.id === id), s), 0);
   }
   // Y el frente resumido por comarca, que es lo que la ficha enseña.
+  // Y el frente resumido por comarca: lo que el reino cree, no lo que hay. Una
+  // comarca que cayó donde nadie estaba mirando sigue figurando entera hasta
+  // que alguien vaya a verla, y esa es exactamente la sorpresa que faltaba.
   const frentes = [];
-  for (const [idx, o] of repartoDelTeatro(teatro)) {
+  for (const [idx, o] of repartoDelTeatro(teatro, teatro ? teatro.mem : null)) {
     const parte = o.mio / Math.max(1, o.mio + o.suyo);
     const g = idx < PROV_MUNDO.length ? geomProvincia(idx) : null;
     const mia = idx >= PROV_MUNDO.length ? provs[idx - PROV_MUNDO.length] : null;
@@ -11277,21 +11644,25 @@ function correrCampana(s, dias, rnd) {
   // instrucción no es de ninguna hueste en particular, es del reino.
   return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas,
            teatro: guardarTeatro(teatro), comido: Math.round(comido / 6),
-           instruccion: instruccionTrasElTiempo(s, dias) };
+           instruccion: instruccionTrasElTiempo(s, dias),
+           // Lo que se supo del otro lado, que es lo único que el mapa va a
+           // enseñar de él.
+           avistados: partesDeGuerra(s, finales, dias) };
 }
 
 // Cuánto suelo tiene cada bando, para contarlo en el parte de guerra.
 function pulsoDelFrente(s) {
   const t = _teatro && s && s.teatro && _teatro.firma === s.teatro.firma ? _teatro : null;
   if (!t) return null;
-  let mio = 0, suyo = 0, cercado = 0;
+  let mio = 0, suyo = 0, cercado = 0, aoscuras = 0;
   for (let k = 0; k < t.prov.length; k++) {
-    if (t.prov[k] < 0 || t.due[k] < 0) continue;
-    if (t.due[k] === 1) mio++; else suyo++;
-    if (t.hambre[k] > 0.05) cercado++;
+    if (t.prov[k] < 0) continue;
+    if (t.mem[k] < 0) { aoscuras++; continue; }
+    if (t.mem[k] === 1) mio++; else suyo++;
+    if (t.hambre[k] > 0.05 && t.visto[k] > 0) cercado++;
   }
   const km = t.paso * GRADO_KM;
-  return { mio, suyo, cercado, km2: Math.round(km * km),
+  return { mio, suyo, cercado, aoscuras, km2: Math.round(km * km),
            bolsas: (t.bolsas && t.bolsas[0]) || [], perdidas: (t.bolsas && t.bolsas[1]) || [] };
 }
 
@@ -17733,17 +18104,27 @@ const ACCIONES = [
   // un disparate, y la rueda no ofrece disparates.
   { id: "cercar", n: "cercarla", ico: "◍", col: "gold",
     puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
-    rotulo: (p, s, x) => (x.hueste && x.hueste.orden
-      ? `…y después cercarla · aguanta ${aguanteDe(p, s)} días`
-      : `cercarla · aguanta ${aguanteDe(p, s)} días`),
+    rotulo: (p, s, x) => {
+      // Lo que aguanta una plaza ajena no se sabe: se calcula. Y se calcula
+      // mal desde lejos, que es como se calculaba.
+      const c = certezaDePlaza(s, p);
+      const dd = estimaDe(aguanteDe(p, s), c, "ag:" + p.id);
+      const cuanto = `${c > 0.8 ? "aguanta" : "aguantará unos"} ${dd} días`;
+      return (x.hueste && x.hueste.orden ? "…y después cercarla · " : "cercarla · ") + cuanto;
+    },
     hace: (p) => ({ tipo: "campana", orden: "cercar", id: p.id, idx: p.idx, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
   { id: "asaltar", n: "asaltarla", ico: "⚔", col: "red",
     puede: (p, s, x) => !!x.hueste && p.x != null && (p.ajena || p.ocupada),
     rotulo: (p, s, x) => {
-      const q = pulsoDeAsalto(x.hueste, p, s);
+      const c = certezaDePlaza(s, p);
+      const q = pulsoDeAsalto(x.hueste, p, s, c);
       const luego = !!(x.hueste && x.hueste.orden);
-      return `${luego ? "…y después asaltarla" : "asaltarla"} · ${Math.round(q.prob * 100)} de cada 100`;
+      // Con la plaza a medio conocer, lo que se da no es una probabilidad: es
+      // lo que los exploradores creen. Se dice así, porque asaltar creyendo
+      // que hay una cuenta exacta detrás es cómo se pierden los ejércitos.
+      return `${luego ? "…y después asaltarla" : "asaltarla"} · `
+        + `${c > 0.8 ? "" : "al parecer "}${Math.round(q.prob * 100)} de cada 100`;
     },
     hace: (p) => ({ tipo: "campana", orden: "asaltar", id: p.id, idx: p.idx, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
@@ -18333,6 +18714,8 @@ export default function PaxMundi() {
         // no abre la ficha del ejército; se empieza en lo normal, y de ahí se
         // sube pagando o se baja ahorrando.
         adiestramiento: "revista", instruccion: 34,
+        // De nadie se sabe nada todavía, que es como empieza cualquier guerra.
+        avistados: {},
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -19570,6 +19953,8 @@ export default function PaxMundi() {
         // Lo que el reino adelantó adiestrando: sube despacio hacia el techo
         // del plan que se esté pagando, y baja solo si se deja de pagar.
         instruccion: camp.instruccion,
+        // Y lo que se supo del enemigo: partes, no verdades.
+        avistados: camp.avistados,
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -20041,7 +20426,10 @@ export default function PaxMundi() {
           comparadas={comparadas}
           onComparar={alComparar}
           onRueda={abrirRueda}
-          huestes={s.huestes}
+          /* Al mapa no se le pasa la verdad: se le pasan los partes. Del
+             enemigo se dibuja lo último que alguien vio, en el sitio donde lo
+             vio, y con el número que dijo. */
+          huestes={huestesQueSeVen(s)}
           huesteSel={huesteSel}
           frente={s.teatro}
           onHueste={(id) => setHuesteSel((v) => (v === id ? null : id))}
@@ -22523,7 +22911,10 @@ export default function PaxMundi() {
                   const libres = ejercitoLibre(s);
                   const nLibres = unidadesTotales(libres);
                   const hs = s.huestes || [];
-                  const enemigas = hs.filter((h) => h.de);
+                  // Del otro lado no hay huestes: hay partes. Lo que la
+                  // campaña puede decir es lo último que alguien vio y cuándo,
+                  // y esa segunda mitad es la que importa.
+                  const enemigas = huestesQueSeVen(s).filter((h) => h.parte);
                   const capital = (s.provincias || []).find((p) => p.capital) || (s.provincias || [])[0];
                   const verEnMapa = (h) => {
                     setHuesteSel(h.id);
@@ -22569,8 +22960,14 @@ export default function PaxMundi() {
                         <div style={{ padding: "8px 10px", marginBottom: 8, borderRadius: 7,
                           background: "rgba(224,82,82,0.08)", border: `1px solid ${C.red}55`,
                           fontSize: 11.5, color: C.ink, lineHeight: 1.5 }}>
-                          ⚠ {enemigas.map((h) => `${h.nombre}, ${unidadesTotales(h.ramas)} unidades`).join(" · ")}
-                          {" "}en el mapa. Si se cruzan con las tuyas, hay batalla.
+                          ⚠ {enemigas.map((h) => `${h.nombre}, ${h.fresco ? "" : "unas "}`
+                            + `${unidadesTotales(h.ramas)} unidades`
+                            + (h.edad < 2 ? ", a la vista"
+                               : h.edad < 30 ? `, hace ${h.edad} días`
+                               : `, hace ${Math.round(h.edad / 30)} meses`)).join(" · ")}.
+                          {" "}{enemigas.some((h) => h.edad >= 12)
+                            ? "Lo viejo del parte es lo que hay: nadie sabe dónde están ahora."
+                            : "Si se cruzan con las tuyas, hay batalla."}
                         </div>
                       )}
                       {hs.filter((h) => !h.de).length === 0 && (
@@ -22981,6 +23378,25 @@ export default function PaxMundi() {
                       cuesta ⚜{Math.round(pm.total * 0.55)}/año · {fmtPob(g.bajas || 0)} caídos
                       {g.pidenPaz && <span style={{ color: C.gold }}> · piden condiciones</span>}
                     </div>
+                    {/* ── lo que se sabe del teatro ──
+                        La cuenta del suelo es la que el reino cree, no la que
+                        hay, y por eso dice también cuánto no sabe. Un parte de
+                        guerra honesto empieza por ahí. */}
+                    {(() => {
+                      const pu = pulsoDelFrente(s);
+                      if (!pu || (pu.mio + pu.suyo + pu.aoscuras) === 0) return null;
+                      const todo = pu.mio + pu.suyo + pu.aoscuras;
+                      const oscuro = Math.round((pu.aoscuras / todo) * 100);
+                      return (
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+                          Del teatro se conoce el <b style={{ color: C.ink }}>{100 - oscuro}%</b>:
+                          {" "}{pu.mio} palmos en tu mano y {pu.suyo} en la suya, por lo último que se supo.
+                          {pu.cercado > 0 && <span style={{ color: C.gold }}> {pu.cercado} sin salida.</span>}
+                          {oscuro > 12 && <span style={{ color: C.red }}> Del {oscuro}% restante no hay noticia:
+                            {" "}ahí puede haber cualquier cosa.</span>}
+                        </div>
+                      );
+                    })()}
                     {/* términos */}
                     <div style={{ marginTop: 9 }}>
                       {terms.map((t) => (

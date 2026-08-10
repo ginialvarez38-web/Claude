@@ -26,13 +26,13 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 13-14 | Logística | El ejército come pan y gasta pertrechos según su rama; lo que le llega sale de las comarcas, viaja por los caminos y se apaga con la distancia. Una campaña honda se deshace sin que nadie la ataque. |
 | 8 | Entrenamiento | Cuatro planes de adiestramiento, con su precio al año, su techo y quién hace falta para darlos. Sube despacio, baja si se deja de pagar y se diluye con cada leva. |
 | 9 | Experiencia | La veteranía se gana peleando, sitiando y marchando, y se pierde cuando muere el cuadro que sabía. Una hueste veterana pesa más, sangra menos, no se le rompe la moral y aguanta hambre que a una leva la disuelve. |
+| 22-23 | Niebla e inteligencia | Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
 
 ## Lo que está a medias
 
 | § | Qué falta |
 |---|---|
 | 15-16 | **Combustible y munición como recursos.** El gasto está contado —cada rama pide sus pertrechos— pero sale de una despensa única en vez de una cadena que se pueda cortar. |
-| 22-23 | **Niebla de guerra.** Se ve todo. Las huestes enemigas aparecen enteras y exactas desde el primer día. |
 | 30 | **Prisioneros.** Las bajas se pierden; nadie se rinde ni se canjea. |
 | 34 | **Doctrina.** Hay saberes militares sueltos, pero no una forma de pelear que se elija y que cambie cómo se pelea. |
 | 39 | **Consecuencias sociales.** La población ya sufre la leva y las bajas; falta lo que deja una guerra larga —viudas, mutilados, deuda, radicalización—. |
@@ -60,9 +60,15 @@ guerra y se la lleva la misma guerra— y de ahí sale la decisión que antes no
 existía: a quién mandar a lo difícil, y si vale la pena tomar esa plaza al
 precio que va a costar.
 
-**3 · Niebla de guerra.** Que no se sepa lo que hay enfrente. Convierte el
-reconocimiento en algo que se hace y no en un adorno, y hace que los generales
-se equivoquen, que es lo que hacen.
+**3 · Niebla de guerra.** ✔ Hecho. Que no se sepa lo que hay enfrente.
+Convierte el reconocimiento en algo que se hace y no en un adorno, y hace que
+los generales se equivoquen, que es lo que hacen. Va con dos piezas separadas
+—ver y enterarse—, porque el catalejo y el telégrafo no resuelven el mismo
+problema y no llegaron juntos.
+
+Lo que queda de §23 para después: espionaje que devuelva partes sin mandar
+tropa —la acción de montar una red de espías existe, pero todavía no levanta
+niebla—, y desinformación.
 
 **4 · La estructura.** Divisiones y cuerpos en vez de un montón de unidades
 sueltas, con la organización cambiando por época. Recién acá, cuando hay algo

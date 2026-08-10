@@ -293,6 +293,55 @@ En el mapa cada escudo lleva sus galones —una, dos o tres barras— y en la
 sección de campaña cada hueste dice lo que es con una palabra: bisoños,
 instruidos, hechos, curtidos, la vieja guardia.
 
+## Lo que se sabe no es lo que hay
+
+Antes la guerra se veía desde arriba y desde afuera: la hueste enemiga estaba
+en el mapa con su nombre y su número exacto desde el primer día. Eso no es un
+juego de guerra, es ajedrez con terreno. Ahora hay niebla.
+
+Lo que **no** se esconde es el mundo. La geografía no es un secreto —los mapas
+existían, y un rey de Castilla sabía perfectamente dónde queda Burdeos—. Lo que
+es secreto es lo de hoy: dónde está el ejército del otro, cuánto trae, y hasta
+dónde llegó el frente esta semana.
+
+**Ver y enterarse son dos cosas distintas**, y el juego las lleva aparte porque
+la historia las llevó aparte:
+
+- **Ver** es hasta dónde alcanza la vista de una tropa. Lo que la estira no es
+  el número de soldados sino la caballería ligera —para eso servía—, y después
+  el catalejo, el globo, el aeroplano y el radar. Una hueste ve lo que ve su
+  mejor ojo, no su peor pie: alcanza con mandar los jinetes por delante. Y una
+  tropa bisoña explora peor, porque reconocer es lo más difícil que se le puede
+  pedir a alguien que acaba de llegar.
+- **Enterarse** es cuánto tarda lo que alguien vio en llegar a quien manda. En
+  1200 una noticia camina a caballo: lo que pasa a quinientos kilómetros se
+  sabe en la corte nueve días después. Con el telégrafo, en el acto. Esa
+  diferencia es media guerra.
+
+De ahí salen cuatro cosas que se sienten al jugar:
+
+- **Del enemigo hay partes, no huestes.** El escudo que ves en el mapa está
+  donde se lo vio por última vez, con el número que alguien dijo. Un parte
+  fresco es exacto; uno de lejos redondea a lo grueso y se equivoca. Mientras
+  tanto el ejército de verdad sigue andando: el mapa enseña un fantasma. El
+  escudo se desvanece y se dibuja a trazos según lo viejo que sea, y pasado un
+  año se olvida.
+- **Se ve lo que se pisa y lo que se alcanza a mirar desde donde se pisa.** El
+  suelo propio se conoce entero —ahí vive gente que avisa— y un poco más allá
+  de la raya. El resto es lo que alcancen tus tropas, y se desdibuja en una
+  estación si no vuelve nadie a mirar.
+- **Una comarca puede caer sin que te enteres.** El mapa pinta lo que el reino
+  cree. Una conquista tuya a quinientos kilómetros que el vecino recupera sigue
+  saliendo tuya, con el color cada vez más apagado, hasta que mandás a alguien
+  a ver. El parte de guerra dice cuánto del teatro se conoce y cuánto no.
+- **Asaltar es apostar.** De una plaza ajena no se sabe lo que aguanta: se
+  estima, y de lejos se estima mal. Los rótulos lo dicen —«aguantará unos 75
+  días», «al parecer 76 de cada 100»— y dejan de decirlo cuando llevás tiempo
+  sentado enfrente, porque un cerco es también un reconocimiento largo.
+
+Y vale para los dos lados: un ejército enemigo no sale derecho a buscar una
+hueste tuya que está a cuatrocientos kilómetros y de la que nadie le dijo nada.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
