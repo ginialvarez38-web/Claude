@@ -4809,17 +4809,24 @@ function evolucionarPops(p, s, dias, rnd, cosecha) {
 // nodo de ciencia dejaba la conscripción esperando a un saber que en el árbol
 // llega en el año dos mil, y así ningún reino levantaba una leva napoleónica
 // en el siglo de Napoleón.
+//
+// `sabe` es lo que el recluta trae puesto el día que se presenta, antes de que
+// el reino le enseñe nada. No es un detalle: el mercenario ya sabe su oficio
+// —es exactamente lo que vende, y por eso cuesta cuatro veces más—, mientras
+// que el labrador de la leva señorial no ha formado en su vida. Un ejército
+// permanente y una conscripción están en el medio porque tienen depósito: el
+// que entra pasa por un cuartel antes de ver el frente.
 const RECLUTAS = [
   { id: "senorial", n: "leva señorial", hasta: 1700, cuota: 0.020, oro: 0.55,
     // el que va vuelve para la siega, así que la cosecha lo nota
-    campo: 0.55, dice: "el señor trae a los suyos" },
+    campo: 0.55, sabe: 0.10, dice: "el señor trae a los suyos" },
   { id: "mercenaria", n: "tropa mercenaria", desde: 1350, hasta: 1800, cuota: 0.014, oro: 2.4,
-    ajena: true, campo: 0, dice: "se compran compañías donde las haya" },
+    ajena: true, campo: 0, sabe: 0.62, dice: "se compran compañías donde las haya" },
   { id: "permanente", n: "ejército permanente", desde: 1650, cuota: 0.032, oro: 1.15,
-    mejora: "organizacion.militar_org.ejercito_permanente", campo: 0.15,
+    mejora: "organizacion.militar_org.ejercito_permanente", campo: 0.15, sabe: 0.42,
     dice: "se sirve por años y se cobra una paga" },
   { id: "conscripcion", n: "conscripción", desde: 1793, cuota: 0.095, oro: 0.75,
-    mejora: "organizacion.militar_org.conscripcion", campo: 0.30, pideNacion: true,
+    mejora: "organizacion.militar_org.conscripcion", campo: 0.30, pideNacion: true, sabe: 0.26,
     dice: "sirve todo el que puede, porque el país es de todos" },
 ];
 const RECLUTA_IDX = Object.fromEntries(RECLUTAS.map((x) => [x.id, x]));
@@ -8217,6 +8224,25 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                 style={{ fontFamily: "monospace", fontWeight: 700 }}>
                 {unidadesTotales(h.ramas)}
               </text>
+              {/* Las barras del temple, como los galones de una manga: una
+                  tropa curtida se reconoce desde lejos y sin abrir nada, que
+                  es cuando importa saber a quién se está mandando adónde. */}
+              {(() => {
+                const gal = templeDe(h) > 0.68 ? 3 : templeDe(h) > 0.46 ? 2 : templeDe(h) > 0.28 ? 1 : 0;
+                if (!gal) return null;
+                const dy = suya ? r * 1.75 : -r * 1.55;
+                return (
+                  <g pointerEvents="none">
+                    {[0, 1, 2].slice(0, gal).map((k) => (
+                      <line key={"g" + k} x1={h.x - r * 0.55} y1={h.y + dy + k * pxCapa * 1.9}
+                        x2={h.x + r * 0.55} y2={h.y + dy + k * pxCapa * 1.9}
+                        stroke={gal === 3 ? "#E8D9A0" : col} strokeWidth={pxCapa * 1.1}
+                        strokeLinecap="round" opacity="0.95" />
+                    ))}
+                    <title>{`${gradoDeTemple(templeDe(h)).n}: ${gradoDeTemple(templeDe(h)).dice}`}</title>
+                  </g>
+                );
+              })()}
               {/* cuánto lleva andado, en una barra bajo el escudo */}
               {d && largo > 0 && (
                 <g pointerEvents="none">
@@ -9597,6 +9623,134 @@ function velocidadHueste(h, prov) {
   return base * (0.75 + via.soc * 0.75) * (t.com || 1);
 }
 
+// ═══ EL TEMPLE: LO QUE LE ENSEÑARON Y LO QUE VIVIÓ ════════════════════════
+//
+// Son dos números distintos y la diferencia es la mitad de la historia militar
+// del mundo. La INSTRUCCIÓN es lo que el reino le puso encima antes de que
+// sonara un tiro: formar, cargar, marchar de noche, obedecer a un sargento al
+// que no se conoce. Se compra con oro y sobre todo con años, y la tiene toda
+// la tropa por igual porque sale de una escuela y no de una batalla. La
+// EXPERIENCIA no se compra en ningún lado: es lo que una hueste aprendió en el
+// campo, y solo se gana donde también se puede perder.
+//
+// Un reino puede tener tropa instruidísima y verde, o veterana y sin
+// instrucción, y las dos cosas se ven distintas: la instrucción evita el
+// desastre del primer día —la unidad que se disuelve al primer cañonazo
+// porque nadie sabe qué hacer—, y la experiencia evita el del segundo año
+// —la que se deja media hueste en una retirada que no supo hacer—.
+//
+// Lo que hace que esto sea una decisión y no una estadística es que adiestrar
+// cuesta plata todos los años y da fruto recién a los tres o cuatro, mientras
+// que la veteranía la regala la guerra y se la lleva la misma guerra: una
+// victoria cara destruye el cuadro que sabía, y con reemplazos no vuelve.
+
+const INSTRUCCION_BASE = 18;      // lo que sabe una tropa a la que nadie enseñó
+
+// Los planes de adiestramiento. El techo es hasta dónde llega ese plan por
+// mucho que se insista, y el ritmo, cuántos puntos gana al año: adiestrar es
+// lo más lento que hace un ejército, y por eso el que quiere tropa buena en
+// una guerra tiene que haberla pagado en la paz anterior.
+const ADIESTRAMIENTO = [
+  { id: "ninguno", n: "sin instrucción", oro: 0, techo: 20, ritmo: 0,
+    dice: "se les da un arma y se aprende en la primera batalla, que es donde peor se aprende" },
+  { id: "revista", n: "revista de armas", oro: 0.7, techo: 46, ritmo: 8,
+    dice: "unas semanas al año: formar, cargar y no romper la línea" },
+  { id: "cuadros", n: "escuela de cuadros", oro: 1.8, techo: 72, ritmo: 15,
+    req: "organizacion.militar_org.cuadro_oficiales", falta: "sin cuadros no hay quien enseñe",
+    dice: "sargentos que enseñan y oficiales que saben lo que mandan" },
+  { id: "maniobras", n: "maniobras de campaña", oro: 3.6, techo: 93, ritmo: 24,
+    req: "organizacion.militar_org.estado_mayor", falta: "sin plana mayor no hay quien las dirija",
+    dice: "se ensaya la guerra entera todos los años, con mapas, árbitros y fuego de verdad" },
+];
+const ADIESTRA_IDX = Object.fromEntries(ADIESTRAMIENTO.map((x) => [x.id, x]));
+// Un plan necesita quién lo dé. No se puede tener escuela de cuadros sin
+// cuadros: eso es lo que el saber militar desbloquea de verdad, y no un número.
+function adiestramientoDisponible(a, ciencia) {
+  const x = typeof a === "string" ? ADIESTRA_IDX[a] : a;
+  if (!x) return false;
+  return !x.req || new Set((ciencia || {}).sabidos || []).has(x.req);
+}
+function planDeAdiestramiento(s) {
+  const x = ADIESTRA_IDX[(s && s.adiestramiento) || "ninguno"] || ADIESTRA_IDX.ninguno;
+  return adiestramientoDisponible(x, s && s.ciencia) ? x : ADIESTRA_IDX.ninguno;
+}
+// Lo que cuesta al año tener a la tropa aprendiendo. Va por unidad: un plan
+// caro con un ejército grande es una partida del presupuesto que se siente, y
+// esa es exactamente la decisión —muchos malos o pocos buenos—.
+function costoAdiestramiento(s) {
+  return Math.round(planDeAdiestramiento(s).oro * unidadesTotales((s && s.ejercito) || {}));
+}
+// Lo que trae puesto el que se presenta, entre lo que su régimen de leva le dio
+// y lo que el depósito del reino le pueda enseñar.
+function instruccionDeRecluta(s) {
+  const reg = regimenDeLeva(s);
+  const plan = planDeAdiestramiento(s);
+  return acotar(Math.max((reg.sabe != null ? reg.sabe : 0.2) * 100, plan.techo * 0.35), 0, 100);
+}
+// Cómo va la instrucción del reino con el paso de los días. Sube hacia el techo
+// del plan y nunca de golpe; y si el plan se abandona, baja sola, porque el que
+// aprendió se licencia y el que entra no sabe nada.
+function instruccionTrasElTiempo(s, dias) {
+  const plan = planDeAdiestramiento(s);
+  const anos = Math.max(0, dias || 0) / 365;
+  const v = s && s.instruccion != null ? s.instruccion : INSTRUCCION_BASE;
+  return acotar(v < plan.techo ? Math.min(plan.techo, v + plan.ritmo * anos)
+                               : Math.max(plan.techo, v - 7 * anos), 0, 100);
+}
+// Reclutar baja la instrucción media: el que llega no sabe lo que sabían los
+// que ya estaban. Cuanto más chico el ejército, más lo diluye cada recluta.
+function diluirInstruccion(s, nuevas) {
+  const n = Math.max(0, nuevas || 0);
+  const N = unidadesTotales((s && s.ejercito) || {});
+  const v = s && s.instruccion != null ? s.instruccion : INSTRUCCION_BASE;
+  return Math.round(acotar((v * N + instruccionDeRecluta(s) * n) / Math.max(1, N + n), 0, 100));
+}
+// Y licenciar a casa una hueste curtida la sube: los que vuelven enseñan. Es
+// lo que convierte la leva del año que viene en algo más que un gentío, y la
+// única forma que tiene un reino de guardar lo que aprendió en una guerra.
+function instruccionDeVuelta(s, h) {
+  const N = Math.max(1, unidadesTotales((s && s.ejercito) || {}));
+  const n = Math.min(N, unidadesTotales((h && h.ramas) || {}));
+  const v = s && s.instruccion != null ? s.instruccion : INSTRUCCION_BASE;
+  const trae = Math.max(h && h.instruccion != null ? h.instruccion : 0,
+                        ((h && h.experiencia) || 0) * 0.85);
+  return Math.round(acotar((v * (N - n) + trae * n) / N, 0, 100));
+}
+
+// Lo que valen las dos juntas. La instrucción rinde pronto y se estanca; la
+// experiencia tarda y no tiene techo práctico, que es por qué un ejército de
+// veteranos da más miedo que uno bien enseñado.
+function templeDe(h) {
+  const ins = acotar((h && h.instruccion != null ? h.instruccion : INSTRUCCION_BASE) / 100, 0, 1);
+  const exp = acotar(((h && h.experiencia) || 0) / 100, 0, 1);
+  return acotar(ins * 0.42 + exp * 0.58, 0, 1);
+}
+const GRADOS_TEMPLE = [
+  [0.14, "bisoños", "gente con un arma y sin oficio"],
+  [0.28, "instruidos", "saben formar y cargar; lo otro no lo saben"],
+  [0.46, "hechos", "aguantan la primera descarga sin desarmarse"],
+  [0.68, "curtidos", "ya vieron lo que pasa y volvieron"],
+  [9, "la vieja guardia", "valen por tres y lo saben"],
+];
+function gradoDeTemple(t) {
+  const g = GRADOS_TEMPLE.find((x) => t < x[0]) || GRADOS_TEMPLE[GRADOS_TEMPLE.length - 1];
+  return { n: g[1], dice: g[2] };
+}
+// Lo que se aprende rinde cada vez menos: la primera batalla enseña más que la
+// décima, y a partir de cierto punto lo único que queda por aprender es lo que
+// no se puede enseñar.
+const aprender = (v, cuanto) => acotar((v || 0) + cuanto * (1 - (v || 0) / 118), 0, 100);
+// Y lo que se pierde cuando la sangría pasa de lo normal. Los veteranos van
+// delante: mientras las bajas sean las de una campaña la hueste se curte, pero
+// cuando pasan de un cuarto lo que se pierde es el cuadro que sabía, y eso no
+// vuelve con reemplazos. Una victoria cara cuesta el ejército que la ganó.
+// Uno de cada seis es lo que aguanta una unidad sin perder el cuadro que la
+// hace funcionar: por debajo se repone sola, por encima empieza a faltar el
+// que sabía. Es un umbral que una batalla pareja alcanza aunque se gane, y por
+// eso un ejército que gana todo el tiempo también se gasta.
+const sangrarTemple = (v, parte) =>
+  acotar((v || 0) * (1 - Math.max(0, (parte || 0) - 0.16) * 1.8), 0, 100);
+
 // Cuánto pesa una hueste en un campo de batalla. No es la cuenta de hombres:
 // una rama vale lo que el saber de la época la hace valer, que es lo que ya
 // calcula el resto del juego.
@@ -9613,8 +9767,13 @@ function pesoDeHueste(h, s) {
   // mismos hombres. Y el abasto tampoco: sin pan no se marcha y sin pertrechos
   // no se dispara, por muchos que sean. Una hueste sin nada pelea a un tercio.
   const ab = h && h.abasto != null ? acotar(h.abasto, 0, 1) : 1;
+  // Y el temple, que es lo que separa dos ejércitos del mismo tamaño. Acá pesa
+  // menos de lo que la diferencia se siente al final: lo que de verdad hace
+  // que una hueste veterana valga por tres no está en este número sino en que
+  // pierde menos gente, no se le rompe la moral y no se deshace de hambre.
+  const tem = templeDe(h);
   return f * (0.55 + 0.45 * acotar((h && h.moral != null ? h.moral : 100) / 100, 0, 1))
-           * (0.34 + 0.66 * ab);
+           * (0.34 + 0.66 * ab) * (0.78 + 0.85 * tem);
 }
 
 // ——— lo que cuesta tomar una plaza ———
@@ -10608,9 +10767,16 @@ const ORDENES = {
   asaltar: { n: "asaltar", ico: "⚔", dice: "asaltando" },
 };
 
-function huesteNueva(id, ramas, x, y, nombre) {
+function huesteNueva(id, ramas, x, y, nombre, temple) {
   return { id, nombre: nombre || "hueste", ramas: { ...ramas }, x, y,
            orden: null, destino: null, objetivo: null, plaza: null, moral: 100,
+           // Lo que la tropa sabe el día que sale: la instrucción se la dio el
+           // reino en la paz y la trae puesta; la experiencia no la trae nadie,
+           // se gana afuera.
+           instruccion: (temple && temple.instruccion != null)
+             ? acotar(temple.instruccion, 0, 100) : INSTRUCCION_BASE,
+           experiencia: (temple && temple.experiencia != null)
+             ? acotar(temple.experiencia, 0, 100) : 0,
            recorrido: 0, largo: 0, cerco: 0, aguante: 0,
            // Lo que hay que hacer después de lo de ahora. Va aparte de la
            // orden en curso a propósito: así una partida guardada antes de que
@@ -10763,9 +10929,14 @@ function batallar(a, b, prov, s, rnd) {
   const parejo = 1 - Math.abs(q.prob - 0.5) * 2;
   const delGana = acotar(0.05 + parejo * 0.16, 0.03, 0.28);
   const delPierde = acotar(0.18 + parejo * 0.30, 0.12, 0.62);
+  // El que sabe pierde menos, y no porque lo maten menos: porque se retira en
+  // orden, recoge a los suyos y no deja media hueste tirada por el camino, que
+  // es donde de verdad se pierde un ejército derrotado. Acá está la mitad de
+  // lo que vale un veterano.
+  const menos = (h) => 1 - 0.32 * templeDe(h);
   return { ganaA, prob: q.prob, pulso: q,
-           bajasA: ganaA ? delGana : delPierde,
-           bajasB: ganaA ? delPierde : delGana };
+           bajasA: (ganaA ? delGana : delPierde) * menos(a),
+           bajasB: (ganaA ? delPierde : delGana) * menos(b) };
 }
 
 const mermar = (ramas, parte) => {
@@ -10799,8 +10970,14 @@ function levantarEnemigas(s, rnd) {
     if (d > dm) { dm = d; borde = p; }
   }
   const ramas = { infanteria: Math.round(poder * 0.7), caballeria: Math.max(1, Math.round(poder * 0.3)) };
+  // El vecino tampoco manda labradores: lo que cruza la raya es lo mejor que
+  // tiene, con la instrucción que su siglo permite y con lo que lleve peleado.
+  // Un enemigo eternamente bisoño convertiría cada guerra en un paseo.
+  const siglo = acotar(((s.anio || 1200) - 1000) / 900, 0, 1);
   const h = huesteNueva("en1", ramas, borde.x + (rnd() - 0.5) * 2, borde.y + (rnd() - 0.5) * 2,
-    `hueste de ${s.guerra.vecino}`);
+    `hueste de ${s.guerra.vecino}`,
+    { instruccion: 22 + siglo * 46 + rnd() * 12,
+      experiencia: (s.guerra.desde != null ? acotar((s.anio - s.guerra.desde) * 7, 0, 42) : 0) + rnd() * 14 });
   return [{ ...h, de: s.guerra.vecino, orden: "marchar", objetivo: corte.id,
             destino: { x: corte.x, y: corte.y },
             largo: leguas({ x: h.x, y: h.y }, { x: corte.x, y: corte.y }) }];
@@ -10882,6 +11059,10 @@ function correrCampana(s, dias, rnd) {
 
   for (let h of enPie) {
     const antes = { x: h.x, y: h.y };
+    // Qué traía al empezar el turno. Hay que guardarlo acá: una hueste que
+    // llega y cumple su orden termina el turno sin orden ninguna, y mirándola
+    // al final parecía que se había pasado el turno acuartelada.
+    const enCampana = !!(h.orden || h.destino);
     // El enemigo no camina hacia un punto fijo: va por lo que tenga más cerca.
     // Un ejército que ignora al que tiene al lado no es un ejército.
     if (h.de) {
@@ -10933,8 +11114,10 @@ function correrCampana(s, dias, rnd) {
         h = siguienteOrden({ ...h, cerco: 0, aguante: 0 }, s);
       } else {
         // Sentarse delante de una plaza también cuesta: la enfermedad se lleva
-        // más sitiadores que el muro.
-        h = { ...h, cerco, aguante, moral: acotar((h.moral || 100) - dias * 0.05, 30, 100) };
+        // más sitiadores que el muro. Un cerco enseña poco —esperar no es
+        // pelear— pero algo enseña: guardias, zapa, y no morirse de disentería.
+        h = { ...h, cerco, aguante, experiencia: aprender(h.experiencia, dias * 0.030),
+              moral: acotar((h.moral || 100) - dias * 0.05, 30, 100) };
       }
     } else if (alPie && h.orden === "asaltar" && obj) {
       const r = asaltar(h, obj, s, rnd);
@@ -10947,7 +11130,14 @@ function correrCampana(s, dias, rnd) {
       } else {
         hechos.push(`El asalto a ${obj.nombre} se estrella contra el muro: ${Math.round(r.parte * 100)} de cada cien quedaron al pie.`);
       }
-      const tras = { ...h, ramas, moral: acotar((h.moral || 100) - (r.tomada ? 4 : 22), 20, 100) };
+      // Un asalto es la escuela más cara que hay. El que entra aprende, el
+      // que rebota también, y a los dos les cuesta lo mismo: si la sangría
+      // pasó de lo normal, los que sabían se quedaron al pie del muro.
+      const tempAs = templeDe(h);
+      const tras = { ...h, ramas,
+        experiencia: sangrarTemple(aprender(h.experiencia, r.tomada ? 8 : 6), r.parte),
+        instruccion: sangrarTemple(h.instruccion != null ? h.instruccion : INSTRUCCION_BASE, r.parte),
+        moral: acotar((h.moral || 100) - (r.tomada ? 4 : 22) * (1 - 0.45 * tempAs), 20, 100) };
       // Si entró, se pasa a lo siguiente del plan; si rebotó, se queda con la
       // plaza delante y sin orden: volver a lanzarla es decisión del que manda.
       h = r.tomada ? siguienteOrden(tras, s)
@@ -10965,16 +11155,28 @@ function correrCampana(s, dias, rnd) {
     // hace de verdad un ejército al que no le llega nada.
     if (h.abasto != null && h.abasto < 0.98) {
       const falta = 1 - h.abasto;
-      const parte = Math.min(0.6, ABASTO_HAMBRE * falta * dias);
+      // Lo que se va no es lo que se muere. Una hueste sin pan se deshace
+      // porque la gente se manda a mudar, y de eso la veteranía protege
+      // muchísimo: la tropa que se conoce aguanta hambre que a una leva la
+      // disuelve en tres semanas.
+      const tempH = templeDe(h);
+      const parte = Math.min(0.6, ABASTO_HAMBRE * falta * dias * (1 - 0.45 * tempH));
       if (parte > 0.004) {
         const ramas = mermar(h.ramas, parte);
         const antesN = unidadesTotales(h.ramas), ahoraN = unidadesTotales(ramas);
-        h = { ...h, ramas, moral: acotar((h.moral || 100) - falta * dias * 0.55, 10, 100) };
+        h = { ...h, ramas, experiencia: sangrarTemple(h.experiencia, parte),
+              moral: acotar((h.moral || 100) - falta * dias * 0.55 * (1 - 0.45 * tempH), 10, 100) };
         if (!h.de && antesN - ahoraN >= 1)
           hechos.push(`${h.nombre} pierde ${antesN - ahoraN} unidades sin combatir: `
             + `${h.porque}. Le llega ${Math.round(h.abasto * 100)} de cada cien raciones.`);
       }
     }
+    // Y la campaña en sí. No hace falta pelear para aprender: marchar de
+    // noche, cruzar un río, montar y levantar el campamento todos los días y
+    // no perder a nadie por el camino es la mitad del oficio, y es lo que
+    // separa a una hueste que lleva un año afuera de una recién levantada.
+    if (enCampana)
+      h = { ...h, experiencia: aprender(h.experiencia, dias * 0.022) };
     // Lo andado de verdad, para que el mapa lo enseñe.
     h = { ...h, ultimo: leguas(antes, { x: h.x, y: h.y }) };
     huestes.push(h);
@@ -10998,13 +11200,25 @@ function correrCampana(s, dias, rnd) {
       hechos.push(`Batalla${donde}: ${gana.nombre} deshace a ${pierde.nombre}. `
         + `${Math.round(pp * 100)} de cada cien del vencido quedaron en el campo, `
         + `${Math.round(pg * 100)} del vencedor.`);
+      // Una batalla es lo que más enseña y lo que más caro cobra la lección.
+      // El que gana barato sale con un ejército mejor del que entró; el que
+      // gana caro sale con uno peor, aunque el mapa diga que ganó. Ahí está
+      // la diferencia entre una victoria y una victoria pírrica, y no en una
+      // palabra que ponga la crónica.
       const nuevoG = { ...gana, ramas: mermar(gana.ramas, pg),
+        experiencia: sangrarTemple(aprender(gana.experiencia, 10), pg),
+        instruccion: sangrarTemple(gana.instruccion != null ? gana.instruccion : INSTRUCCION_BASE, pg),
         moral: acotar((gana.moral || 100) + 6, 20, 100) };
       const ramasP = mermar(pierde.ramas, pp);
+      // Del que pierde aprenden los que vuelven, que son menos.
+      const tempP = templeDe(pierde);
       // El que pierde se retira por donde vino, si le queda alguien.
       const quedan = unidadesTotales(ramasP);
       const nuevoP = quedan > 0
-        ? { ...pierde, ramas: ramasP, moral: acotar((pierde.moral || 100) - 26, 15, 100),
+        ? { ...pierde, ramas: ramasP,
+            experiencia: sangrarTemple(aprender(pierde.experiencia, 7), pp),
+            instruccion: sangrarTemple(pierde.instruccion != null ? pierde.instruccion : INSTRUCCION_BASE, pp),
+            moral: acotar((pierde.moral || 100) - 26 * (1 - 0.45 * tempP), 15, 100),
             orden: null, destino: null, objetivo: null, cola: [], largo: 0, recorrido: 0,
             x: pierde.x + (pierde.x - gana.x) * 0.35, y: pierde.y + (pierde.y - gana.y) * 0.35 }
         : null;
@@ -11058,8 +11272,12 @@ function correrCampana(s, dias, rnd) {
     if ((propia && parte > 0.995) || (!propia && parte < 0.005)) continue;
     frentes.push({ idx, nombre, pais: g ? g.pais : null, parte, cercado: o.hambre });
   }
+  // Y lo que el reino adelantó adiestrando estos días, que pasa a la tropa que
+  // todavía no salió. Se devuelve con lo demás para que el turno lo guarde: la
+  // instrucción no es de ninguna hueste en particular, es del reino.
   return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas,
-           teatro: guardarTeatro(teatro), comido: Math.round(comido / 6) };
+           teatro: guardarTeatro(teatro), comido: Math.round(comido / 6),
+           instruccion: instruccionTrasElTiempo(s, dias) };
 }
 
 // Cuánto suelo tiene cada bando, para contarlo en el parte de guerra.
@@ -11077,8 +11295,13 @@ function pulsoDelFrente(s) {
            bolsas: (t.bolsas && t.bolsas[0]) || [], perdidas: (t.bolsas && t.bolsas[1]) || [] };
 }
 
-function mantenimientoEjercito(ej) {
-  return RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.mant, 0);
+// Lo que cuesta el ejército al año. La paga de la tropa y, si el reino está
+// adiestrando, lo que cuesta enseñarle: un ejército que entrena es más caro
+// que uno que espera, y esa es la factura que hay que estar dispuesto a pagar
+// en la paz para no pagarla en sangre después.
+function mantenimientoEjercito(ej, s) {
+  const paga = RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.mant, 0);
+  return paga + (s ? Math.round(planDeAdiestramiento(s).oro * unidadesTotales(ej || {})) : 0);
 }
 function brazosEnFilas(ej) {
   return RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.brazos, 0);
@@ -16833,11 +17056,11 @@ const REGLAS = [
       const falta = -x.neto;
       const caja = (s.edu || {}).oro || 0;
       const dura = falta > 0 ? caja / falta : 99;
-      const porTropa = x.mant > 0 ? mantenimientoEjercito(s.ejercito) / x.mant : 0;
+      const porTropa = x.mant > 0 ? mantenimientoEjercito(s.ejercito, s) / x.mant : 0;
       return { nivel: caja < falta * 3 ? "grave" : "mal",
         problema: `Se gastan ${casi(falta)} más de los que entran cada año.`,
         causa: porTropa > 0.5
-          ? `La mitad larga del gasto es la tropa: ${casi(mantenimientoEjercito(s.ejercito))} al año de sostén.`
+          ? `La mitad larga del gasto es la tropa: ${casi(mantenimientoEjercito(s.ejercito, s))} al año de sostén.`
           : (s.deuda || 0) > 0
           ? `De lo que se gasta, ${casi(x.servicio)} son intereses de una deuda de ${casi(s.deuda)}.`
           : `El sostén de lo levantado —${casi(x.mant)} al año— ya no cabe en lo que rinde el reino.`,
@@ -17254,6 +17477,7 @@ const TAREAS = [
         : s.provincias;
       return { oro: costo,
         s: { ...s, ejercito: { ...ej, [r.id]: (ej[r.id] || 0) + 1 }, provincias,
+          instruccion: diluirInstruccion(s, 1),
           pops: lv.tomados > 0 ? sociedadDelReino(provincias, s.anio, (s.gobierno || {}).forma) : s.pops,
           edu: { ...s.edu, oro: s.edu.oro - costo } },
         texto: `levantó una unidad de ${r.n.toLowerCase()} (⚜ ${costo}); van ${unidadesTotales(ej) + 1} de ${meta}` };
@@ -17266,7 +17490,7 @@ const TAREAS = [
       if (total <= 1 || s.guerra) return null;        // ni el último cuerpo ni en guerra
       const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
         s.factorias, s.ejercito, s.provincias);
-      const mant = mantenimientoEjercito(ej);
+      const mant = mantenimientoEjercito(ej, s);
       const lim = limiteFuerzas(s.stats, s.ciencia, s.poblacion);
       if (mant <= ing * 0.45 && total <= lim) return null;
       // se va la que peor rinde por lo que cuesta sostenerla
@@ -17324,7 +17548,7 @@ const TAREAS = [
       // la forma más rápida de arruinar un reino con buenas intenciones
       const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
         s.factorias, s.ejercito, s.provincias);
-      if (mantenimientoTotal(edu) + mantenimientoEjercito(s.ejercito) > ing * 0.6) return null;
+      if (mantenimientoTotal(edu) + mantenimientoEjercito(s.ejercito, s) > ing * 0.6) return null;
       const ob = objetivoDe("sedes", caja.objetivo);
       const pueden = INSTITUCIONES.filter((i) => i.costo <= caja.cupo
         && (!i.req || (inst[i.req] || 0) >= 1));
@@ -18103,6 +18327,12 @@ export default function PaxMundi() {
         facPeso: {}, reservaGrano: 0,
         dilema: null, dilemasVistos: {}, guerra: null, tributos: [],
         ejercito: { infanteria: 2 }, generales: [], bajasRecientes: 0,
+        // Se empieza con la revista de armas, que es lo que tenía cualquier
+        // señor que no fuera un desastre: unas semanas de formación al año. No
+        // se empieza en cero porque eso sería un castigo escondido para el que
+        // no abre la ficha del ejército; se empieza en lo normal, y de ahí se
+        // sube pagando o se baja ahorrando.
+        adiestramiento: "revista", instruccion: 34,
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -18219,6 +18449,10 @@ export default function PaxMundi() {
       const costo = Math.round(r.costo * reg.oro);
       if (unidadesTotales(ej) >= lim || st.edu.oro < costo || rv.libres < r.brazos) return st;
       const n = Math.max(1, cuantas || 1);
+      // Los que llegan no saben lo que sabían los que estaban: la instrucción
+      // media del ejército baja con cada leva, y por eso duplicar la tropa de
+      // golpe en vísperas de una guerra sale peor de lo que parece.
+      const insNueva = diluirInstruccion(st, n);
       ej[rid] = (ej[rid] || 0) + n;
       // Y los hombres salen de algún lado: del campo y del taller, salvo que se
       // compren fuera. El que se lleva la leva deja de arar.
@@ -18226,7 +18460,7 @@ export default function PaxMundi() {
       const provincias = lv.tomados > 0
         ? lv.provincias.map((p) => (p.pops && p.pops.length ? { ...p, soc: resumenPops(p.pops) } : p))
         : st.provincias;
-      return { ...st, ejercito: ej, provincias,
+      return { ...st, ejercito: ej, provincias, instruccion: insNueva,
         pops: lv.tomados > 0 ? sociedadDelReino(provincias, st.anio, (st.gobierno || {}).forma) : st.pops,
         edu: { ...st.edu, oro: st.edu.oro - costo },
         facciones: { ...st.facciones, ejercito: Math.min(100, (st.facciones?.ejercito ?? 50) + 3) },
@@ -18886,7 +19120,7 @@ export default function PaxMundi() {
       // ═══ PRESUPUESTO: se cobra el mantenimiento y se reparte lo que sobra ═══
       const P = state.presupuesto || PRESUPUESTO_INICIAL;
       const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito, provs);
-      const mantAnual = mantenimientoTotal(state.edu) + mantenimientoEjercito(state.ejercito);
+      const mantAnual = mantenimientoTotal(state.edu) + mantenimientoEjercito(state.ejercito, state);
       // servicio de la deuda: se paga antes que nada
       const deudaPrev = state.deuda || 0;
       const credPrev = capacidadCredito(cienciaPrevia, nuevosStats, ingresoAnual, state.anio, state.creditoVetado, state.devaluaciones);
@@ -19333,6 +19567,9 @@ export default function PaxMundi() {
         // la despensa del reino, y eso es lo que hace que una guerra larga se
         // sienta en el pan de todos y no solo en el frente.
         reservaGrano: Math.max(0, Math.round(reservaNueva - (camp.comido || 0))),
+        // Lo que el reino adelantó adiestrando: sube despacio hacia el techo
+        // del plan que se esté pagando, y baja solo si se deja de pagar.
+        instruccion: camp.instruccion,
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -22244,7 +22481,7 @@ export default function PaxMundi() {
               const pm = poderMilitar(s.stats, s.ciencia, s.poblacion, s.presupuesto, s.ejercito);
               const lim = limiteFuerzas(s.stats, s.ciencia, s.poblacion);
               const uds = unidadesTotales(s.ejercito);
-              const mantEj = mantenimientoEjercito(s.ejercito);
+              const mantEj = mantenimientoEjercito(s.ejercito, s);
               const bmax = brazosMaximos(s.poblacion, s);
               const bocu = brazosOcupados(s.ejercito);
               const brz = (s.provincias || []).some((p) => (p.pops || []).length) ? brazosDelReino(s) : null;
@@ -22306,9 +22543,14 @@ export default function PaxMundi() {
                               if (unidadesTotales(lib) <= 0) return st;
                               const id = "hu" + ((st.huestes || []).length + 1) + "-" + st.turno;
                               return { ...st, huestes: [...(st.huestes || []),
-                                huesteNueva(id, lib, capital.x, capital.y, `hueste de ${capital.nombre}`)],
+                                huesteNueva(id, lib, capital.x, capital.y, `hueste de ${capital.nombre}`,
+                                  // sale con lo que el reino le enseñó y sin
+                                  // nada de lo que solo se aprende afuera
+                                  { instruccion: st.instruccion ?? INSTRUCCION_BASE, experiencia: 0 })],
                                 cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
-                                  texto: `Se ponen en pie de guerra ${unidadesTotales(lib)} unidades en ${capital.nombre}.` }] };
+                                  texto: `Se ponen en pie de guerra ${unidadesTotales(lib)} unidades en ${capital.nombre}: `
+                                    + `${gradoDeTemple(templeDe({ instruccion: st.instruccion ?? INSTRUCCION_BASE, experiencia: 0 })).n}, `
+                                    + `${planDeAdiestramiento(st).n}.` }] };
                             });
                             // Se despliega y se va a verlo: desplegar sin ver
                             // dónde quedó es la mitad de la orden.
@@ -22356,6 +22598,24 @@ export default function PaxMundi() {
                                 {unidadesTotales(h.ramas)} ud · moral {Math.round(h.moral || 100)}
                               </span>
                             </div>
+                            {/* El temple. Va con nombre y no con número porque
+                                lo que el que manda necesita saber es a quién
+                                puede mandar a lo difícil, y eso se dice con una
+                                palabra: bisoños o vieja guardia. */}
+                            {(() => {
+                              const tt = templeDe(h);
+                              const gr = gradoDeTemple(tt);
+                              const col = tt > 0.68 ? C.green : tt > 0.28 ? C.gold : C.red;
+                              return (
+                                <div style={{ fontSize: 11.5, color: col, marginTop: 3, lineHeight: 1.5 }}>
+                                  ⚔ {gr.n}: {gr.dice}
+                                  <span style={{ fontFamily: mono, color: C.muted }}>
+                                    {" "}· instrucción {Math.round(h.instruccion ?? INSTRUCCION_BASE)}
+                                    {" "}· veteranía {Math.round(h.experiencia || 0)}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                             {/* El abasto va arriba de todo y en rojo cuando falta: una
                                 hueste que no come no es una hueste con un problema,
                                 es una hueste que se está deshaciendo mientras mirás. */}
@@ -22412,9 +22672,18 @@ export default function PaxMundi() {
                                   ✕ cancelar el plan
                                 </button>
                               )}
-                              <button onClick={() => setState((st) => ({ ...st,
-                                  huestes: (st.huestes || []).filter((q) => q.id !== h.id) }))}
-                                title="vuelve al conteo del reino"
+                              <button onClick={() => setState((st) => {
+                                  const q = (st.huestes || []).find((z) => z.id === h.id);
+                                  const ins = q ? instruccionDeVuelta(st, q) : st.instruccion;
+                                  const sube = q && ins > (st.instruccion ?? INSTRUCCION_BASE) + 1;
+                                  return { ...st, instruccion: ins,
+                                    huestes: (st.huestes || []).filter((z) => z.id !== h.id),
+                                    cronica: sube ? [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                      texto: `⚔ Vuelve la ${q.nombre} y sus veteranos se reparten por los cuarteles: `
+                                        + `la instrucción del ejército sube de ${Math.round(st.instruccion ?? INSTRUCCION_BASE)} a ${ins}. `
+                                        + `Lo que aprendieron afuera es lo único que queda de la campaña.` }] : st.cronica };
+                                })}
+                                title="vuelve al conteo del reino, y lo que aprendió con ella"
                                 style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
                                   background: "transparent", border: `1px solid ${C.line}`,
                                   color: C.muted, fontFamily: mono, fontSize: 10.5 }}>
@@ -22469,6 +22738,82 @@ export default function PaxMundi() {
                     )}
                   </div>
                 )}
+
+                {/* ── cómo se adiestra ──
+                    La otra mitad de lo que vale un ejército, y la que se paga
+                    en la paz. Va acá arriba y no escondida abajo porque es una
+                    decisión de todos los años, no una que se toma una vez. */}
+                {(() => {
+                  const plan = planDeAdiestramiento(s);
+                  const ins = s.instruccion ?? INSTRUCCION_BASE;
+                  const nUds = unidadesTotales(s.ejercito || {});
+                  const hs2 = (s.huestes || []).filter((h) => !h.de);
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⚔ CÓMO SE ADIESTRA LA TROPA
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12,
+                          color: ins > 60 ? C.green : ins > 30 ? C.gold : C.red }}>
+                          instrucción {Math.round(ins)} / {plan.techo}
+                        </span>
+                      </div>
+                      <div style={{ height: 5, marginTop: 6, borderRadius: 3,
+                        background: "rgba(0,0,0,0.35)", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.round(acotar(ins, 0, 100))}%`, height: "100%",
+                          background: ins > 60 ? C.green : ins > 30 ? C.gold : C.red }} />
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+                        Lo que la tropa sabe antes de que suene un tiro. Sube unos puntos al año
+                        —adiestrar es lo más lento que hace un ejército— y baja cada vez que entra
+                        una leva nueva. La veteranía es otra cosa y no se compra: esa la da la guerra.
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                        {ADIESTRAMIENTO.map((a2) => {
+                          const puede = adiestramientoDisponible(a2, s.ciencia);
+                          const act = plan.id === a2.id;
+                          const cuesta = Math.round(a2.oro * nUds);
+                          return (
+                            <button key={a2.id} disabled={!puede || pensando}
+                              onClick={() => setState((st) => (st.adiestramiento === a2.id ? st : ({ ...st,
+                                adiestramiento: a2.id,
+                                cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                  texto: `⚔ Se ordena ${a2.n} para toda la tropa: ${a2.dice}. `
+                                    + (a2.oro > 0
+                                        ? `Cuesta ⚜${Math.round(a2.oro * unidadesTotales(st.ejercito || {}))} al año y no se va a notar hasta dentro de unos cuantos.`
+                                        : `No cuesta nada, y se nota.`) }] })))}
+                              style={{ textAlign: "left", padding: "7px 9px", borderRadius: 6,
+                                cursor: puede ? "pointer" : "not-allowed",
+                                background: act ? `${C.gold}18` : "transparent",
+                                border: `1px solid ${act ? C.gold : C.line}`, opacity: puede ? 1 : 0.45 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                <span style={{ fontSize: 12.5, color: act ? C.gold : C.ink }}>
+                                  {act ? "▪ " : "▫ "}{a2.n}
+                                </span>
+                                <span style={{ fontFamily: mono, fontSize: 10.5,
+                                  color: a2.oro > 0 ? C.gold : C.muted }}>
+                                  {a2.oro > 0 ? `⚜${cuesta}/año · techo ${a2.techo}` : `sin coste · techo ${a2.techo}`}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                {puede ? a2.dice
+                                  : `hace falta saber «${MED_IDX[a2.req]?.nombre || a2.req}»: ${a2.falta}`}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {hs2.length > 0 && (
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
+                          En el mapa: {hs2.map((h) => `${h.nombre}, ${gradoDeTemple(templeDe(h)).n}`).join(" · ")}.
+                          Lo que aprendieron vuelve al reino cuando se las licencia a casa.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── ramas ── */}
                 <div style={{ fontSize: 10, letterSpacing: 1.8, textTransform: "uppercase", color: C.muted,

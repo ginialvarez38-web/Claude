@@ -242,6 +242,57 @@ Y el cerco mide lo que tiene que medir: no cuánto de la comarca tenés, sino
 cuánto del campo alrededor de la plaza. Para bloquear una ciudad hay que
 cortarle los caminos, no ocupar el departamento entero.
 
+## Lo que le enseñaron a la tropa y lo que vivió
+
+Son dos cosas distintas y el juego las lleva por separado, porque la diferencia
+entre ellas es la mitad de la historia militar del mundo.
+
+La **instrucción** es lo que el reino le puso encima a su tropa antes de que
+sonara un tiro: formar, cargar, marchar de noche, obedecer a un sargento al que
+no se conoce. Se compra, y se compra en la paz. En la ficha del ejército se
+elige el plan —ninguno, revista de armas, escuela de cuadros, maniobras de
+campaña—, cada uno con su precio al año por unidad y su techo. Sube unos pocos
+puntos por año: un plan puesto el día que se declara la guerra no llega a
+tiempo a nada. Y baja si se deja de pagar, o cada vez que entra una leva nueva:
+duplicar el ejército de golpe hunde la instrucción media, que es exactamente lo
+que le pasa a todo el que moviliza en vísperas.
+
+Los planes de arriba piden que haya quien los dé. Sin cuadro de oficiales no
+hay escuela de cuadros, y decretar maniobras de estado mayor en el siglo XIII
+no hace absolutamente nada.
+
+La **veteranía** no se compra en ningún lado. Se gana afuera: en batalla —lo
+que más enseña—, en un asalto, sentado delante de una plaza, y simplemente
+marchando, porque montar y levantar el campamento todos los días sin perder a
+nadie por el camino es la mitad del oficio. La primera batalla enseña más que
+la décima.
+
+Una hueste veterana vale por tres, y no por un solo motivo:
+
+- pesa bastante más en el campo, y a igualdad de hombres le gana dos de cada
+  tres veces a una leva;
+- pierde una fracción de la gente cuando pelea, y cuando la derrotan se retira
+  en orden en vez de dejarse media hueste por el camino;
+- no se le rompe la moral;
+- y no se deshace cuando se acaba el pan. Cuatro meses sin abasto disuelven a
+  una leva y dejan casi entera a la que se conoce: no los mata el hambre, se
+  van.
+
+**Y se pierde.** Mientras las bajas sean las de una campaña, la hueste se
+curte. Cuando pasan de uno de cada seis empieza a faltar el que sabía, porque
+los veteranos van delante, y eso no vuelve con reemplazos. Un asalto que entra
+perdiendo a cinco de cada diez deja la plaza tomada y el ejército que la tomó
+ya no existe. Una batalla pareja desgasta aunque se gane: un ejército que gana
+todo el tiempo también se gasta.
+
+Lo único que un reino se queda de una guerra es lo que aprendieron los que
+vuelven. Licenciar a casa una hueste curtida sube la instrucción de todo el
+ejército: los veteranos se reparten por los cuarteles y enseñan.
+
+En el mapa cada escudo lleva sus galones —una, dos o tres barras— y en la
+sección de campaña cada hueste dice lo que es con una palabra: bisoños,
+instruidos, hechos, curtidos, la vieja guardia.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

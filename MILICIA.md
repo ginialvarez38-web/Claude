@@ -22,13 +22,16 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 26 | Batallas | Se resuelven en el mapa estratégico. Sin modo táctico y sin hacer falta. |
 | 28 | Guerrilla | La tierra ocupada resiste por su cuenta, palmo por palmo, y recupera lo que se deja solo. |
 | 29 | Ocupación | Se ocupa el suelo antes que la plaza, y una comarca conquistada entra con la lealtad por el suelo. |
-| 31 | Desgaste | Sitiar cuesta bajas por enfermedad; la marcha y el terreno pesan. Falta lo que viene del hambre. |
+| 31 | Desgaste | Sitiar cuesta bajas por enfermedad; la marcha y el terreno pesan; y una hueste sin abasto se deshace sola. |
+| 13-14 | Logística | El ejército come pan y gasta pertrechos según su rama; lo que le llega sale de las comarcas, viaja por los caminos y se apaga con la distancia. Una campaña honda se deshace sin que nadie la ataque. |
+| 8 | Entrenamiento | Cuatro planes de adiestramiento, con su precio al año, su techo y quién hace falta para darlos. Sube despacio, baja si se deja de pagar y se diluye con cada leva. |
+| 9 | Experiencia | La veteranía se gana peleando, sitiando y marchando, y se pierde cuando muere el cuadro que sabía. Una hueste veterana pesa más, sangra menos, no se le rompe la moral y aguanta hambre que a una leva la disuelve. |
 
 ## Lo que está a medias
 
 | § | Qué falta |
 |---|---|
-| 13-14 | **Logística.** No existe. El frente ya modela hasta dónde alcanza la fuerza de un reino, pero nadie come, nadie gasta munición y nadie se queda sin nada. |
+| 15-16 | **Combustible y munición como recursos.** El gasto está contado —cada rama pide sus pertrechos— pero sale de una despensa única en vez de una cadena que se pueda cortar. |
 | 22-23 | **Niebla de guerra.** Se ve todo. Las huestes enemigas aparecen enteras y exactas desde el primer día. |
 | 30 | **Prisioneros.** Las bajas se pierden; nadie se rinde ni se canjea. |
 | 34 | **Doctrina.** Hay saberes militares sueltos, pero no una forma de pelear que se elija y que cambie cómo se pelea. |
@@ -37,23 +40,25 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 ## Lo que no existe
 
-Niveles de escala y cadena de mando (§2-3, §12), entrenamiento y experiencia
-(§8-9), combustible y munición como recursos (§15-16), reparaciones (§17),
-guerra aérea (§20), guerra naval como sistema (§21), operaciones con objetivos
+Niveles de escala y cadena de mando (§2-3, §12), reparaciones (§17), guerra
+aérea (§20), guerra naval como sistema (§21), operaciones con objetivos
 delegados (§24-25), modo táctico (§27), industria militar y su cadena (§32-33),
 armas estratégicas y nucleares (§36-37), economía de guerra (§38).
 
 ## El orden
 
-**1 · El abasto.** Que el ejército coma, gaste y se quede sin nada. Es lo que
-el propio diseño llama central, y es lo único que ata de una sola vez a la
-población, la economía, la infraestructura, la geografía y el frente. Sin esto
-ninguna de las otras piezas tiene contra qué apoyarse: un ejército que no
+**1 · El abasto.** ✔ Hecho. Que el ejército coma, gaste y se quede sin nada. Es
+lo que el propio diseño llama central, y es lo único que ata de una sola vez a
+la población, la economía, la infraestructura, la geografía y el frente. Sin
+esto ninguna de las otras piezas tiene contra qué apoyarse: un ejército que no
 necesita nada no necesita industria, ni caminos, ni depósitos, ni paz.
 
-**2 · Experiencia y entrenamiento.** Una hueste veterana vale por tres, y
-perder veteranos duele de verdad. Es barato de hacer y cambia cada decisión de
-a quién mandar dónde.
+**2 · Experiencia y entrenamiento.** ✔ Hecho. Una hueste veterana vale por
+tres, y perder veteranos duele de verdad. Las dos mitades van por separado
+—instrucción, que se paga en la paz y tarda años; veteranía, que la regala la
+guerra y se la lleva la misma guerra— y de ahí sale la decisión que antes no
+existía: a quién mandar a lo difícil, y si vale la pena tomar esa plaza al
+precio que va a costar.
 
 **3 · Niebla de guerra.** Que no se sepa lo que hay enfrente. Convierte el
 reconocimiento en algo que se hace y no en un adorno, y hace que los generales
