@@ -116,27 +116,44 @@ manda al levantar el dedo caía sobre el fondo de la rueda recién abierta y la
 cerraba antes de que se viera. El juego estaba entero y no era jugable en un
 teléfono, que es donde se juega.
 
-## Un banco de pruebas para la conquista
+## Un banco de pruebas para el frente
 
 `conquista.html` es un archivo aparte, y es solo eso: los Pirineos de verdad
-—72 comarcas con su contorno y su terreno, sacadas del mapa del juego— y un
-ejército que las va tomando. Sin economía, sin turnos, sin nada más. Se abre a
-mano igual que el juego.
+—72 comarcas con su contorno y su terreno, sacadas del mapa del juego— partidos
+en palmos de tierra de seis kilómetros, y dos bandos empujando. Sin economía,
+sin turnos, sin nada más. Se abre a mano igual que el juego.
 
-Sirve para decidir cómo se ve la conquista antes de meterla en el juego, que
-es donde una cosa así se pierde entre todo lo demás. Trae los dos dibujos uno
-al lado del otro —**palmo a palmo**, la comarca partida en cuadros que van
-cambiando de dueño, y **mancha suave**, un disco que crece— y los mandos para
-mirar de cerca, cambiar el tamaño del palmo, lo irregular del frente y el
-tamaño del ejército.
+Sirve para decidir cómo se pelea y cómo se ve antes de meterlo en el juego, que
+es donde una cosa así se pierde entre todo lo demás.
 
-También sirve para probar la pregunta de fondo: si el ejército **ocupa lo que
-pisa** —cruzar la frontera ya empieza a teñir la comarca donde está parado— o
-si **solo hace lo que se le manda**. Se cambia con un botón y se ve la
-diferencia enseguida.
+**Nadie dibuja el frente.** Cada palmo tiene dueño y cambia de dueño cuando el
+de enfrente aprieta más, y solo si el que aprieta ya tiene el palmo de al lado.
+De esa única regla salen las tres cosas que hacen que parezca una guerra:
 
-Lo que ahí se decida es lo que después va al juego. Las reglas están copiadas
-a mano en el propio archivo para que se abra solo, sin nada al lado.
+- **La anexión entra por un costado.** El color nace donde están las botas y se
+  extiende desde ahí; la capital de la comarca es de lo último que cae, no de
+  lo primero.
+- **Salientes.** Una hueste solo aprieta el trecho que tiene delante —unos
+  cincuenta kilómetros—, así que donde hay ejército se mete una lengua y el
+  resto de la línea se queda quieto.
+- **Bolsas.** Dos avances que se cruzan por detrás dejan un trozo suelto. No
+  hay ninguna regla que diga «si está rodeado, cae»: cae porque se le corta lo
+  que lo sostenía, y si nadie va a socorrerlo se rinde de hambre en un par de
+  meses. Mientras se apaga, se va poniendo gris.
+
+Dos cosas más que no son adorno y cambian toda la partida: por tierra
+conquistada uno se abastece peor que por la propia —de ahí que toda ofensiva se
+frene sola cuando se aleja demasiado—, y el enemigo contraataca: sus huestes van
+a donde más terreno perdieron y lo recuperan si te fuiste de ahí.
+
+Los mandos: velocidad y pausa, tamaño del palmo, lo irregular del frente,
+cuántas huestes de cada bando y de qué tamaño, si el enemigo contraataca o se
+queda quieto, y una cámara que sigue a la hueste elegida —de lejos no se ve
+nada, esa es media cuestión—.
+
+Lo que ahí se decida es lo que después va al juego. Las reglas están copiadas a
+mano en el propio archivo para que se abra solo, sin nada al lado, y
+`armar_conquista.py` lo rearma desde la plantilla y los contornos.
 
 ## Conquistar se ve en el mapa
 
