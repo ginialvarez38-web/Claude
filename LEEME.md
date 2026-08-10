@@ -151,39 +151,63 @@ cuántas huestes de cada bando y de qué tamaño, si el enemigo contraataca o se
 queda quieto, y una cámara que sigue a la hueste elegida —de lejos no se ve
 nada, esa es media cuestión—.
 
-Lo que ahí se decida es lo que después va al juego. Las reglas están copiadas a
-mano en el propio archivo para que se abra solo, sin nada al lado, y
-`armar_conquista.py` lo rearma desde la plantilla y los contornos.
+Todo esto ya está en el juego —ver «La guerra se ve en el mapa»—, y el banco de
+pruebas se queda para lo que venga: es mucho más rápido probar una idea de
+frente acá que dentro de una partida. Las reglas están copiadas a mano en el
+propio archivo para que se abra solo, sin nada al lado, y `armar_conquista.py`
+lo rearma desde la plantilla y los contornos.
 
-## Conquistar se ve en el mapa
+## La guerra se ve en el mapa, palmo a palmo
 
-Una comarca no cambia de dueño de golpe. El ejército entra por un lado y va
-ganando campo, y eso es exactamente lo que el mapa pinta: el color crece desde
-donde entró la hueste, recortado contra el contorno de verdad de la comarca,
-así que se derrama por el valle y se para en la costa como se pararía una
-tropa. Lo que está pintado es lo que está tomado.
+Cuando hay guerra, el mapa se parte en palmos de tierra de unos siete
+kilómetros y cada palmo tiene dueño. Un palmo cambia de dueño cuando el de
+enfrente aprieta más, y solo si el que aprieta ya tiene el palmo de al lado o
+lo tiene bajo las botas. **Nadie dibuja el frente**: sale de los empujones, y
+por eso se comporta como un frente.
 
-En medio queda la plaza, del color de quien todavía la tiene, y ahí es donde
-termina el asunto: la comarca puede estar entera en tus manos y el castillo
-seguir sin rendirse. Cuando cae, la comarca pasa a ser del reino —con su
-contorno real, la mitad de su gente y la lealtad por el suelo, que es como
-entra una comarca conquistada—.
+- **La anexión entra por un costado.** El color nace donde están las botas —si
+  la hueste cruzó la frontera, en la frontera— y la capital de la comarca es de
+  lo último que cae, no de lo primero.
+- **Salientes.** Una hueste aprieta el trecho que tiene delante, unos cincuenta
+  y ocho kilómetros, y no más. Donde hay ejército se mete una lengua; el resto
+  de la línea se queda quieto.
+- **Bolsas.** Lo que queda cercado y sin nadie que lo socorra se rinde de
+  hambre en un par de meses, y mientras se apaga se va poniendo gris. No hay
+  ninguna regla que diga «si está rodeado, cae»: cae porque se le corta lo que
+  lo sostenía. Si llega una hueste suya a romper el cerco, deja de estar
+  perdido y el juego lo sabe.
 
-Lo que tarda depende de lo que hay que tomar, no de un número fijo: una comarca
-grande lleva mucho más que una chica, la montaña mucho más que la llanura, y un
-ejército con cañones a rastras avanza al paso de los cañones. Ocupar la Guayana
-lleva más de cien días; París, ocho.
+Debajo hay un campo de fuerza por bando que nace en las huestes y en las plazas
+y se propaga de palmo en palmo perdiendo por el camino: poco por tierra propia,
+mucho por la del otro, y bastante por la conquistada —la gente no es tuya, los
+caminos los cortan, cada convoy necesita escolta—. De ahí sale sola la
+**culminación**: toda ofensiva se frena cuando se aleja de su tierra.
 
-Y el cerco solo cuenta mientras la plaza está de verdad rodeada. Sitiar una
-ciudad por un lado y dejarle el otro abierto no es sitiarla: es acamparle
-enfrente y verla comer. Por eso conviene tomar el campo antes de sentarse
-delante del muro. Si el ejército levanta el campamento y se va, lo tomado se
-va perdiendo solo: el campo vuelve a su dueño, aunque mucho más despacio de lo
-que se ganó.
+Y de ahí sale la vuelta del otro. **La tierra ocupada resiste por su cuenta**,
+en todos sus palmos: es la gente de ahí, que no se fue a ninguna parte. Si
+levantás el campamento y te vas, lo tomado se pierde solo. Para conservar una
+conquista hay que dejarle tropa encima o tomar la plaza y quedársela. Y las
+huestes del vecino ya no van a tu capital: van al desgarrón más grande que
+tengan a mano, a recuperar lo suyo.
+
+Un cerco solo cuenta mientras la plaza está de verdad rodeada: sitiarla por un
+lado y dejarle el otro abierto es acamparle enfrente y verla comer. Los días de
+cerco valen lo que valga el cerco, así que una plaza mal sitiada aguanta
+muchísimo más.
+
+Al caer la plaza, la comarca pasa a ser del reino con su contorno de verdad, la
+mitad de su gente y la lealtad por el suelo, que es como entra una comarca
+conquistada.
 
 Con el turno de un año —el que viene puesto— la campaña entera se resuelve
-entre dos pantallas y no hay nada que mirar. Poné el turno en un mes o en una
-semana, arriba en el consejo, y se ve avanzar.
+entre dos pantallas. Poné el turno en un mes o en una semana, arriba en el
+consejo, y se ve avanzar.
+
+El teatro se arma solo sobre la caja donde se pelea, no sobre el mundo entero
+—serían veintidós millones de palmos—, y el palmo se agranda si la caja es
+enorme, así que la cuenta no se dispara aunque la guerra sea entre imperios. En
+la partida guardada va solo el dueño de cada palmo, comprimido por tramos:
+treinta y cinco mil palmos ocupan tres mil letras.
 
 ## La partida se guarda sola
 

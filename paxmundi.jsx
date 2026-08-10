@@ -6977,7 +6977,7 @@ const escalon = (v, paso) => {
 // el otro: cada instancia se numera.
 let _nMapa = 0;
 
-function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda, huestes, huesteSel, onHueste, frentes }) {
+function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, paisPropio, margenInfIzq, anio, mira, vistaPedida, margenSup, margenInf, margenIzq, comparadas, onComparar, sitio, onRueda, huestes, huesteSel, onHueste, frente }) {
   const [uid] = useState(() => "pm" + ++_nMapa);
   const cajaRef = useRef(null);
   const svgRef = useRef(null);
@@ -8038,61 +8038,73 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // a uno, no queda un palmo sin tomar. Y mientras la plaza aguanta, queda su
   // isla en medio con el color de quien todavía la tiene, que es lo que se ve
   // desde arriba en un asedio de verdad.
-  const capaFrentes = useMemo(() => {
-    const fs = (frentes || []).filter((f) => f && f.idx != null && f.avance > 0.001);
-    if (!fs.length) return null;
-    // Lo que se gana va en el oro del reino y no en un color de atlas: en este
-    // mapa las comarcas propias se pintan por su terreno y lo que dice «esto es
-    // tuyo» es el borde dorado y la estrella de la corte. Un violeta de paleta
-    // no lo diría. Lo que se pierde va en el rojo de lo ocupado, que ya es el
-    // color con el que el mapa cuenta las malas noticias. Y para saber de quién
-    // era, el color del país queda debajo, que es el que estaba ahí.
-    const mio = C.gold;
-    return (
-      <g style={{ pointerEvents: "none" }}>
-        {fs.map((f, i) => {
-          const g = geomProvincia(f.idx);
-          if (!g || !g.d) return null;
-          // hasta la esquina más lejana: con eso, avance 1 no deja nada fuera
-          const R = Math.max(Math.hypot(g.x0 - f.x, g.y0 - f.y), Math.hypot(g.x1 - f.x, g.y0 - f.y),
-                             Math.hypot(g.x0 - f.x, g.y1 - f.y), Math.hypot(g.x1 - f.x, g.y1 - f.y));
-          const r = R * f.avance;
-          const col = f.mia ? mio : C.red;
-          // el dueño de antes, que es lo que queda de isla alrededor de la plaza
-          const suyo = f.mia ? colorDePais(f.pais) : mio;
-          const cid = uid + "fr" + f.idx;
-          return (
-            <g key={"fr" + f.idx}>
-              <clipPath id={cid}><path d={g.d} /></clipPath>
-              <g clipPath={`url(#${cid})`}>
-                <path d={g.d} fill={col} opacity={0.20 * f.avance} />
-                <circle cx={f.x} cy={f.y} r={r} fill={col} opacity="0.6" />
-                {/* la línea del frente: lo tomado tiene un borde, y ese borde
-                    es la noticia —por dónde se está ganando el campo— */}
-                <circle cx={f.x} cy={f.y} r={r} fill="none" stroke={col}
-                  strokeWidth={pxCapa * 1.8} opacity="0.95" />
-                <circle cx={f.x} cy={f.y} r={r} fill="none" stroke="#0B1017"
-                  strokeWidth={pxCapa * 0.7} strokeDasharray={`${pxCapa * 2.6} ${pxCapa * 2.6}`}
-                  opacity="0.6" />
-              </g>
-              {/* La plaza, que aguanta en medio de lo tomado hasta que cae. Va
-                  mientras haya frente y no solo mientras quede campo por tomar:
-                  con la comarca entera ocupada y el castillo sin rendirse, el
-                  mapa tiene que enseñar justamente eso —todo suyo salvo el
-                  torreón—, que es como termina un asedio antes de terminar. */}
-              {f.px != null && (
-                <g>
-                  <circle cx={f.px} cy={f.py} r={pxCapa * 4.6} fill={suyo} opacity="0.92" />
-                  <circle cx={f.px} cy={f.py} r={pxCapa * 4.6} fill="none"
-                    stroke="#0B1017" strokeWidth={pxCapa * 0.8} opacity="0.85" />
-                </g>
-              )}
-            </g>
-          );
-        })}
-      </g>
-    );
-  }, [frentes, pxCapa, uid]);
+  // El frente, palmo a palmo. Se escribe un píxel por palmo de tierra en una
+  // imagen del tamaño de la rejilla y se estira sin suavizar: por eso el borde
+  // sale dentado, con la forma que le dieron los empujones, y no redondeado.
+  //
+  // Va como una sola <image> y no como miles de figuras. Con cuatro mil
+  // provincias en el mapa, meter cuarenta mil rectángulos más era garantizado
+  // que el arrastre volviera a costar lo que costaba.
+  const frenteVivo = teatroVivo(frente);
+  const selloFrente = frente ? frente.due : null;
+  const capaFrente = useMemo(() => {
+    const t = frenteVivo;
+    if (!t || typeof document === "undefined") return null;
+    const lz = document.createElement("canvas");
+    lz.width = t.GW; lz.height = t.GH;
+    const g = lz.getContext("2d");
+    if (!g) return null;
+    const img = g.createImageData(t.GW, t.GH);
+    const d = img.data;
+    const oro = [212, 175, 55], rojo = [150, 92, 92];
+    const n = t.GW * t.GH;
+    let algo = false;
+    for (let k = 0; k < n; k++) {
+      const o = k * 4;
+      const due = t.due[k];
+      if (t.prov[k] < 0 || due < 0) { d[o + 3] = 0; continue; }
+      // Solo se pinta lo que está en disputa: lo que cambió de manos, lo que
+      // está cambiando ahora, y el palmo de al lado —para que la línea del
+      // frente tenga filo—. La comarca que sigue siendo de quien dice el mapa
+      // no necesita que nadie la tiña: el color del reino ya lo cuenta. Sin
+      // esto el mapa aparecía con la frontera teñida hasta en tiempos de paz.
+      const cambiada = due !== t.nat[k];
+      const disputa = t.pres[k] > 0.05;
+      const filo = !cambiada && !disputa && vecinoRevuelto(t, k);
+      if (!cambiada && !disputa && !filo) { d[o + 3] = 0; continue; }
+      algo = true;
+      const c = due === 1 ? oro : rojo;
+      let r = c[0], v = c[1], a = c[2], op;
+      if (disputa) {
+        const q = acotar(t.pres[k], 0, 1);
+        r = Math.min(255, c[0] + 70 * q + 25); v = Math.min(255, c[1] + 75 * q + 25);
+        a = Math.min(255, c[2] + 90 * q + 25);
+        op = 210;
+      } else if (filo) op = 220;
+      else op = 120;
+      // lo cercado y sin socorro se apaga hacia el gris según se le acaba el
+      // pan: se ve de lejos qué bolsa está viva y cuál ya está para caer
+      const ham = t.hambre[k];
+      if (ham > 0.02) {
+        const m = (r + v + a) / 3;
+        r += (m - r) * ham * 0.85; v += (m - v) * ham * 0.85; a += (m - a) * ham * 0.85;
+        op = Math.max(op, 130 + 80 * ham);
+      }
+      d[o] = r; d[o + 1] = v; d[o + 2] = a; d[o + 3] = op;
+    }
+    if (!algo) return null;
+    g.putImageData(img, 0, 0);
+    return { url: lz.toDataURL(), x: t.gx0, y: t.gy0,
+      w: t.GW * t.paso, h: t.GH * t.paso };
+  }, [frenteVivo, selloFrente]);
+
+  const capaFrentes = capaFrente && (
+    <g style={{ pointerEvents: "none" }}>
+      <image href={capaFrente.url} x={capaFrente.x} y={capaFrente.y}
+        width={capaFrente.w} height={capaFrente.h} preserveAspectRatio="none"
+        style={{ imageRendering: "pixelated" }} />
+    </g>
+  );
 
   // ——— las huestes ———
   //
@@ -9717,77 +9729,632 @@ function aguanteDe(p, s) {
 // por eso el color crece desde donde entró la hueste y no desde el centro.
 //
 // Un frente es esa cuenta: qué comarca, por dónde se entró, cuánto se lleva.
-// Ocupar no es marchar. Una parte de la jornada se va en dejar gente en cada
-// villa, cortar los caminos y sentar la guarnición; el resto del día el
-// ejército no avanza, se queda. Esa parte es la que manda el ritmo.
-const OCUPAR_PARTE = 0.25;         // de la marcha diaria, lo que sirve para ocupar
-const OLVIDO_CONQUISTA = 0.008;    // lo que se recupera sola por día sin nadie encima
+// ═══ EL TEATRO: EL FRENTE PALMO A PALMO ══════════════════════════
+//
+// Antes esto era un disco que crecía desde el centro de cada comarca, y estaba
+// mal de raíz: una guerra no anexa una comarca del medio hacia afuera, y un
+// disco no puede hacer un saliente ni una bolsa por mucho que se le pida.
+//
+// Ahora el teatro de la guerra va partido en palmos de tierra —unos kilómetros
+// cada uno— y cada palmo tiene dueño. Un palmo cambia de dueño cuando el de
+// enfrente aprieta más, y solo si el que aprieta ya tiene el palmo de al lado
+// o lo tiene bajo las botas. De esa sola regla salen las tres cosas que hacen
+// que un mapa de guerra parezca un mapa de guerra:
+//
+//   · la anexión entra por un costado, porque nace donde están las botas;
+//   · hay salientes, porque una hueste solo aprieta el trecho que tiene
+//     delante y el resto de la línea se queda quieto;
+//   · hay bolsas, porque dos avances que se cruzan por detrás dejan un trozo
+//     suelto. No hay ninguna regla que diga «si está rodeado, cae»: cae porque
+//     se le corta lo que lo sostenía.
+//
+// El teatro no cubre el mundo —serían veintidós millones de palmos— sino la
+// caja donde se está peleando, y el palmo se agranda si la caja es enorme, así
+// que la cuenta no se dispara aunque la guerra sea entre imperios.
 
-// El radio de una comarca en grados: media diagonal de su caja. Es lo que hay
-// que recorrer desde donde se entró para tenerla toda, y por eso una comarca
-// grande tarda más que una chica —que es lo obvio y era lo que faltaba: hasta
-// acá una provincia rusa se ocupaba tan rápido como una holandesa—.
-function radioDeComarca(p) {
-  const g = p && p.idx != null ? geomProvincia(p.idx) : null;
-  if (!g) return 0.6;
-  return Math.max(0.05, Math.hypot(g.x1 - g.x0, g.y1 - g.y0) / 2);
+const PALMO_KM = 7;               // lo que mide un palmo cuando se puede
+const PALMOS_TOPE = 46000;        // cuántos palmos como mucho, y de ahí el tamaño
+const RADIO_PIE_KM = 14;          // el suelo que una hueste pisa de verdad
+const ALCANCE_KM = 58;            // el trecho de frente que una hueste aprieta
+const DIAS_DE_HAMBRE = 70;        // lo que aguanta un cercado sin socorro
+const OCUPAR_PARTE = 0.25;        // de la marcha diaria, lo que sirve para ocupar
+// Las dos fuerzas van a la misma vara. Una hueste de cien unidades pesa unas
+// ciento cincuenta, y una comarca medieval se defiende con quince: sin poner
+// las dos escalas juntas, el ejército pasaba por encima de todo el mapa sin
+// despeinarse, o no podía con la primera aldea.
+const FUERZA_HUESTE = 0.45;
+const FUERZA_PLAZA = 2.2;
+// Y lo que resiste una tierra ocupada, palmo por palmo. No es una guarnición:
+// es la gente que vive ahí y que no es tuya —el camino cortado, el mensajero
+// que no llega, la aldea que no da de comer—. Sin esto, un ejército sentado en
+// su capital sostenía una conquista a trescientos kilómetros para siempre y no
+// había manera de que el vecino recuperara nada, que es justo lo que hace que
+// una guerra sea una guerra y no una marea.
+const RESISTENCIA_OCUPADA = 0.62;
+
+// Un teatro vive fuera del estado del juego: son medio millón de números y no
+// tienen nada que hacer dentro de algo que se copia entero en cada turno. En
+// el estado va solo el dueño de cada palmo, comprimido; todo lo demás —qué
+// comarca es cada palmo, su terreno, su terquedad— se vuelve a sacar del mapa,
+// que no cambia.
+let _teatro = null;
+
+function firmaTeatro(t) { return `${t.gx0.toFixed(3)}|${t.gy0.toFixed(3)}|${t.GW}|${t.GH}|${t.paso.toFixed(5)}`; }
+
+// La caja donde se pelea: el reino, más lo que las huestes tengan tomado o
+// pisado, más un margen para que quepa el avance de los próximos turnos.
+function cajaDelTeatro(s) {
+  const puntos = [];
+  for (const p of (s && s.provincias) || []) if (p.x != null) puntos.push(p);
+  for (const h of (s && s.huestes) || []) if (h.x != null) puntos.push(h);
+  if (!puntos.length) return null;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const p of puntos) {
+    const g = p.idx != null ? geomProvincia(p.idx) : null;
+    const m0 = g ? 0 : 0.7;                        // las inventadas ocupan medio grado
+    const a = (g ? g.x0 : p.x) - m0, b = (g ? g.y0 : p.y) - m0;
+    const c = (g ? g.x1 : p.x) + m0, d = (g ? g.y1 : p.y) + m0;
+    if (a < x0) x0 = a; if (b < y0) y0 = b;
+    if (c > x1) x1 = c; if (d > y1) y1 = d;
+  }
+  // Margen para crecer, y la caja redondeada a grados enteros. Lo segundo no
+  // es cosmética: si la caja se moviera con cada paso de un ejército, el
+  // teatro se rehacía cada turno, los dueños guardados no encajaban en la
+  // rejilla nueva y el frente volvía a las fronteras de siempre. Se veía como
+  // «la conquista no avanza nunca».
+  const m = 3.2, r = (v, d) => (d < 0 ? Math.floor(v) : Math.ceil(v));
+  return { x0: r(x0 - m, -1), y0: Math.max(0, r(y0 - m, -1)),
+           x1: r(x1 + m, 1), y1: Math.min(MUNDO_ALTO, r(y1 + m, 1)) };
 }
 
-// Cuánto de la comarca se gana en un día. Sale de kilómetros de verdad: los
-// que la hueste puede consolidar en una jornada, contra los que hay que cubrir.
-// La velocidad ya trae el terreno y el camino —una montaña sin calzada se
-// ocupa a paso de mula— y la razón de fuerzas trae lo que cuesta la resistencia.
-function ritmoDeConquista(h, p, s) {
-  const f = pesoDeHueste(h, s);
-  const d = defensaDe(p, s).total;
-  const kmDia = velocidadHueste(h, p) * OCUPAR_PARTE * (f / (f + d));
-  const radioKm = radioDeComarca(p) * GRADO_KM;
-  return radioKm > 0 ? kmDia / radioKm : 0;
+// ¿La caja de este teatro todavía cubre lo que hay que cubrir? Se agranda solo
+// cuando algo se sale de verdad, no cada vez que una hueste da un paso.
+function cajaAlcanza(t, s) {
+  if (!t) return false;
+  const x1 = t.gx0 + t.GW * t.paso, y1 = t.gy0 + t.GH * t.paso;
+  const cabe = (x, y) => x > t.gx0 + 0.6 && x < x1 - 0.6 && y > t.gy0 + 0.6 && y < y1 - 0.6;
+  for (const p of (s && s.provincias) || []) if (p.x != null && !cabe(p.x, p.y)) return false;
+  for (const h of (s && s.huestes) || []) if (h.x != null && !cabe(h.x, h.y)) return false;
+  return true;
+}
+
+// Rasterizar: qué comarca del mundo cae en cada palmo. Se hace por barrido de
+// filas —para cada fila, dónde entra y dónde sale el contorno— y no con un
+// lienzo. Con lienzo era más corto de escribir y tenía dos defectos: el juego
+// dejaba de resolver los cercos allí donde no hay canvas, y el suavizado de
+// bordes mezclaba colores, así que un palmo del borde salía asignado a una
+// tercera comarca. Esto es exacto y no depende de nada.
+function pintarComarcaEnRejilla(t, q, valor) {
+  const subs = puntosTrazo(q.d);
+  if (!subs.length) return;
+  const j0 = Math.max(0, Math.floor((q.y0 - t.gy0) / t.paso));
+  const j1 = Math.min(t.GH - 1, Math.ceil((q.y1 - t.gy0) / t.paso));
+  const cortes = [];
+  for (let j = j0; j <= j1; j++) {
+    const y = t.gy0 + (j + 0.5) * t.paso;
+    cortes.length = 0;
+    for (const ps of subs) {
+      for (let a = 0, b = ps.length - 1; a < ps.length; b = a++) {
+        const ya = ps[a][1], yb = ps[b][1];
+        if ((ya > y) === (yb > y)) continue;
+        cortes.push(ps[a][0] + ((y - ya) / (yb - ya)) * (ps[b][0] - ps[a][0]));
+      }
+    }
+    if (cortes.length < 2) continue;
+    cortes.sort((a, b) => a - b);
+    for (let c = 0; c + 1 < cortes.length; c += 2) {
+      let i0 = Math.round((cortes[c] - t.gx0) / t.paso - 0.5);
+      let i1 = Math.round((cortes[c + 1] - t.gx0) / t.paso - 0.5);
+      // Una comarca angosta puede no tener ningún centro de palmo adentro y
+      // quedaría sin un solo palmo, o sea sin existir. Se le da uno.
+      if (i1 < i0) i1 = i0;
+      i0 = Math.max(0, i0); i1 = Math.min(t.GW - 1, i1);
+      for (let i = i0; i <= i1; i++) valor(j * t.GW + i);
+    }
+  }
+}
+
+// La clave de una comarca dentro del teatro. Las del mapa real son su número
+// en el atlas; las inventadas —una nación que no sale de un país de verdad—
+// no tienen ninguno, así que se les da uno propio por su sitio en la lista.
+// Sin esto, en una partida con comarcas inventadas no caía ninguna plaza: el
+// teatro no sabía a cuál mirar y el cerco nunca contaba un día.
+function claveTeatro(p, s) {
+  if (!p) return null;
+  if (p.idx != null) return p.idx;
+  const i = ((s && s.provincias) || []).findIndex((q) => q.id === p.id);
+  // por encima del atlas, nunca negativa: en toda la rejilla «negativo» quiere
+  // decir «acá no hay tierra», y una clave negativa convertía a las comarcas
+  // inventadas en mar abierto
+  return i >= 0 ? PROV_MUNDO.length + i : null;
+}
+
+function armarTeatro(s, fija) {
+  let paso, GW, GH, gx0, gy0, caja;
+  if (fija && fija.GW) {
+    // la misma rejilla de antes, para que los dueños guardados encajen
+    paso = fija.paso; GW = fija.GW; GH = fija.GH; gx0 = fija.gx0; gy0 = fija.gy0;
+    caja = { x0: gx0, y0: gy0, x1: gx0 + GW * paso, y1: gy0 + GH * paso };
+  } else {
+    caja = cajaDelTeatro(s);
+    if (!caja) return null;
+    const an = caja.x1 - caja.x0, al = caja.y1 - caja.y0;
+    paso = PALMO_KM / GRADO_KM;
+    while ((an / paso) * (al / paso) > PALMOS_TOPE) paso *= 1.25;
+    GW = Math.ceil(an / paso) + 2; GH = Math.ceil(al / paso) + 2;
+    gx0 = caja.x0 - paso; gy0 = caja.y0 - paso;
+  }
+  const n = GW * GH;
+  const t = { paso, gx0, gy0, GW, GH,
+    prov: new Int32Array(n), ter: new Uint8Array(n), due: new Int8Array(n),
+    nat: new Int8Array(n), pres: new Float32Array(n), azar: new Float32Array(n),
+    hambre: new Float32Array(n), aisla: new Uint8Array(n), pie: new Int8Array(n),
+    hueMio: new Float32Array(n), hueSuyo: new Float32Array(n),
+    plaMio: new Float32Array(n), plaSuyo: new Float32Array(n) };
+  t.prov.fill(-1); t.due.fill(-1); t.nat.fill(-1);
+
+  const mias = new Set();
+  for (const p of (s && s.provincias) || []) if (p.idx != null) mias.add(p.idx);
+  const claves = Object.keys(TERRENOS);
+  for (let i = 0; i < PROV_MUNDO.length; i++) {
+    const q = geomProvincia(i);
+    if (!q || !q.d) continue;
+    if (q.x1 < caja.x0 || q.x0 > caja.x1 || q.y1 < caja.y0 || q.y0 > caja.y1) continue;
+    const suya = mias.has(q.i) ? 1 : 0;
+    const kt = Math.max(0, claves.indexOf(q.terreno));
+    pintarComarcaEnRejilla(t, q, (k) => {
+      t.prov[k] = q.i; t.ter[k] = kt; t.due[k] = suya; t.nat[k] = suya;
+    });
+  }
+  // Y las comarcas inventadas, que no están en el atlas: se les da un redondel
+  // de tierra propia alrededor de su punto. No tienen contorno de verdad
+  // porque no existen en ningún mapa, pero tienen que poder ganarse y perderse
+  // igual que las otras.
+  const provs = (s && s.provincias) || [];
+  for (let i = 0; i < provs.length; i++) {
+    const p = provs[i];
+    if (p.idx != null || p.x == null) continue;
+    const clave = PROV_MUNDO.length + i;
+    const kt = Math.max(0, claves.indexOf(p.terreno));
+    const r = 0.5;
+    const ci = Math.floor((p.x - gx0) / paso), cj = Math.floor((p.y - gy0) / paso);
+    const rr = Math.round(r / paso);
+    for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) {
+      if (di * di + dj * dj > rr * rr) continue;
+      const a2 = ci + di, b2 = cj + dj;
+      if (a2 < 0 || b2 < 0 || a2 >= GW || b2 >= GH) continue;
+      const k = b2 * GW + a2;
+      // Pisa lo que haya del atlas: si el reino es inventado, su tierra es la
+      // que manda ahí. Al revés —respetando el atlas— el redondel caía siempre
+      // encima de alguna comarca real y la nación inventada se quedaba sin un
+      // solo palmo propio, o sea sin poder ganar ni perder nada.
+      t.prov[k] = clave; t.ter[k] = kt; t.due[k] = 1; t.nat[k] = 1;
+    }
+  }
+  // Un número fijo por palmo: sin esto el frente sería un compás. Y a
+  // manchones, no palmo por palmo: un ruido independiente en cada palmo se
+  // promedia a lo largo de la línea y deja el frente igual de liso que si no
+  // hubiera ninguno. Lo que abolla una línea de frente son trechos enteros
+  // difíciles —una marisma, un desfiladero, un bosque cerrado—, así que la
+  // mayor parte del número sale del manchón y solo un poco del palmo suelto.
+  const revuelto = (v) => {
+    let h = (v * 2654435761) ^ 0x9e3779b9;
+    h = (h ^ (h >>> 15)) * 2246822519; h = (h ^ (h >>> 13)) * 3266489917;
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  };
+  const MANCHON = 4;
+  for (let k = 0; k < n; k++) {
+    if (t.prov[k] < 0) continue;
+    const bi = Math.floor((k % GW) / MANCHON), bj = Math.floor(Math.floor(k / GW) / MANCHON);
+    t.azar[k] = 0.72 * revuelto(bj * 8191 + bi) + 0.28 * revuelto(k);
+  }
+  t.firma = firmaTeatro(t);
+  return t;
+}
+
+// El teatro que hay en memoria, si es el de esta partida. El mapa lo lee de
+// acá: medio millón de números no viajan por el estado en cada dibujo.
+function teatroVivo(sello) {
+  return _teatro && sello && _teatro.firma === sello.firma ? _teatro : null;
+}
+// ¿Tiene al lado un palmo que cambió de manos? Eso lo convierte en filo del
+// frente: el borde de lo conquistado, que es lo que hay que ver.
+const vecinoRevuelto = (t, k) => {
+  const j = k % t.GW, n = t.GW * t.GH;
+  const q = (i) => i >= 0 && i < n && t.prov[i] >= 0 && (t.due[i] !== t.nat[i] || t.pres[i] > 0.05);
+  return (j > 0 && q(k - 1)) || (j < t.GW - 1 && q(k + 1)) || q(k - t.GW) || q(k + t.GW);
+};
+
+const celdaTeatro = (t, x, y) => {
+  const i = Math.floor((x - t.gx0) / t.paso), j = Math.floor((y - t.gy0) / t.paso);
+  if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) return -1;
+  return j * t.GW + i;
+};
+
+// ——— guardar y traer ———
+// De todo el teatro solo hace falta guardar quién tiene cada palmo, y eso se
+// comprime muy bien porque son manchas grandes: por tramos, en base 36.
+function empacarDuenos(t) {
+  const out = [];
+  let v = t.due[0], n = 1;
+  for (let k = 1; k < t.due.length; k++) {
+    if (t.due[k] === v) { n++; continue; }
+    out.push((v + 1) + "." + n.toString(36)); v = t.due[k]; n = 1;
+  }
+  out.push((v + 1) + "." + n.toString(36));
+  return out.join(",");
+}
+function desempacarDuenos(t, txt) {
+  if (!txt) return false;
+  let k = 0;
+  for (const tramo of txt.split(",")) {
+    const [a, b] = tramo.split(".");
+    const v = Number(a) - 1, n = parseInt(b, 36);
+    if (!Number.isFinite(v) || !Number.isFinite(n)) return false;
+    for (let i = 0; i < n && k < t.due.length; i++, k++) t.due[k] = v;
+  }
+  return k === t.due.length;
+}
+
+// El teatro que corresponde a esta partida: el que ya está en memoria si sirve,
+// o uno nuevo. Si el guardado trae dueños de un teatro del mismo tamaño, se
+// ponen encima; si no —porque el reino creció y la caja cambió—, se arranca de
+// las fronteras de hoy, que es lo honesto: no se puede inventar dónde estaba
+// el frente en un mapa que ya no es el mismo.
+function teatroDe(s) {
+  const g = s && s.teatro;
+  if (_teatro && g && _teatro.firma === g.firma && cajaAlcanza(_teatro, s)) return _teatro;
+  // el de la partida guardada, si su caja todavía sirve
+  if (g && g.GW) {
+    const viejo = _teatro && _teatro.firma === g.firma ? _teatro : armarTeatro(s, g);
+    if (viejo) {
+      if (!(_teatro && _teatro.firma === g.firma)) desempacarDuenos(viejo, g.due);
+      if (cajaAlcanza(viejo, s)) { _teatro = viejo; return viejo; }
+      // la guerra se salió del teatro: uno más grande, con lo ganado puesto
+      const nuevo = armarTeatro(s, null);
+      if (!nuevo) { _teatro = viejo; return viejo; }
+      for (let k = 0; k < nuevo.prov.length; k++) {
+        if (nuevo.prov[k] < 0) continue;
+        const x = nuevo.gx0 + ((k % nuevo.GW) + 0.5) * nuevo.paso;
+        const y = nuevo.gy0 + (Math.floor(k / nuevo.GW) + 0.5) * nuevo.paso;
+        const q = celdaTeatro(viejo, x, y);
+        if (q >= 0 && viejo.prov[q] >= 0) nuevo.due[k] = viejo.due[q];
+      }
+      _teatro = nuevo;
+      return nuevo;
+    }
+  }
+  _teatro = armarTeatro(s, null);
+  return _teatro;
+}
+function guardarTeatro(t) {
+  return t ? { firma: t.firma, paso: t.paso, gx0: t.gx0, gy0: t.gy0,
+               GW: t.GW, GH: t.GH, due: empacarDuenos(t) } : null;
+}
+
+// ——— el campo de cada bando ———
+//
+// Cuánta fuerza alcanza a proyectar cada bando sobre cada palmo. Nace en las
+// huestes y en las plazas, y se propaga de palmo en palmo perdiendo por el
+// camino: poco por tierra propia, mucho por la del otro, y algo intermedio por
+// la conquistada —que no es lo mismo que la propia: la gente no es tuya, los
+// caminos los cortan, hay que dejar guarnición en cada pueblo—. De ahí sale
+// sola la culminación: toda ofensiva se frena cuando se aleja demasiado de su
+// tierra, y ese es el momento en que el otro contraataca.
+//
+// Y de ahí sale también la bolsa: un trozo cercado se queda sin campo porque
+// los suyos ya no llegan hasta él.
+// Son dos campos y no uno, y la diferencia es toda la guerra: lo que puede una
+// hueste no está donde la hueste no está. Un ejército sentado en su capital
+// mandaba, con un solo campo, tanta fuerza a trescientos kilómetros que
+// sostenía una conquista para siempre y el vecino no podía recuperar nada. Lo
+// de la hueste se pesa después por lo cerca que esté; lo de las plazas y la
+// gente ocupada, no: eso está ahí, quieto, siempre.
+function propagarCampo(t, s, campo, bando, huestes, deHuestes) {
+  const n = t.GW * t.GH;
+  campo.fill(0);
+  if (deHuestes) {
+    const r = Math.max(1, Math.round(RADIO_PIE_KM / (t.paso * GRADO_KM)));
+    for (const h of huestes) {
+      if ((h.de ? 0 : 1) !== bando) continue;
+      const peso = pesoDeHueste(h, s) * FUERZA_HUESTE;
+      const ci = Math.floor((h.x - t.gx0) / t.paso), cj = Math.floor((h.y - t.gy0) / t.paso);
+      for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+        if (di * di + dj * dj > r * r) continue;
+        const i = ci + di, j = cj + dj;
+        if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+        const k = j * t.GW + i;
+        if (t.prov[k] >= 0 && peso > campo[k]) campo[k] = peso;
+      }
+    }
+  } else {
+    // Las plazas: cada comarca sostiene a los suyos desde dentro. A quien la
+    // ocupa no le sostiene casi nada —esa gente no es suya— y por eso una
+    // comarca tomada no se defiende sola.
+    const fuerzas = defensasDelTeatro(t, s);
+    for (const [clave, def] of fuerzas.plaza) {
+      const k = fuerzas.sede.get(clave);
+      if (k == null || k < 0 || t.nat[k] !== bando) continue;
+      const v = def * FUERZA_PLAZA * (t.due[k] === bando ? 1 : 0.35);
+      if (v > campo[k]) campo[k] = v;
+    }
+  }
+  // Dos barridos, ida y vuelta. El factor tiene que ser menor que uno siempre:
+  // si no, la fuerza no se propaga, se multiplica, y los dos campos crecen sin
+  // freno hasta que la razón entre ellos da medio a medio en todas partes —el
+  // frente se queda clavado y no se entiende por qué—.
+  const claves = Object.keys(TERRENOS);
+  const paso1 = (k) => {
+    const tt = TERRENOS[claves[t.ter[k]]] || TERRENOS.llanura;
+    // Por lo conquistado se pasa casi tan mal como por lo del otro: la gente no
+    // es tuya, los caminos los cortan, cada convoy necesita escolta. Con 0,935
+    // un reino sostenía sus conquistas desde su capital sin poner un soldado
+    // encima, y entonces nada de lo ganado se podía volver a perder.
+    const base = t.due[k] !== bando ? 0.862 : t.nat[k] === bando ? 0.978 : 0.885;
+    return base * (1 - (tt.def - 1) * 0.10);
+  };
+  for (let v = 0; v < 2; v++) {
+    for (let j = 1; j < t.GH; j++) for (let i = 1; i < t.GW; i++) {
+      const k = j * t.GW + i;
+      if (t.prov[k] < 0) continue;
+      const d = paso1(k);
+      let m = campo[k];
+      if (campo[k - 1] * d > m) m = campo[k - 1] * d;
+      if (campo[k - t.GW] * d > m) m = campo[k - t.GW] * d;
+      if (campo[k - t.GW - 1] * d * 0.96 > m) m = campo[k - t.GW - 1] * d * 0.96;
+      campo[k] = m;
+    }
+    for (let j = t.GH - 2; j >= 0; j--) for (let i = t.GW - 2; i >= 0; i--) {
+      const k = j * t.GW + i;
+      if (t.prov[k] < 0) continue;
+      const d = paso1(k);
+      let m = campo[k];
+      if (campo[k + 1] * d > m) m = campo[k + 1] * d;
+      if (campo[k + t.GW] * d > m) m = campo[k + t.GW] * d;
+      if (campo[k + t.GW + 1] * d * 0.96 > m) m = campo[k + t.GW + 1] * d * 0.96;
+      campo[k] = m;
+    }
+  }
+}
+
+// Lo que vale defendiéndose cada comarca del teatro, y dónde está su plaza. Se
+// calcula una vez: son las mismas mientras la caja no cambie.
+function defensasDelTeatro(t, s) {
+  if (t._def) return t._def;
+  const plaza = new Map(), sede = new Map();
+  for (const p of (s && s.provincias) || []) {
+    const c = claveTeatro(p, s);
+    if (c == null || p.x == null) continue;
+    plaza.set(c, defensaDe(p, s).total);
+    sede.set(c, celdaTeatro(t, p.x, p.y));
+  }
+  for (let k = 0; k < t.prov.length; k++) {
+    const i = t.prov[k];
+    if (i < 0 || plaza.has(i) || i >= PROV_MUNDO.length) continue;
+    const q = plazaAjena(i, s);
+    if (!q) { plaza.set(i, 0); continue; }
+    plaza.set(i, defensaDe(q, s).total);
+    sede.set(i, celdaTeatro(t, q.x, q.y));
+  }
+  t._def = { plaza, sede };
+  return t._def;
+}
+
+// A qué distancia tiene cada palmo la hueste más cercana de cada bando. Una
+// hueste no empuja toda la línea a la vez: aprieta el trecho que tiene delante
+// y el resto se queda mirando. Sin esto, un solo ejército avanzaba en una ola
+// pareja y dos que iban a hacer una tenaza no dejaban hueco en el medio, que es
+// justamente lo que hace la bolsa.
+function medirAlcance(t, huestes) {
+  const n = t.GW * t.GH;
+  if (!t.alcMio || t.alcMio.length !== n) {
+    t.alcMio = new Float32Array(n); t.alcSuyo = new Float32Array(n);
+  }
+  t.alcMio.fill(1e9); t.alcSuyo.fill(1e9);
+  const gkm = t.paso * GRADO_KM;
+  const r = Math.ceil((ALCANCE_KM * 3) / gkm);
+  for (const h of huestes) {
+    const a = h.de ? t.alcSuyo : t.alcMio;
+    const ci = (h.x - t.gx0) / t.paso, cj = (h.y - t.gy0) / t.paso;
+    const i0 = Math.max(0, Math.floor(ci - r)), i1 = Math.min(t.GW - 1, Math.ceil(ci + r));
+    const j0 = Math.max(0, Math.floor(cj - r)), j1 = Math.min(t.GH - 1, Math.ceil(cj + r));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const d = Math.hypot(i - ci, j - cj) * gkm;
+      const k = j * t.GW + i;
+      if (d < a[k]) a[k] = d;
+    }
+  }
+}
+
+// Dónde tiene los pies puesta cada hueste. Una hueste metida en tierra ajena
+// queda rodeada de palmos del otro, y la regla de «solo se toma lo que se
+// toca» la dejaría paralizada: el suelo que pisa siempre es suyo de disputar.
+function marcarPies(t, huestes) {
+  t.pie.fill(-1);
+  const r = Math.max(1, Math.round(RADIO_PIE_KM / (t.paso * GRADO_KM)));
+  for (const h of huestes) {
+    const ci = Math.floor((h.x - t.gx0) / t.paso), cj = Math.floor((h.y - t.gy0) / t.paso);
+    for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+      if (di * di + dj * dj > r * r) continue;
+      const i = ci + di, j = cj + dj;
+      if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+      const k = j * t.GW + i;
+      if (t.prov[k] >= 0) t.pie[k] = h.de ? 0 : 1;
+    }
+  }
+}
+
+// Quién está cercado de verdad: trozos sueltos del cuerpo del país, rodeados
+// de enemigo y no de mar, y sin ninguna hueste propia adentro que pueda romper
+// el cerco. Una isla no es una bolsa: a las dos las separa algo del grueso de
+// los suyos, pero a una la separa el mar y solo a la otra la separó el otro.
+function marcarAislados(t, huestes) {
+  const n = t.GW * t.GH;
+  if (!t._marca || t._marca.length !== n) {
+    t._marca = new Uint8Array(n); t._pila = new Int32Array(n);
+  }
+  const marca = t._marca, pila = t._pila;
+  t.aisla.fill(0);
+  const trozosPorBando = { 0: [], 1: [] };
+  for (const bando of [0, 1]) {
+    marca.fill(0);
+    const otro = 1 - bando;
+    const trozos = [];
+    for (let s0 = 0; s0 < n; s0++) {
+      if (marca[s0] || t.prov[s0] < 0 || t.due[s0] !== bando) continue;
+      let tope = 0; const cel = [];
+      let ene = 0, nada = 0;
+      pila[tope++] = s0; marca[s0] = 1;
+      while (tope) {
+        const k = pila[--tope]; cel.push(k);
+        const j = k % t.GW;
+        const ver = (q) => {
+          if (q < 0 || q >= n || t.prov[q] < 0) { nada++; return; }
+          if (t.due[q] === otro) { ene++; return; }
+          if (!marca[q]) { marca[q] = 1; pila[tope++] = q; }
+        };
+        ver(j > 0 ? k - 1 : -1); ver(j < t.GW - 1 ? k + 1 : -1);
+        ver(k - t.GW); ver(k + t.GW);
+      }
+      trozos.push({ cel, cercada: ene > (ene + nada) * 0.6 });
+    }
+    trozos.sort((a, b) => b.cel.length - a.cel.length);
+    for (const q of trozos.slice(1)) {
+      if (!q.cercada || q.cel.length < 4) continue;
+      const dentro = huestes.some((h) => {
+        if ((h.de ? 0 : 1) !== bando) return false;
+        const k = celdaTeatro(t, h.x, h.y);
+        return k >= 0 && q.cel.indexOf(k) >= 0;
+      });
+      if (dentro) continue;
+      for (const k of q.cel) t.aisla[k] = 1;
+      trozosPorBando[bando].push(q.cel.length);
+    }
+  }
+  t.bolsas = trozosPorBando;
+}
+
+// La comarca suya que más terreno tiene en mis manos, y a la que más le
+// conviene ir. Se pesa por lo perdido y por lo cerca que le queda: mandar la
+// hueste al otro extremo del país por tres palmos no lo hace nadie.
+function desgarronMasGrande(t, s, h) {
+  if (!t) return null;
+  const perdido = new Map();
+  for (let k = 0; k < t.prov.length; k++) {
+    if (t.prov[k] < 0 || t.nat[k] !== 0 || t.due[k] !== 1) continue;
+    perdido.set(t.prov[k], (perdido.get(t.prov[k]) || 0) + 1);
+  }
+  let mejor = null, mp = 0;
+  for (const [idx, n] of perdido) {
+    if (n < 6) continue;
+    const g = idx < PROV_MUNDO.length ? geomProvincia(idx) : null;
+    if (!g) continue;
+    const puntos = n / (1 + leguas({ x: h.x, y: h.y }, g) / 150);
+    if (puntos > mp) { mp = puntos; mejor = { x: g.x, y: g.y, n, nombre: g.n }; }
+  }
+  return mejor;
+}
+
+// ——— un paso del frente ———
+function pasoDelFrente(t, s, huestes, dt, desorden) {
+  marcarPies(t, huestes);
+  medirAlcance(t, huestes);
+  propagarCampo(t, s, t.hueMio, 1, huestes, true);
+  propagarCampo(t, s, t.hueSuyo, 0, huestes, true);
+  propagarCampo(t, s, t.plaMio, 1, huestes, false);
+  propagarCampo(t, s, t.plaSuyo, 0, huestes, false);
+  const n = t.GW * t.GH;
+  const claves = Object.keys(TERRENOS);
+  const cerca = (d) => 1 / (1 + (d / ALCANCE_KM) * (d / ALCANCE_KM));
+  for (let i = 0; i < n; i++) {
+    if (t.prov[i] < 0) continue;
+    if (t.aisla[i]) t.hambre[i] = Math.min(1, t.hambre[i] + dt / DIAS_DE_HAMBRE);
+    else if (t.hambre[i] > 0) t.hambre[i] = Math.max(0, t.hambre[i] - dt / (DIAS_DE_HAMBRE * 2.5));
+    const mio = t.due[i] === 1;
+    const fM = cerca(t.alcMio[i]), fS = cerca(t.alcSuyo[i]);
+    // La tierra ocupada resiste por su cuenta, y eso sí ataca: es la gente de
+    // ahí, que no se fue a ninguna parte y quiere a los suyos de vuelta. Es
+    // local por naturaleza —no hace falta propagarla— y es lo único que puede
+    // recuperar una comarca cuando el que la tomó levantó el campamento.
+    const levanta = t.nat[i] !== t.due[i] && t.nat[i] >= 0
+      ? (defensasDelTeatro(t, s).plaza.get(t.prov[i]) || 0) * FUERZA_PLAZA * RESISTENCIA_OCUPADA : 0;
+    // Una plaza defiende bien y ataca poco: la guarnición no sale a campaña.
+    const ata = levanta + (mio ? t.hueSuyo[i] * fS + t.plaSuyo[i] * 0.25
+                               : t.hueMio[i] * fM + t.plaMio[i] * 0.25);
+    // al cercado se le acaba todo: al final se rinde aunque nadie lo asalte
+    const def = ((mio ? t.plaMio[i] + t.hueMio[i] * fM : t.plaSuyo[i] + t.hueSuyo[i] * fS))
+      * (1 - 0.92 * t.hambre[i]);
+    if (ata <= 0) { t.pres[i] *= 0.94; continue; }
+    const ataca = mio ? 0 : 1;
+    const j = i % t.GW;
+    let pegado = false;
+    if (j > 0 && t.due[i - 1] === ataca) pegado = true;
+    else if (j < t.GW - 1 && t.due[i + 1] === ataca) pegado = true;
+    else if (i >= t.GW && t.due[i - t.GW] === ataca) pegado = true;
+    else if (i + t.GW < n && t.due[i + t.GW] === ataca) pegado = true;
+    if (!pegado && t.pie[i] !== ataca) { t.pres[i] *= 0.94; continue; }
+    // Un cercado sin pan se rinde solo: los cercos no se ganan a bayoneta.
+    // El umbral no es uno sino casi uno: sumar setenta veces un setentavo da
+    // 0,9999999999999999, y con «>= 1» la bolsa aguantaba para siempre por una
+    // milésima de millonésima de pan.
+    if (t.hambre[i] >= 0.999) { t.due[i] = ataca; t.pres[i] = 0; t.hambre[i] = 0; continue; }
+    const tt = TERRENOS[claves[t.ter[i]]] || TERRENOS.llanura;
+    // La dureza divide el ritmo, no suma a la defensa. Sumando, un palmo de
+    // montaña con mala suerte quedaba con la defensa por encima del ataque
+    // para siempre y ahí se plantaba. Dividiendo, la montaña tarda el doble
+    // —que es lo que hace la montaña—; lo que no hace es volver inmortal.
+    const dureza = tt.def * (1 - desorden * 0.55 + desorden * 1.1 * t.azar[i]);
+    // el alcance ya está en las fuerzas: acá solo la razón entre ellas
+    const razon = ata / (ata + def * 1.35);
+    t.pres[i] += (((razon - 0.5) * 3.6) / dureza) * dt;
+    if (t.pres[i] >= 1) { t.due[i] = ataca; t.pres[i] = 0; }
+    else if (t.pres[i] < 0) t.pres[i] = 0;
+  }
+}
+
+// Correr el frente los días de un turno. Un turno puede ser un año y no se
+// puede pisar día por día medio millón de palmos trescientas sesenta y cinco
+// veces: se dan pasos más largos, hasta cuarenta y ocho, y cada paso vale
+// varios días. La cuenta es la misma, con menos grano.
+const PASOS_TOPE = 34;
+function correrFrente(t, s, huestes, dias) {
+  if (!t) return;
+  const pasos = Math.max(1, Math.min(PASOS_TOPE, Math.round(dias)));
+  const dt = dias / pasos;
+  for (let i = 0; i < pasos; i++) {
+    if (i % 3 === 0) marcarAislados(t, huestes);
+    pasoDelFrente(t, s, huestes, dt, 0.8);
+  }
+  marcarAislados(t, huestes);
+}
+
+// Cuánto de cada comarca tiene cada bando. Es lo que la ficha enseña y lo que
+// aprieta el cerco: un cerco solo cuenta mientras la plaza está rodeada de
+// verdad, y «rodeada» quiere decir que el campo alrededor ya es del que sitia.
+function repartoDelTeatro(t) {
+  const por = new Map();
+  if (!t) return por;
+  for (let k = 0; k < t.prov.length; k++) {
+    const i = t.prov[k]; if (i < 0 || t.due[k] < 0) continue;
+    let o = por.get(i);
+    if (!o) { o = { mio: 0, suyo: 0, hambre: 0 }; por.set(i, o); }
+    if (t.due[k] === 1) o.mio++; else o.suyo++;
+    if (t.hambre[k] > 0.05) o.hambre++;
+  }
+  return por;
+}
+function tomadoDe(reparto, idx) {
+  const o = idx == null ? null : reparto.get(idx);
+  if (!o) return 0;
+  return o.mio / Math.max(1, o.mio + o.suyo);
 }
 
 // Cuántos días de cerco valen los días que pasaron. Un cerco solo cuenta
 // mientras la plaza está de verdad rodeada: sitiar una ciudad por un lado y
 // dejarle el otro abierto no es sitiarla, es acamparle enfrente y verla comer.
-// Así que los días valen lo que valga el cerco, y el cerco vale cuánto del
-// campo se tiene tomado. Con el campo entero en la mano, un día es un día.
-//
-// Se resuelve entero y no día a día porque un turno puede ser un año: el campo
-// se va ganando mientras corren esos días, y el cerco cuenta más cada día que
-// pasa. Es la integral de lo tomado, que sale en dos cuentas.
-function diasDeCerco(avance0, ritmo, dias) {
-  const a0 = acotar(avance0 || 0, 0, 1);
-  if (!(ritmo > 0)) return dias * a0;
-  const hasta = Math.max(0, Math.min(dias, (1 - a0) / ritmo));   // cuándo se toma entera
-  return a0 * hasta + (ritmo * hasta * hasta) / 2 + (dias - hasta);
-}
-
-// El frente de una comarca, o uno nuevo empezado donde está la hueste. La
-// entrada se guarda una sola vez: si el color naciera cada turno donde esté el
-// ejército, la mancha saltaría por el mapa en vez de crecer.
-function frenteDe(frentes, id) { return (frentes || []).find((f) => f && f.id === id) || null; }
-function frenteNuevo(id, p, h, mia) {
-  return { id, idx: p && p.idx != null ? p.idx : null,
-    nombre: (p && p.nombre) || "", pais: (p && p.pais) || null,
-    // por dónde entró; si no se sabe, por el centro de la comarca
-    x: h ? h.x : (p && p.x), y: h ? h.y : (p && p.y),
-    px: p && p.x, py: p && p.y, avance: 0, mia: !!mia };
-}
-// Con los frentes puestos al día: los que tienen a alguien encima crecen, los
-// que se quedaron solos se van borrando —el campo vuelve a su dueño en cuanto
-// el ejército levanta el campamento—, y los que llegaron a cero se van.
-function frentesTrasElDia(frentes, empujes, dias) {
-  const vistos = new Set();
-  const salen = [];
-  for (const f of frentes || []) {
-    const e = empujes.get(f.id);
-    vistos.add(f.id);
-    const av = e ? Math.min(1, f.avance + e.ritmo * dias)
-                 : f.avance - OLVIDO_CONQUISTA * dias;
-    if (av > 0.001) salen.push({ ...f, avance: av });
-  }
-  for (const [id, e] of empujes)
-    if (!vistos.has(id)) salen.push({ ...e.nuevo, avance: Math.min(1, e.ritmo * dias) });
-  return salen;
+function diasDeCerco(tomadoAntes, tomadoAhora, dias) {
+  const a = acotar(tomadoAntes || 0, 0, 1), b = acotar(tomadoAhora || 0, 0, 1);
+  return dias * ((a + b) / 2);
 }
 
 // Una comarca del vecino, mirada como plaza: lo que hace falta para saber
@@ -10052,8 +10619,13 @@ function correrCampana(s, dias, rnd) {
   // Lo que cada hueste está ganando de suelo este turno, por comarca. Se junta
   // primero y se aplica al final: dos huestes sobre la misma plaza empujan el
   // mismo frente, no uno cada una.
-  const empujes = new Map();
   const conquistadas = [];
+  // El frente se corre primero, palmo a palmo, y de ahí sale cuánto tiene cada
+  // uno de cada comarca. Todo lo demás —el cerco, la rendición— se apoya en
+  // eso: primero el suelo, después las plazas.
+  const teatro = teatroDe(s);
+  const antesDelFrente = repartoDelTeatro(teatro);
+  const enPie0 = [...((s && s.huestes) || [])];
   // Quién tomó qué. Sin esta distinción, una plaza que te tomaba el enemigo
   // quedaba marcada como recién conquistada por vos: la guerra al revés.
   const porElEnemigo = [];
@@ -10062,18 +10634,27 @@ function correrCampana(s, dias, rnd) {
   if (nacidas.length)
     hechos.push(`${nacidas[0].nombre} cruza la raya con ${unidadesTotales(nacidas[0].ramas)} unidades.`);
   const enPie = [...((s && s.huestes) || []), ...nacidas];
+  correrFrente(teatro, s, enPie, dias);
+  const reparto = repartoDelTeatro(teatro);
   for (let h of enPie) {
     const antes = { x: h.x, y: h.y };
     // El enemigo no camina hacia un punto fijo: va por lo que tenga más cerca.
     // Un ejército que ignora al que tiene al lado no es un ejército.
     if (h.de) {
+      // Primero, lo suyo que le tomaron: un ejército que deja el país partido
+      // por la mitad para ir a buscar al otro no es un ejército, y sin esto el
+      // frente era una ola que avanzaba y no volvía nunca. Va al desgarrón más
+      // grande que tenga a mano.
+      const roto = desgarronMasGrande(teatro, s, h);
       let presa = null, dm = Infinity;
       for (const q of enPie) {
         if (q.de) continue;
         const d = leguas({ x: h.x, y: h.y }, { x: q.x, y: q.y });
         if (d < dm) { dm = d; presa = q; }
       }
-      if (presa && dm < 600)
+      if (roto) h = { ...h, orden: "marchar", destino: { x: roto.x, y: roto.y },
+                      largo: leguas({ x: h.x, y: h.y }, roto), recorrido: 0 };
+      else if (presa && dm < 600)
         h = { ...h, orden: "marchar", destino: { x: presa.x, y: presa.y },
               largo: dm, recorrido: 0 };
     }
@@ -10088,21 +10669,18 @@ function correrCampana(s, dias, rnd) {
     // destino está donde está. Mirar solo `llegada` dejaba fuera a las que
     // nacen ya delante de la plaza, y esas se quedaban sitiando para siempre.
     const alPie = !!h.llegada || !h.destino;
-    let ritmoAqui = 0, tomadoYa = 0;
-    if (obj && alPie && (h.orden === "cercar" || h.orden === "asaltar")) {
-      ritmoAqui = ritmoDeConquista(h, obj, s);
-      const f0 = frenteDe(s && s.frentes, obj.id);
-      tomadoYa = f0 ? f0.avance : 0;
-      const ya = empujes.get(obj.id);
-      if (!ya || ya.ritmo < ritmoAqui)
-        empujes.set(obj.id, { ritmo: ritmoAqui, nuevo: frenteNuevo(obj.id, obj, h, !h.de) });
-    }
+    // Cuánto del campo alrededor de la plaza está en manos del que sitia. Sale
+    // del teatro y no de una cuenta aparte: lo que aprieta el cerco es el
+    // mismo suelo que el mapa está pintando.
+    const idxObj = claveTeatro(obj, s);
+    const antesT = h.de ? 1 - tomadoDe(antesDelFrente, idxObj) : tomadoDe(antesDelFrente, idxObj);
+    const ahoraT = h.de ? 1 - tomadoDe(reparto, idxObj) : tomadoDe(reparto, idxObj);
 
     if (h.orden === "cercar" && obj && alPie) {
       const aguante = h.aguante || aguanteDe(obj, s);
       // Los días valen lo que valga el cerco: mientras el campo esté a medias,
       // la plaza sigue recibiendo grano por donde no hay nadie.
-      const cerco = (h.cerco || 0) + diasDeCerco(tomadoYa, ritmoAqui, dias);
+      const cerco = (h.cerco || 0) + diasDeCerco(antesT, ahoraT, dias);
       if (cerco >= aguante) {
         tomadas.push(obj.id);
         if (h.de) porElEnemigo.push(obj.id); else if (obj.ajena) conquistadas.push(obj);
@@ -10196,11 +10774,46 @@ function correrCampana(s, dias, rnd) {
     ganadas.push(r.comarca);
     hechos.push(`${r.comarca.nombre} pasa a ser del reino: ${fmtPob(r.comarca.poblacion)} de gente que no eligió serlo.`);
   }
-  // Y los frentes al día. Lo tomado queda entero —la comarca ya es tuya, no
-  // hay media comarca que pintar— y lo demás crece o se va borrando.
-  const frentes = frentesTrasElDia(s && s.frentes, empujes, dias)
-    .filter((f) => !tomadas.includes(f.id));
-  return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas };
+  // Lo que cayó pasa entero a manos del que lo tomó: la comarca ya es suya y
+  // no hay media comarca que pintar.
+  if (teatro) {
+    const volcar = (clave, due) => {
+      if (clave == null) return;
+      for (let k = 0; k < teatro.prov.length; k++)
+        if (teatro.prov[k] === clave) { teatro.due[k] = due; teatro.pres[k] = 0; teatro.hambre[k] = 0; }
+    };
+    for (const q of conquistadas) volcar(claveTeatro(q, s), 1);
+    for (const id of porElEnemigo) volcar(claveTeatro(provs.find((q) => q.id === id), s), 0);
+  }
+  // Y el frente resumido por comarca, que es lo que la ficha enseña.
+  const frentes = [];
+  for (const [idx, o] of repartoDelTeatro(teatro)) {
+    const parte = o.mio / Math.max(1, o.mio + o.suyo);
+    const g = idx < PROV_MUNDO.length ? geomProvincia(idx) : null;
+    const mia = idx >= PROV_MUNDO.length ? provs[idx - PROV_MUNDO.length] : null;
+    const nombre = g ? g.n : mia ? mia.nombre : null;
+    if (!nombre) continue;
+    const propia = mia ? true : provs.some((p) => p.idx === idx);
+    if ((propia && parte > 0.995) || (!propia && parte < 0.005)) continue;
+    frentes.push({ idx, nombre, pais: g ? g.pais : null, parte, cercado: o.hambre });
+  }
+  return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas,
+           teatro: guardarTeatro(teatro) };
+}
+
+// Cuánto suelo tiene cada bando, para contarlo en el parte de guerra.
+function pulsoDelFrente(s) {
+  const t = _teatro && s && s.teatro && _teatro.firma === s.teatro.firma ? _teatro : null;
+  if (!t) return null;
+  let mio = 0, suyo = 0, cercado = 0;
+  for (let k = 0; k < t.prov.length; k++) {
+    if (t.prov[k] < 0 || t.due[k] < 0) continue;
+    if (t.due[k] === 1) mio++; else suyo++;
+    if (t.hambre[k] > 0.05) cercado++;
+  }
+  const km = t.paso * GRADO_KM;
+  return { mio, suyo, cercado, km2: Math.round(km * km),
+           bolsas: (t.bolsas && t.bolsas[0]) || [], perdidas: (t.bolsas && t.bolsas[1]) || [] };
 }
 
 function mantenimientoEjercito(ej) {
@@ -18448,6 +19061,7 @@ export default function PaxMundi() {
         ...s,
         huestes: camp.huestes,
         frentes: camp.frentes,
+        teatro: camp.teatro,
         anio: anioNuevo, dia: diaNuevo,
         turno: s.turno + 1,
         dia: diaNuevo,
@@ -18928,7 +19542,7 @@ export default function PaxMundi() {
           onRueda={abrirRueda}
           huestes={s.huestes}
           huesteSel={huesteSel}
-          frentes={s.frentes}
+          frente={s.teatro}
           onHueste={(id) => setHuesteSel((v) => (v === id ? null : id))}
           sitio={sitioMapa}
           margenSup={altoCab}
