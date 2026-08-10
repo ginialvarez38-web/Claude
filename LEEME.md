@@ -209,6 +209,42 @@ enorme, así que la cuenta no se dispara aunque la guerra sea entre imperios. En
 la partida guardada va solo el dueño de cada palmo, comprimido por tramos:
 treinta y cinco mil palmos ocupan tres mil letras.
 
+## El ejército come, gasta y se queda sin nada
+
+Ninguna hueste puede pelear indefinidamente. Cada una necesita pan y pertrechos
+todos los días: cien jinetes comen tres veces lo que cien de a pie —el caballo
+también come— y la artillería casi no come pero gasta a paladas.
+
+Lo que le llega sale del reino y viaja por sus caminos. Cada comarca puede
+mandar lo que le permiten su calzada, su terreno, su costa y su gente; el
+grueso parte de la corte, que es el depósito, y se va perdiendo con la
+distancia: poco por tierra propia, bastante por la recién conquistada —la gente
+no es tuya, los caminos los cortan— y casi nada por la del otro, salvo las
+pocas leguas que el tren de suministro sigue a la tropa.
+
+De ahí salen tres cosas que se sienten al jugar:
+
+- **Cruzar la frontera es gratis; meterse hondo, no.** Una hueste pegada a su
+  raya recibe todo. A media Francia ya no le llega nada, y una campaña metida
+  en el fondo se deshace sin que nadie la ataque: pierde gente, pierde moral y
+  pelea a un tercio de lo que pesa.
+- **Un ejército más grande que el país no se puede alimentar.** No arruina el
+  granero: se muere de hambre encima de él.
+- **Del granero sale lo que la cosecha no cubre.** Un ejército que el país
+  puede mantener no vacía la despensa; la vacía el que lo sobrepasa, y eso se
+  siente en el pan de todos.
+
+En la sección de campaña, cada hueste dice cómo está —«abastecida» o «abasto
+41% · el camino no da para tanto»— y en el mapa lleva un aro roto alrededor
+cuando le falta. Las bajas por hambre se cuentan en la crónica con su motivo.
+
+Y el cerco mide lo que tiene que medir: no cuánto de la comarca tenés, sino
+cuánto del campo alrededor de la plaza. Para bloquear una ciudad hay que
+cortarle los caminos, no ocupar el departamento entero.
+
+`MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
+qué orden conviene hacerlo.
+
 ## La partida se guarda sola
 
 Al terminar cada turno, y también cuando dejás el juego —cambiás de pestaña,

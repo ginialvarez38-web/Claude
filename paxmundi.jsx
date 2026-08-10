@@ -8185,6 +8185,18 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
                   onClick={(e) => { e.stopPropagation();
                     if (!movido.current && onHueste) onHueste(h.id); }} />
               )}
+              {/* El aro del hambre: una hueste sin abasto lleva un anillo roto
+                  alrededor. Se ve desde lejos y sin abrir nada, que es cuando
+                  hace falta verlo. */}
+              {h.abasto != null && h.abasto < 0.85 && (
+                <circle cx={h.x} cy={h.y} r={r * 1.75} fill="none"
+                  stroke={h.abasto < 0.5 ? "#E05252" : "#E8B04B"}
+                  strokeWidth={pxCapa * 1.5}
+                  strokeDasharray={`${pxCapa * 1.6} ${pxCapa * 2.6}`}
+                  opacity="0.9" pointerEvents="none">
+                  <title>{`sin abasto: le llega ${Math.round(h.abasto * 100)} de cada cien raciones`}</title>
+                </circle>
+              )}
               {/* el escudo */}
               <path d={suya
                 ? `M${h.x - r},${h.y + r} L${h.x + r},${h.y + r} L${h.x + r},${h.y - r * 0.35} `
@@ -9598,8 +9610,11 @@ function pesoDeHueste(h, s) {
     f += n * fuerzaRama(r.id, (s && s.ciencia) || {});
   }
   // La moral no es un adorno: una hueste rota pesa la mitad aunque tenga los
-  // mismos hombres.
-  return f * (0.55 + 0.45 * acotar((h && h.moral != null ? h.moral : 100) / 100, 0, 1));
+  // mismos hombres. Y el abasto tampoco: sin pan no se marcha y sin pertrechos
+  // no se dispara, por muchos que sean. Una hueste sin nada pelea a un tercio.
+  const ab = h && h.abasto != null ? acotar(h.abasto, 0, 1) : 1;
+  return f * (0.55 + 0.45 * acotar((h && h.moral != null ? h.moral : 100) / 100, 0, 1))
+           * (0.34 + 0.66 * ab);
 }
 
 // ——— lo que cuesta tomar una plaza ———
@@ -9890,7 +9905,8 @@ function armarTeatro(s, fija) {
     nat: new Int8Array(n), pres: new Float32Array(n), azar: new Float32Array(n),
     hambre: new Float32Array(n), aisla: new Uint8Array(n), pie: new Int8Array(n),
     hueMio: new Float32Array(n), hueSuyo: new Float32Array(n),
-    plaMio: new Float32Array(n), plaSuyo: new Float32Array(n) };
+    plaMio: new Float32Array(n), plaSuyo: new Float32Array(n),
+    abaMio: new Float32Array(n), abaSuyo: new Float32Array(n) };
   t.prov.fill(-1); t.due.fill(-1); t.nat.fill(-1);
 
   const mias = new Set();
@@ -10255,6 +10271,158 @@ function desgarronMasGrande(t, s, h) {
   return mejor;
 }
 
+// ═══ EL ABASTO ═══════════════════════════════════════════════════
+//
+// Ninguna hueste puede pelear indefinidamente sin que le llegue nada. Lo que
+// come y lo que gasta sale del reino, viaja por los caminos que el reino tenga
+// y se acaba: eso es lo que ata al ejército con la población que lo alimenta,
+// la economía que lo paga, los caminos que lo mueven y la geografía que lo
+// aguanta. Sin esto un ejército es un número que camina.
+//
+// No hay un «suministro: 100». Hay una capacidad por comarca, que depende de
+// su camino, su terreno, su costa y su gente, y que se va perdiendo con la
+// distancia. Un ejército enorme puede superar lo que una región da de sí, y
+// entonces pasa hambre estando en su propia casa.
+
+// Lo que necesita cada rama al día, por unidad. La infantería come; la
+// caballería come mucho más —el caballo come diez veces lo que el hombre— y la
+// artillería casi no come pero gasta pertrechos a paladas.
+const GASTO_RAMA = {
+  infanteria: { pan: 1.00, pertrechos: 0.35 },
+  caballeria: { pan: 3.20, pertrechos: 0.45 },
+  artilleria: { pan: 0.90, pertrechos: 2.60 },
+  ingenieros: { pan: 0.85, pertrechos: 1.10 },
+  marina:     { pan: 1.40, pertrechos: 0.80 },
+};
+function gastoDeHueste(h, s) {
+  let pan = 0, per = 0;
+  for (const r of RAMAS_EJERCITO) {
+    const n = ((h && h.ramas) || {})[r.id] || 0;
+    if (!n) continue;
+    const g = GASTO_RAMA[r.id] || GASTO_RAMA.infanteria;
+    pan += n * g.pan; per += n * g.pertrechos;
+  }
+  // Cuanto más se sabe de logística, menos se pierde por el camino: el tren de
+  // suministro y la cadena de abastecimiento son eso y nada más que eso.
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let merma = 1;
+  if (sab.has("organizacion.logistica.organizacion_campana")) merma *= 0.92;
+  if (sab.has("organizacion.logistica.tren_suministro")) merma *= 0.85;
+  if (sab.has("organizacion.logistica.cadena_suministro")) merma *= 0.80;
+  return { pan: pan * merma, pertrechos: per * merma };
+}
+
+// Lo que una comarca puede sacar de sí y mandar hacia afuera. El camino es lo
+// que más pesa —una calzada mueve tres veces lo que una senda—, después la
+// gente que hay para acarrear, y la costa, que es el camino más barato que
+// existió hasta el ferrocarril.
+function capacidadLogistica(p, s) {
+  if (!p) return 0;
+  const t = TERRENOS[p.terreno] || TERRENOS.llanura;
+  const via = acotar(Math.round(p.via || 0), 0, 3);
+  const gente = Math.pow(Math.max(1, p.poblacion || 0), 0.42);
+  return gente * (0.55 + via * 0.42) * t.com * (p.costera ? 1.22 : 1)
+    * (p.ocupada ? 0.35 : 1);
+}
+
+// El campo del abasto: cuánto alcanza a llegar a cada palmo. Sale de las
+// comarcas propias y solo viaja por suelo propio —un convoy no cruza tierra
+// del otro—, así que una hueste cercada se queda literalmente sin nada, sin
+// que haga falta ninguna regla que lo diga.
+function propagarAbasto(t, s, campo, bando) {
+  const n = t.GW * t.GH;
+  campo.fill(0);
+  // El grueso sale de la corte, que es el depósito del reino: ahí llega lo que
+  // el país entero produce y de ahí parte lo que va al frente. Cada comarca
+  // aporta además lo suyo, poco, con lo que se saca de sus propios campos.
+  //
+  // Que no sea cada comarca una fuente entera importa: si lo fuera, un
+  // ejército rodeado seguiría comiendo tan campante de la comarca en la que
+  // está sentado, y un cerco dejaría de ser un cerco.
+  const provs = (s && s.provincias) || [];
+  const total = provs.reduce((a, p) => a + capacidadLogistica(p, s), 0);
+  const corte = provs.find((p) => p.capital && p.x != null) || provs.find((p) => p.x != null);
+  if (corte) {
+    const k = celdaTeatro(t, corte.x, corte.y);
+    if (k >= 0 && t.due[k] === bando) campo[k] = total * 0.85;
+  }
+  for (const p of provs) {
+    if (p.x == null) continue;
+    const k = celdaTeatro(t, p.x, p.y);
+    if (k < 0 || t.due[k] !== bando) continue;
+    const v = capacidadLogistica(p, s) * 0.25;
+    if (v > campo[k]) campo[k] = v;
+  }
+  const claves = Object.keys(TERRENOS);
+  // Lo que se pierde por palmo. Por tierra propia con camino se pierde poco;
+  // por tierra recién tomada, mucho más —no hay depósitos, no hay carreteros
+  // que quieran ir—; por tierra del otro, nada llega.
+  const paso1 = (k) => {
+    const tt = TERRENOS[claves[t.ter[k]]] || TERRENOS.llanura;
+    // Por tierra del otro también pasa algo, pero poco y por poco trecho: eso
+    // es el tren de suministro, que sigue a la tropa unas leguas más allá del
+    // frente. Cortarlo del todo dejaba sin comer a un ejército parado a diez
+    // kilómetros de su propia frontera, que es absurdo.
+    // Por tierra propia se pierde poco por legua —hay caminos, hay depósitos,
+    // hay quien lleve—; por la recién tomada bastante más; por la del otro,
+    // solo lo que la tropa arrastra consigo, y por unas pocas leguas.
+    //
+    // Con 0,972 por palmo, trescientos kilómetros de tierra propia se comían
+    // dos tercios del abasto y un ejército modesto plantado en su propia
+    // frontera se moría de hambre. Perder algo con la distancia es real;
+    // perder eso, no.
+    const base = t.due[k] !== bando ? 0.72 : t.nat[k] === bando ? 0.9885 : 0.955;
+    return base * (0.72 + 0.28 * tt.com);
+  };
+  for (let v = 0; v < 2; v++) {
+    for (let j = 1; j < t.GH; j++) for (let i = 1; i < t.GW; i++) {
+      const k = j * t.GW + i;
+      if (t.prov[k] < 0) continue;
+      const d = paso1(k);
+      if (!d) continue;
+      let m = campo[k];
+      if (campo[k - 1] * d > m) m = campo[k - 1] * d;
+      if (campo[k - t.GW] * d > m) m = campo[k - t.GW] * d;
+      campo[k] = m;
+    }
+    for (let j = t.GH - 2; j >= 0; j--) for (let i = t.GW - 2; i >= 0; i--) {
+      const k = j * t.GW + i;
+      if (t.prov[k] < 0) continue;
+      const d = paso1(k);
+      if (!d) continue;
+      let m = campo[k];
+      if (campo[k + 1] * d > m) m = campo[k + 1] * d;
+      if (campo[k + t.GW] * d > m) m = campo[k + t.GW] * d;
+      campo[k] = m;
+    }
+  }
+}
+
+// Qué le llega de verdad a una hueste, y qué le pasa si no le llega. Se
+// devuelve el desglose porque quien manda tiene que poder ver por qué su
+// ejército se está deshaciendo sin que nadie lo ataque.
+// Lo que se pierde al día con la despensa en cero. Un uno y pico por ciento
+// diario parece poco y no lo es: un mes así se lleva un tercio de la hueste, y
+// una campaña entera sin abasto no deja nada. Es como se deshicieron los
+// ejércitos de verdad, mucho más que a tiros.
+const ABASTO_HAMBRE = 0.012;
+function abastoDeHueste(h, t, s, despensa) {
+  const g = gastoDeHueste(h, s);
+  const pide = g.pan + g.pertrechos;
+  if (pide <= 0) return { parte: 1, pide: 0, llega: 0, porque: "no necesita nada" };
+  const k = t ? celdaTeatro(t, h.x, h.y) : -1;
+  // lo que el camino puede traer hasta ahí
+  const camino = t && k >= 0 && t.prov[k] >= 0 ? (h.de ? t.abaSuyo : t.abaMio)[k] : 0;
+  // y lo que hay en los almacenes del reino para repartir
+  const enCasa = despensa == null ? pide : despensa;
+  const llega = Math.max(0, Math.min(pide, camino, enCasa));
+  const parte = llega / pide;
+  const porque = camino < pide * 0.98
+    ? (camino <= pide * 0.05 ? "cortado: no llega nada" : "el camino no da para tanto")
+    : enCasa < pide ? "no hay de dónde sacarlo" : "abastecida";
+  return { parte, pide, llega, camino, porque };
+}
+
 // ——— un paso del frente ———
 function pasoDelFrente(t, s, huestes, dt, desorden) {
   marcarPies(t, huestes);
@@ -10347,6 +10515,33 @@ function tomadoDe(reparto, idx) {
   const o = idx == null ? null : reparto.get(idx);
   if (!o) return 0;
   return o.mio / Math.max(1, o.mio + o.suyo);
+}
+
+// Cuánto del campo alrededor de una plaza está en manos de quien la sitia. No
+// es lo mismo que cuánto de la comarca: para bloquear una ciudad hay que
+// cortarle lo que entra por sus caminos, no ocupar el departamento entero.
+//
+// Medirlo sobre la comarca entera hacía que un ejército de cuarenta unidades
+// tardara tres años en rendir una plaza cualquiera, porque su alcance no daba
+// para más del cinco por ciento de una comarca grande. Alrededor de la plaza
+// sí da, que es de lo que se trata.
+const CERCO_KM = 45;
+function cercoDeLaPlaza(t, p, bando) {
+  if (!t || !p || p.x == null) return 0;
+  const gkm = t.paso * GRADO_KM;
+  const r = Math.max(1, Math.round(CERCO_KM / gkm));
+  const ci = Math.floor((p.x - t.gx0) / t.paso), cj = Math.floor((p.y - t.gy0) / t.paso);
+  let mio = 0, todo = 0;
+  for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+    if (di * di + dj * dj > r * r) continue;
+    const i = ci + di, j = cj + dj;
+    if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
+    const k = j * t.GW + i;
+    if (t.prov[k] < 0 || t.due[k] < 0) continue;
+    todo++;
+    if (t.due[k] === bando) mio++;
+  }
+  return todo ? mio / todo : 0;
 }
 
 // Cuántos días de cerco valen los días que pasaron. Un cerco solo cuenta
@@ -10624,7 +10819,13 @@ function correrCampana(s, dias, rnd) {
   // uno de cada comarca. Todo lo demás —el cerco, la rendición— se apoya en
   // eso: primero el suelo, después las plazas.
   const teatro = teatroDe(s);
-  const antesDelFrente = repartoDelTeatro(teatro);
+  // Cómo estaba el cerco de cada plaza antes de correr el frente: los días de
+  // cerco valen el promedio entre lo de antes y lo de ahora.
+  const cercoAntes = new Map();
+  for (const h of (s && s.huestes) || []) {
+    const o = h.objetivo ? ((s.provincias || []).find((p) => p.id === h.objetivo) || h.plaza) : null;
+    if (o) cercoAntes.set(o.id, cercoDeLaPlaza(teatro, o, h.de ? 0 : 1));
+  }
   const enPie0 = [...((s && s.huestes) || [])];
   // Quién tomó qué. Sin esta distinción, una plaza que te tomaba el enemigo
   // quedaba marcada como recién conquistada por vos: la guerra al revés.
@@ -10636,6 +10837,49 @@ function correrCampana(s, dias, rnd) {
   const enPie = [...((s && s.huestes) || []), ...nacidas];
   correrFrente(teatro, s, enPie, dias);
   const reparto = repartoDelTeatro(teatro);
+
+  // ——— el abasto, antes que nada ———
+  // Lo que le llegue a cada hueste decide lo que puede hacer este turno: con
+  // qué fuerza pelea, cuánta gente pierde sin que nadie la ataque y con qué
+  // ánimo. Se calcula una vez, sobre el frente ya corrido.
+  if (teatro) { propagarAbasto(teatro, s, teatro.abaMio, 1);
+                propagarAbasto(teatro, s, teatro.abaSuyo, 0); }
+  // Lo que el reino puede poner sobre la mesa. No es solo lo que hay guardado:
+  // un reino que se quedó sin reserva no dejó de cosechar, y un ejército en su
+  // propia tierra come de lo que se está segando ahora. La reserva es el
+  // colchón —lo que permite sostener a un ejército más grande de lo que el
+  // país da de sí— y es lo que se vacía cuando la guerra se alarga.
+  // El coeficiente pone las dos varas en la misma escala: un reino medieval
+  // tiene que poder mantener en pie un ejército de campaña sin pasar hambre en
+  // su propia casa. Lo que tiene que apretar es la distancia y el camino, no un
+  // tope global —si el tope global aprieta, no hay decisión que tomar—.
+  const corriente = ((s && s.provincias) || [])
+    .reduce((a, p) => a + capacidadLogistica(p, s), 0) * 2;
+  const despensa = corriente + Math.max(0, (s && s.reservaGrano) || 0) * 4;
+  const pidenTodas = enPie.filter((h) => !h.de)
+    .reduce((a, h) => { const g = gastoDeHueste(h, s); return a + g.pan + g.pertrechos; }, 0);
+  // si no alcanza para todas, a todas les llega la misma parte
+  const raciona = pidenTodas > 0 ? Math.min(1, despensa / pidenTodas) : 1;
+  let consumo = 0;
+  const conAbasto = enPie.map((h) => {
+    const a = abastoDeHueste(h, teatro, s, h.de ? null : (gastoDeHueste(h, s).pan
+      + gastoDeHueste(h, s).pertrechos) * raciona);
+    if (!h.de) consumo += a.llega * dias;
+    return { ...h, abasto: a.parte, porque: a.porque, pide: a.pide };
+  });
+  // Del granero sale lo que la cosecha del año no alcanzó a cubrir, y nada
+  // más. Un reino que puede alimentar a su ejército no vacía su despensa por
+  // tenerlo en pie; la vacía el ejército que es más grande que el país.
+  //
+  // Contarlo mal —descontar del granero todo lo que come la tropa, viniera de
+  // donde viniera— hacía que un ejército de campaña normal provocara hambre en
+  // siete comarcas y trece alzamientos en ocho meses, y el gobierno se disolvía
+  // solo. La ruina por sobrepasarse tiene que existir; la ruina por poner un
+  // ejército en pie, no.
+  const comido = Math.max(0, consumo - corriente * dias) / 4;
+  enPie.length = 0;
+  for (const h of conAbasto) enPie.push(h);
+
   for (let h of enPie) {
     const antes = { x: h.x, y: h.y };
     // El enemigo no camina hacia un punto fijo: va por lo que tenga más cerca.
@@ -10672,9 +10916,10 @@ function correrCampana(s, dias, rnd) {
     // Cuánto del campo alrededor de la plaza está en manos del que sitia. Sale
     // del teatro y no de una cuenta aparte: lo que aprieta el cerco es el
     // mismo suelo que el mapa está pintando.
-    const idxObj = claveTeatro(obj, s);
-    const antesT = h.de ? 1 - tomadoDe(antesDelFrente, idxObj) : tomadoDe(antesDelFrente, idxObj);
-    const ahoraT = h.de ? 1 - tomadoDe(reparto, idxObj) : tomadoDe(reparto, idxObj);
+    const bandoH = h.de ? 0 : 1;
+    const antesT = cercoAntes.get(obj ? obj.id : "") != null
+      ? cercoAntes.get(obj.id) : cercoDeLaPlaza(teatro, obj, bandoH);
+    const ahoraT = cercoDeLaPlaza(teatro, obj, bandoH);
 
     if (h.orden === "cercar" && obj && alPie) {
       const aguante = h.aguante || aguanteDe(obj, s);
@@ -10713,6 +10958,22 @@ function correrCampana(s, dias, rnd) {
         ? `La ${h.nombre} llega y pasa a ${ORDENES[sigue.orden].n} lo que sigue del plan.`
         : `La ${h.nombre} llega a su destino.`);
       h = sigue;
+    }
+    // ——— y lo que cuesta no comer ———
+    // No todas las bajas vienen del combate. Una hueste sin abasto se deshace
+    // sola: se muere de hambre, se enferma y sobre todo se va, que es lo que
+    // hace de verdad un ejército al que no le llega nada.
+    if (h.abasto != null && h.abasto < 0.98) {
+      const falta = 1 - h.abasto;
+      const parte = Math.min(0.6, ABASTO_HAMBRE * falta * dias);
+      if (parte > 0.004) {
+        const ramas = mermar(h.ramas, parte);
+        const antesN = unidadesTotales(h.ramas), ahoraN = unidadesTotales(ramas);
+        h = { ...h, ramas, moral: acotar((h.moral || 100) - falta * dias * 0.55, 10, 100) };
+        if (!h.de && antesN - ahoraN >= 1)
+          hechos.push(`${h.nombre} pierde ${antesN - ahoraN} unidades sin combatir: `
+            + `${h.porque}. Le llega ${Math.round(h.abasto * 100)} de cada cien raciones.`);
+      }
     }
     // Lo andado de verdad, para que el mapa lo enseñe.
     h = { ...h, ultimo: leguas(antes, { x: h.x, y: h.y }) };
@@ -10798,7 +11059,7 @@ function correrCampana(s, dias, rnd) {
     frentes.push({ idx, nombre, pais: g ? g.pais : null, parte, cercado: o.hambre });
   }
   return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas,
-           teatro: guardarTeatro(teatro) };
+           teatro: guardarTeatro(teatro), comido: Math.round(comido / 6) };
 }
 
 // Cuánto suelo tiene cada bando, para contarlo en el parte de guerra.
@@ -19068,7 +19329,10 @@ export default function PaxMundi() {
         presupuesto: P,
         poblacion: Math.round(poblacionTotal(provs)),
         provincias: provs2,
-        reservaGrano: Math.round(reservaNueva),
+        // Lo que el ejército se comió del granero. Un ejército en campaña vacía
+        // la despensa del reino, y eso es lo que hace que una guerra larga se
+        // sienta en el pan de todos y no solo en el frente.
+        reservaGrano: Math.max(0, Math.round(reservaNueva - (camp.comido || 0))),
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -22092,6 +22356,23 @@ export default function PaxMundi() {
                                 {unidadesTotales(h.ramas)} ud · moral {Math.round(h.moral || 100)}
                               </span>
                             </div>
+                            {/* El abasto va arriba de todo y en rojo cuando falta: una
+                                hueste que no come no es una hueste con un problema,
+                                es una hueste que se está deshaciendo mientras mirás. */}
+                            {h.abasto != null && (
+                              <div style={{ fontSize: 11.5, marginTop: 4, lineHeight: 1.5,
+                                color: h.abasto > 0.95 ? C.green : h.abasto > 0.6 ? C.gold : C.red }}>
+                                {h.abasto > 0.95 ? "▮ abastecida"
+                                  : `▯ abasto ${Math.round(h.abasto * 100)}% · ${h.porque || "no le llega todo"}`}
+                                {h.abasto <= 0.95 && (
+                                  <div style={{ height: 4, marginTop: 3, borderRadius: 2,
+                                    background: "rgba(0,0,0,0.35)", overflow: "hidden" }}>
+                                    <div style={{ width: `${Math.round(h.abasto * 100)}%`, height: "100%",
+                                      background: h.abasto > 0.6 ? C.gold : C.red }} />
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3, lineHeight: 1.5 }}>
                               {donde ? `cerca de ${donde.nombre}` : "en marcha"}
                               {o ? ` · ${o.ico} ${o.dice}` : " · sin órdenes"}
