@@ -10686,6 +10686,66 @@ function riesgoDeEspias(s, vecino, dias) {
   return acotar((0.10 + c * 0.22) * (guerra ? 2.1 : 1) * (Math.max(0, dias || 0) / 365), 0, 0.9);
 }
 
+// ——— y la otra mitad: hacerles creer ———
+//
+// Una red que solo escucha está a medio usar. La otra mitad de lo que hace un
+// servicio —y la que ganó más batallas— es meter en la cabeza del otro algo que
+// no es cierto: un ejército donde no hay ninguno, o ninguno donde sí lo hay.
+// Fortitude no fue un adorno de Overlord; fue la razón por la que quince
+// divisiones alemanas se quedaron mirando el Paso de Calais mientras
+// desembarcaban en Normandía.
+//
+// Acá son dos engaños y no más, porque son los dos únicos que cambian lo que el
+// otro hace: el SEÑUELO le pone un ejército delante de los ojos en un sitio
+// donde no hay nada, y el VELO le tapa uno que sí está. Los dos se pagan con la
+// red —se queman contactos, y eso no se recupera— y los dos pueden no cuajar,
+// que es lo esencial: el que engaña nunca sabe si funcionó hasta que ve lo que
+// hizo el otro.
+const ENGANOS = [
+  { id: "senuelo", n: "hacerles ver un ejército que no está", ico: "◇",
+    dias: 150, quema: 0.22, oro: 20,
+    dice: "se sueltan rumores por donde se sabe que escuchan: gente de armas, carros, un campamento "
+        + "que nadie vio de cerca. Si cuaja, van para allá" },
+  { id: "velo", n: "que no vean el que sí está", ico: "◈",
+    dias: 110, quema: 0.28, oro: 25,
+    dice: "se compran los ojos que hay en el camino y se dejan pasar los partes que convienen. "
+        + "Si cuaja, para ellos esa hueste no existe" },
+];
+const ENGANO_IDX = Object.fromEntries(ENGANOS.map((x) => [x.id, x]));
+const hoyEnDias = (s) => ((s && s.anio) || 0) * 365 + ((s && s.dia) || 0);
+// Hace falta una red que ya sirva para algo: con cuatro contactos recién
+// puestos no se engaña a nadie, se los descubre.
+const ENGANO_PIDE = 0.25;
+function puedeEnganar(s) {
+  const v = s && s.guerra ? s.guerra.vecino : null;
+  return !!v && calidadEspias(s, v) >= ENGANO_PIDE;
+}
+function enganosVivos(s) {
+  const hoy = hoyEnDias(s);
+  return ((s && s.enganos) || []).filter((e) => e && e.hasta > hoy);
+}
+// Los que cuajaron, que son los únicos que hacen algo. El que los montó no
+// sabe cuáles son: eso es lo que hace que engañar sea una apuesta y no una
+// orden.
+function enganosQueCuajan(s) { return enganosVivos(s).filter((e) => e.cuaja); }
+// Montar uno. Cuesta oro, quema red, dura lo que dura y puede no servir de
+// nada. Cuanto mejor la red, más probable que cuaje y más dura.
+function montarEngano(s, tipo, donde, rnd) {
+  const g = ENGANO_IDX[tipo];
+  const vecino = s && s.guerra ? s.guerra.vecino : null;
+  if (!g || !vecino || !puedeEnganar(s)) return null;
+  const c = calidadEspias(s, vecino);
+  const cuaja = (rnd ? rnd() : Math.random()) < acotar(0.30 + c * 0.62, 0, 0.9);
+  const espias = { ...(s.espias || {}) };
+  espias[vecino] = { ...espias[vecino],
+    calidad: +acotar(c - g.quema, 0, 1).toFixed(3) };
+  return { engano: { tipo, cuaja, hasta: hoyEnDias(s) + Math.round(g.dias * (0.6 + c * 0.8)),
+                     x: donde ? donde.x : null, y: donde ? donde.y : null,
+                     hueste: donde && donde.hueste ? donde.hueste : null,
+                     nombre: donde && donde.nombre ? donde.nombre : null },
+           espias, oro: g.oro };
+}
+
 // ——— quién está mirando ———
 //
 // Se ve lo que se pisa y lo que se alcanza a mirar desde donde se pisa. No hay
@@ -12017,12 +12077,26 @@ function correrCampana(s, dias, rnd) {
       // le dijo nada no es un ejército, es un buscador de tesoros. La niebla
       // vale para los dos lados, que es lo único que la hace justa.
       const ojo = alcanceDeVista(h, s);
+      // Y va por lo que CREE que hay, no por lo que hay. Una hueste velada no
+      // existe para él, y un señuelo existe aunque no haya nadie: acá es donde
+      // un engaño deja de ser una línea de crónica y mueve un ejército.
+      const cuajan = enganosQueCuajan(s);
+      const velados = new Set(cuajan.filter((e) => e.tipo === "velo" && e.hueste)
+        .map((e) => e.hueste));
       let presa = null, dm = Infinity;
       for (const q of enPie) {
-        if (q.de) continue;
+        if (q.de || velados.has(q.id)) continue;
         const d = leguas({ x: h.x, y: h.y }, { x: q.x, y: q.y });
         if (d > ojo * 1.6) continue;
         if (d < dm) { dm = d; presa = q; }
+      }
+      // Un señuelo pesa como lo que dice ser: si está más cerca que lo de
+      // verdad, van para allá y se pasan la campaña mirando un campo vacío.
+      for (const e of cuajan) {
+        if (e.tipo !== "senuelo" || e.x == null) continue;
+        const d = leguas({ x: h.x, y: h.y }, { x: e.x, y: e.y });
+        if (d > ojo * 1.6 || d >= dm) continue;
+        dm = d; presa = { x: e.x, y: e.y, senuelo: true };
       }
       if (roto) h = { ...h, orden: "marchar", destino: { x: roto.x, y: roto.y },
                       largo: leguas({ x: h.x, y: h.y }, roto), recorrido: 0 };
@@ -12270,8 +12344,12 @@ function correrCampana(s, dias, rnd) {
            // Lo que se supo del otro lado, que es lo único que el mapa va a
            // enseñar de él.
            avistados: partesDeGuerra(s, finales, dias),
-           // Y cómo quedaron las redes: mejoran mientras se pagan.
-           espias: espiasTrasElTiempo(s, dias, true) };
+           // Y cómo quedaron las redes: mejoran mientras se pagan. Los
+           // engaños que se pasaron de fecha se caen solos: un rumor dura lo
+           // que dura y después alguien va a mirar.
+           espias: espiasTrasElTiempo(s, dias, true),
+           enganos: enganosVivos({ ...s, anio: (s.anio || 0) + Math.floor(((s.dia || 0) + dias) / 365),
+             dia: ((s.dia || 0) + dias) % 365 }) };
 }
 
 // Cuánto suelo tiene cada bando, para contarlo en el parte de guerra.
@@ -18905,6 +18983,18 @@ const ACCIONES = [
   // Declararle la guerra a un vecino estaba enterrado en un panel, y el vecino
   // se ve en el mapa: acá es donde uno lo mira cuando lo piensa. Va con el
   // pulso de fuerzas puesto en el rótulo, para que no sea un salto al vacío.
+  // El señuelo se pone en el mapa porque es lo que es: un sitio donde el otro
+  // tiene que creer que hay algo. Sale solo con guerra y con una red que ya
+  // sirva: con cuatro contactos recién puestos no se engaña a nadie.
+  { id: "senuelo", n: "hacerles ver un ejército aquí", ico: "◇", col: "violet",
+    puede: (p, s) => p.x != null && puedeEnganar(s),
+    rotulo: (p, s) => {
+      const c = calidadEspias(s, s.guerra.vecino);
+      return `hacerles ver un ejército aquí · la red queda en `
+        + `${Math.round(Math.max(0, c - ENGANO_IDX.senuelo.quema) * 100)} de ${Math.round(c * 100)}`;
+    },
+    hace: (p) => ({ tipo: "engano", engano: "senuelo", x: p.x, y: p.y,
+      nombre: p.comarca || p.nombre }) },
   { id: "guerra", n: "declararle la guerra", ico: "⚔", col: "red",
     // No se exige que el país esté en la lista de vecinos, y ese era el nudo:
     // los vecinos del juego —Aragón, Navarra— no son los países que se ven en
@@ -19457,7 +19547,7 @@ export default function PaxMundi() {
         // Y los almacenes vacíos: lo que haya de pertrechos habrá que hacerlo.
         deposito: 0,
         // Ni una red montada en ninguna parte: eso se paga.
-        espias: {},
+        espias: {}, enganos: [],
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -20787,6 +20877,8 @@ export default function PaxMundi() {
         deposito: camp.deposito,
         // Y las redes de espías, que mejoran mientras se pagan y a veces caen.
         espias: espiasFin,
+        // Y los engaños en pie, que caducan solos.
+        enganos: camp.enganos,
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -21146,6 +21238,24 @@ export default function PaxMundi() {
     if (pedido.tipo === "comparar") { alComparar(pedido.id); return; }
     if (pedido.tipo === "vista") { setProvSel(pedido.id); setVistaPedida({ id: pedido.vista, k: Date.now() }); return; }
     if (pedido.tipo === "sitio") { setProvSel(pedido.id); setSitio(pedido.obra); setTab(null); return; }
+    if (pedido.tipo === "engano") {
+      setState((st) => {
+        const r = montarEngano(st, pedido.engano,
+          { x: pedido.x, y: pedido.y, nombre: pedido.nombre, hueste: pedido.hueste },
+          dado("eng" + st.turno + (pedido.nombre || "")));
+        if (!r || st.edu.oro < r.oro) return st;
+        const g = ENGANO_IDX[pedido.engano];
+        return { ...st, espias: r.espias,
+          enganos: [...(st.enganos || []), r.engano],
+          edu: { ...st.edu, oro: st.edu.oro - r.oro },
+          // La crónica no dice si cuajó. No se puede decir: el que engaña se
+          // entera por lo que hace el otro, o no se entera nunca.
+          cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+            texto: `☙ ${capitalizar(g.n)}${pedido.nombre ? ` en ${pedido.nombre}` : ""}: ${g.dice}. `
+              + `Se queman contactos y no hay manera de saber desde acá si picaron.` }] };
+      });
+      return;
+    }
     if (pedido.tipo === "guerra") {
       declararGuerra(pedido.vecino, pedido.objetivo, pedido.sobre); return;
     }
@@ -23807,6 +23917,22 @@ export default function PaxMundi() {
                         </button>
                       )}
 
+                      {/* Los engaños en pie. Se dice cuáles hay y hasta cuándo,
+                          y no si funcionaron: eso no se puede saber desde acá,
+                          que es justamente lo que hace que sea una apuesta. */}
+                      {enganosVivos(s).length > 0 && (
+                        <div style={{ padding: "8px 10px", marginBottom: 8, borderRadius: 7,
+                          background: `${C.violet}0E`, border: `1px solid ${C.violet}55`,
+                          fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
+                          ☙ {enganosVivos(s).map((e) => {
+                            const g = ENGANO_IDX[e.tipo] || {};
+                            const quedan = Math.max(0, Math.round(e.hasta - hoyEnDias(s)));
+                            return `${g.ico || "☙"} ${e.tipo === "velo" ? "velo sobre " + (e.nombre || "una hueste")
+                              : "señuelo en " + (e.nombre || "el mapa")}, ${quedan} días más`;
+                          }).join(" · ")}.
+                          {" "}Si picaron o no, se sabrá por lo que hagan ellos.
+                        </div>
+                      )}
                       {enemigas.length > 0 && (
                         <div style={{ padding: "8px 10px", marginBottom: 8, borderRadius: 7,
                           background: "rgba(224,82,82,0.08)", border: `1px solid ${C.red}55`,
@@ -23955,6 +24081,27 @@ export default function PaxMundi() {
                                   color: C.gold, fontFamily: mono, fontSize: 10.5 }}>
                                 ◎ verla en el mapa
                               </button>
+                              {puedeEnganar(s) && !(s.enganos || []).some((e) =>
+                                  e.tipo === "velo" && e.hueste === h.id && e.hasta > hoyEnDias(s)) && (
+                                <button onClick={() => setState((st) => {
+                                    const r = montarEngano(st, "velo", { hueste: h.id, nombre: h.nombre },
+                                      dado("velo" + st.turno + h.id));
+                                    if (!r || st.edu.oro < r.oro) return st;
+                                    return { ...st, espias: r.espias,
+                                      enganos: [...(st.enganos || []), r.engano],
+                                      edu: { ...st.edu, oro: st.edu.oro - r.oro },
+                                      cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                        texto: `☙ Se compran los ojos del camino para que la ${h.nombre} `
+                                          + `no figure en ningún parte suyo. Se queman contactos, y desde `
+                                          + `acá no hay manera de saber si picaron.` }] };
+                                  })}
+                                  title="si cuaja, para ellos esta hueste no existe"
+                                  style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+                                    background: "transparent", border: `1px solid ${C.violet}55`,
+                                    color: C.violet, fontFamily: mono, fontSize: 10.5 }}>
+                                  ◈ que no la vean
+                                </button>
+                              )}
                               {unidadesTotales(h.ramas) > 3 && (
                                 <button onClick={() => setState((st) => {
                                     const z = (st.huestes || []).find((q) => q.id === h.id);

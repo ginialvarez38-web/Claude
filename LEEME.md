@@ -380,6 +380,28 @@ descubrir —más cuanto mejor sea, y el doble en guerra, porque en guerra la
 buscan de verdad—: cuando pasa, la red se deshace y lo pagás en las
 cancillerías.
 
+### Y hacerles creer
+
+Una red que solo escucha está a medio usar. La otra mitad —la que ganó más
+batallas— es meter en la cabeza del otro algo que no es cierto. Hay dos
+engaños, porque son los dos únicos que cambian lo que el otro hace:
+
+- **El señuelo**: hacerles ver un ejército donde no hay ninguno. Se pone con el
+  clic derecho en el sitio del mapa donde tienen que creer que hay algo. Si
+  cuaja, van para allá y se pasan la campaña mirando un campo vacío.
+- **El velo**: que no vean el que sí está. Se pone sobre una hueste desde su
+  ficha. Si cuaja, para ellos esa hueste no existe y pasan de largo.
+
+Los dos se pagan en oro y sobre todo **quemando la red**: un contacto que se
+usa para mentir es un contacto que ya no sirve para escuchar, así que engañar
+cuesta saber. Y los dos **pueden no cuajar** —con una red muy buena funcionan
+unas cinco de cada seis; con una apenas suficiente, dos de cada tres—.
+
+Lo importante es que **desde casa no se puede saber cuál cuajó.** La ficha
+lista los engaños en pie y cuántos días les quedan, y nada más; si picaron o no
+se sabrá por lo que hagan ellos, que es exactamente como fue siempre. Un rumor
+dura lo que dura: pasada la fecha alguien va a mirar, no hay nada, y se acabó.
+
 ## Cuánto puede llevar un solo hombre
 
 Lo que cambió en dos mil años de guerra no es cuántos hombres podía levantar un
