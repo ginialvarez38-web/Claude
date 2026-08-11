@@ -30,7 +30,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 32-33 | Industria militar | Tres eslabones —mina, fundición, maestranza— cada uno con su gente, su terreno y sus saberes; la cadena rinde lo que deja pasar el más angosto. Los pertrechos ya no salen del campo, y hay depósitos que se llenan en paz y se vacían en guerra. |
 | 2-3 | Escala y estructura | Seis escalones de organización, cada uno con su saber: cuántas unidades aguanta una hueste y cuántas huestes lleva un general. Poner en pie de guerra reparte, y se puede partir a mano. |
 | 12 | Cadena de mando | Cada hueste tiene su general, repartidos solos. Uno estirado deja de servir; las huestes con el mismo jefe pelean juntas y las sueltas llegan de a una. |
-| 22-23 | Niebla e inteligencia | Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
+| 22-23 | Niebla e inteligencia | Redes de espías que se montan, se pagan, mejoran con los años y se descubren: dan partes de todo el país del otro donde no hay tropa, con poco detalle. Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
 
 ## Lo que está a medias
 
@@ -68,9 +68,8 @@ los generales se equivoquen, que es lo que hacen. Va con dos piezas separadas
 —ver y enterarse—, porque el catalejo y el telégrafo no resuelven el mismo
 problema y no llegaron juntos.
 
-Lo que queda de §23 para después: espionaje que devuelva partes sin mandar
-tropa —la acción de montar una red de espías existe, pero todavía no levanta
-niebla—, y desinformación.
+Lo que queda de §23 para después: desinformación —alimentar al otro con partes
+falsos—, que es la mitad que falta del asunto.
 
 **4 · La estructura.** ✔ Hecho. Divisiones y cuerpos en vez de un montón de
 unidades sueltas, con la organización cambiando por época. Recién acá, cuando

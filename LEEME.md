@@ -357,6 +357,29 @@ De ahí salen cuatro cosas que se sienten al jugar:
 Y vale para los dos lados: un ejército enemigo no sale derecho a buscar una
 hueste tuya que está a cuatrocientos kilómetros y de la que nadie le dijo nada.
 
+### La otra manera de saber
+
+Mirar tiene un límite físico: se ve hasta donde llega la vista de alguien que
+está ahí. Por eso todos los estados pagaron siempre por el otro camino. Una
+**red de espías** no es un ejército invisible: es gente que vive allá
+—mercaderes, frailes, secretarios mal pagados— y que cuenta cosas tarde,
+incompletas y a veces falsas.
+
+Se monta contra un vecino desde la ficha del ejército, cuesta al montarla y
+cuesta todos los años. Y es exactamente lo contrario de un explorador: **poco
+detalle sobre mucho territorio.** Un jinete encima de un ejército enemigo te
+dice cuántos son; una red te dice que pasaron por ahí y te da un número redondo
+y equivocado —dice veinte donde hay treinta— pero te lo dice de todo el país a
+la vez, incluso donde no tenés una sola tropa. Las dos cosas se suman en vez de
+sustituirse.
+
+Tarda años en servir: empieza en diez y sube unos puntos por año hasta el techo
+que su siglo permite, que en 1200 son cuatro frailes y en 1950 un servicio con
+presupuesto. Si se deja de pagar, en cinco años no queda nadie. Y se puede
+descubrir —más cuanto mejor sea, y el doble en guerra, porque en guerra la
+buscan de verdad—: cuando pasa, la red se deshace y lo pagás en las
+cancillerías.
+
 ## Cuánto puede llevar un solo hombre
 
 Lo que cambió en dos mil años de guerra no es cuántos hombres podía levantar un

@@ -10610,6 +10610,82 @@ function retrasoDelAviso(s, x, y) {
   return leguas(corte, { x, y }) / velocidadDelAviso(s);
 }
 
+// ——— la otra manera de saber ———
+//
+// Mirar tiene un límite físico: se ve hasta donde llega la vista de alguien que
+// está ahí. Enterarse por otro camino no lo tiene, y por eso todos los estados
+// pagaron siempre por ese otro camino. Una red de espías no es un ejército
+// invisible: es gente que vive allá —mercaderes, frailes, secretarios mal
+// pagados— y que cuenta cosas tarde, incompletas y a veces falsas. Lo que da no
+// es la verdad: es un piso de conocimiento que existe aunque no tengas una sola
+// tropa cerca, y eso, en una guerra, es la diferencia entre pelear a ciegas y
+// pelear mal informado.
+//
+// Se paga todos los años, mejora sola mientras se paga, se pudre si se deja de
+// pagar y se puede descubrir. Descubrirla cuesta caro, que es lo que la hace
+// una decisión y no un botón que se aprieta una vez.
+const ESPIA_ORO = 0.055;          // del ingreso anual, por red en pie
+const ESPIA_CRECE = 0.13;         // lo que mejora por año mientras se paga
+const ESPIA_PUDRE = 0.22;         // lo que se pierde por año si no
+const ESPIA_TECHO = 0.92;
+// Lo que hace mejor a una red. Va de los gremios y las órdenes religiosas
+// —que eran las dos internacionales que había— al servicio con presupuesto.
+const ESPIA_SABER = {
+  "organizacion.instituciones_saber.gremio": 0.10,
+  "sociales.comunicacion.imprenta": 0.12,
+  "organizacion.militar_org.cuadro_oficiales": 0.14,
+  "organizacion.militar_org.estado_mayor": 0.22,
+  "ingenierias.telecom.telegrafo": 0.18,
+  "formales.computacion.criptografia_clave_publica": 0.20,
+  "sociales.arqueologia.desciframiento": 0.12,
+  "ingenierias.telecom.radio": 0.16,
+};
+function techoDeEspias(s) {
+  return acotar(0.30 + sumaSaberEspia(s), 0.30, ESPIA_TECHO);
+}
+function sumaSaberEspia(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let m = 0;
+  for (const [id, v] of Object.entries(ESPIA_SABER)) if (sab.has(id)) m += v;
+  return m;
+}
+function redDeEspias(s, vecino) {
+  const r = ((s && s.espias) || {})[vecino];
+  return r && r.calidad > 0.01 ? r : null;
+}
+function calidadEspias(s, vecino) {
+  const r = redDeEspias(s, vecino);
+  return r ? acotar(r.calidad, 0, 1) : 0;
+}
+function costoEspias(s, ingreso) {
+  const n = Object.values((s && s.espias) || {}).filter((r) => r && r.calidad > 0.01).length;
+  return Math.round(n * Math.max(0, ingreso || 0) * ESPIA_ORO);
+}
+// Cómo va una red con el paso de los días: sube hacia el techo de su época
+// mientras el reino la paga, y se deshace sola si no.
+function espiasTrasElTiempo(s, dias, paga) {
+  const anos = Math.max(0, dias || 0) / 365;
+  const techo = techoDeEspias(s);
+  const out = {};
+  for (const [k, r] of Object.entries((s && s.espias) || {})) {
+    if (!r) continue;
+    const v = paga === false
+      ? r.calidad - ESPIA_PUDRE * anos
+      : r.calidad < techo ? Math.min(techo, r.calidad + ESPIA_CRECE * anos)
+                          : Math.max(techo, r.calidad - ESPIA_PUDRE * 0.4 * anos);
+    if (v > 0.01) out[k] = { ...r, calidad: +acotar(v, 0, 1).toFixed(3) };
+  }
+  return out;
+}
+// Y la chance de que la descubran. Cuanto mejor es, más gente la compone y más
+// hilos hay que tirar; y en guerra el otro busca de verdad.
+function riesgoDeEspias(s, vecino, dias) {
+  const c = calidadEspias(s, vecino);
+  if (c <= 0) return 0;
+  const guerra = s && s.guerra && s.guerra.vecino === vecino;
+  return acotar((0.10 + c * 0.22) * (guerra ? 2.1 : 1) * (Math.max(0, dias || 0) / 365), 0, 0.9);
+}
+
 // ——— quién está mirando ———
 //
 // Se ve lo que se pisa y lo que se alcanza a mirar desde donde se pisa. No hay
@@ -10660,6 +10736,18 @@ function mirarElTeatro(t, s, huestes, dias) {
     if (h.de || h.x == null) continue;
     ver(h.x, h.y, alcanceDeVista(h, s));
   }
+  // Y lo que cuentan los que viven allá. Una red de espías no enseña el frente
+  // como lo enseña un explorador encima: da un dibujo viejo y borroso de todo
+  // el país del otro a la vez, que es exactamente lo contrario —poco detalle,
+  // mucha extensión— y por eso las dos cosas se suman en vez de sustituirse.
+  const red = s && s.guerra ? calidadEspias(s, s.guerra.vecino) : 0;
+  if (red > 0) {
+    const piso = Math.round(60 + red * 150);
+    for (let k = 0; k < n; k++) {
+      if (t.prov[k] < 0 || t.nat[k] === 1) continue;
+      if (t.visto[k] < piso) { t.visto[k] = piso; t.mem[k] = t.due[k]; }
+    }
+  }
 }
 
 // ——— el parte que llega a la corte ———
@@ -10701,6 +10789,11 @@ function certezaSobre(h, s, mias) {
     const c = acotar(1 - (d / alcance) * 0.85, 0.15, 1);
     if (c > mejor) mejor = c;
   }
+  // Los que viven allá. Una red no ve un ejército: oye que pasó, y lo cuenta
+  // con el número que le pareció a alguien. Es poca certeza y es enorme, porque
+  // es la única que existe donde no tenés a nadie.
+  const red = s && s.guerra && h.de === s.guerra.vecino ? calidadEspias(s, s.guerra.vecino) : 0;
+  if (red > 0) mejor = Math.max(mejor, acotar(0.10 + red * 0.38, 0, 0.62));
   // Y la propia tierra: un ejército metido en tu reino no pasa desapercibido.
   // Se mira el suelo y no el centro de la comarca a propósito: una comarca son
   // cien kilómetros de largo, y midiendo desde su punto medio un ejército
@@ -12176,7 +12269,9 @@ function correrCampana(s, dias, rnd) {
            deposito: Math.round(depositoFin), cadena,
            // Lo que se supo del otro lado, que es lo único que el mapa va a
            // enseñar de él.
-           avistados: partesDeGuerra(s, finales, dias) };
+           avistados: partesDeGuerra(s, finales, dias),
+           // Y cómo quedaron las redes: mejoran mientras se pagan.
+           espias: espiasTrasElTiempo(s, dias, true) };
 }
 
 // Cuánto suelo tiene cada bando, para contarlo en el parte de guerra.
@@ -19361,6 +19456,8 @@ export default function PaxMundi() {
         avistados: {},
         // Y los almacenes vacíos: lo que haya de pertrechos habrá que hacerlo.
         deposito: 0,
+        // Ni una red montada en ninguna parte: eso se paga.
+        espias: {},
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -20009,7 +20106,7 @@ export default function PaxMundi() {
           })
         : (state.vecinos || []);
       const evo = evolucionarVecinos(baseVec, nuevosStats, esc, anioNuevo, diaNuevo);
-      const vecinosNuevos = evo.vecinos;
+      let vecinosNuevos = evo.vecinos;
       const entradasVec = evo.entradas;
 
       // ═══ FACCIONES ═══
@@ -20174,7 +20271,10 @@ export default function PaxMundi() {
       // ═══ PRESUPUESTO: se cobra el mantenimiento y se reparte lo que sobra ═══
       const P = state.presupuesto || PRESUPUESTO_INICIAL;
       const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito, provs);
-      const mantAnual = mantenimientoTotal(state.edu) + mantenimientoEjercito(state.ejercito, state);
+      // Y las redes de espías, que se pagan todos los años como cualquier otra
+      // cosa que hay que sostener. Una red sin presupuesto no es una red.
+      const mantAnual = mantenimientoTotal(state.edu) + mantenimientoEjercito(state.ejercito, state)
+        + costoEspias(state, ingresoAnual);
       // servicio de la deuda: se paga antes que nada
       const deudaPrev = state.deuda || 0;
       const credPrev = capacidadCredito(cienciaPrevia, nuevosStats, ingresoAnual, state.anio, state.creditoVetado, state.devaluaciones);
@@ -20599,6 +20699,23 @@ export default function PaxMundi() {
         }
       }
 
+      // ═══ LAS REDES DE ESPÍAS ═══
+      // Mejoran mientras el reino las paga y a veces las descubren, que es lo
+      // que las hace una apuesta y no un botón. Descubrir una es un escándalo
+      // diplomático: el otro sabe que estabas adentro.
+      let espiasFin = espiasTrasElTiempo(state, lapso, true);
+      for (const [quien, red] of Object.entries(espiasFin)) {
+        if (Math.random() >= riesgoDeEspias(state, quien, lapso)) continue;
+        delete espiasFin[quien];
+        nuevosStats.diplomacia = clamp(nuevosStats.diplomacia - 9);
+        nuevosStats.prestigio = clamp(nuevosStats.prestigio - 5);
+        vecinosNuevos = (vecinosNuevos || []).map((v) => (v.nombre === quien
+          ? { ...v, relacion: Math.max(-70, (v.relacion || 0) - 22) } : v));
+        entradasVec.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+          texto: `☙ Descubren a nuestra gente en ${quien}. La red se deshace en una semana y `
+            + `en su corte ya saben qué buscábamos. (Diplomacia −9 · Prestigio −5)` });
+      }
+
       // ═══ ¿SURGE UN DILEMA? ═══
       let dilemaNuevo = state.dilema || null;
       if (!dilemaNuevo) {
@@ -20668,6 +20785,8 @@ export default function PaxMundi() {
         avistados: camp.avistados,
         // Lo que queda en los depósitos de pertrechos.
         deposito: camp.deposito,
+        // Y las redes de espías, que mejoran mientras se pagan y a veces caen.
+        espias: espiasFin,
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -24421,6 +24540,60 @@ export default function PaxMundi() {
               {s.vecinos.map((v, i) => (
                 <div key={i}>
                   <Vecino v={v} />
+                  {/* La red de espías. Es la otra manera de saber qué hay
+                      enfrente, y la única que funciona donde no tenés tropa:
+                      da poco detalle sobre mucho territorio, que es lo
+                      contrario de un explorador. */}
+                  {(() => {
+                    const red = redDeEspias(s, v.nombre);
+                    const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion,
+                      s.vecinos, s.factorias, s.ejercito, s.provincias);
+                    const cuesta = Math.round(Math.max(0, ing) * ESPIA_ORO);
+                    const techo = techoDeEspias(s);
+                    if (red) return (
+                      <div style={{ marginTop: -4, marginBottom: 8, padding: "6px 9px", borderRadius: 5,
+                        background: `${C.violet}0E`, border: `1px solid ${C.violet}44`,
+                        fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: C.violet }}>☙ red de espías en {v.nombre}</span>
+                          <span style={{ fontFamily: mono, color: C.violet }}>
+                            {Math.round(red.calidad * 100)} de {Math.round(techo * 100)}
+                          </span>
+                        </div>
+                        <div>
+                          Cuesta ⚜{cuesta} al año y mejora sola mientras se pague. Sus ejércitos
+                          aparecen en el mapa aunque no tengas a nadie cerca, con el número que
+                          alguien dijo. Si la descubren, se pierde y lo pagás en las cancillerías.
+                        </div>
+                        <button onClick={() => setState((st) => { const e = { ...(st.espias || {}) };
+                            delete e[v.nombre];
+                            return { ...st, espias: e, cronica: [...st.cronica,
+                              { anio: st.anio, dia: st.dia, tipo: "orden",
+                                texto: `☙ Se cierra la red en ${v.nombre}: se deja de pagar y en un año no queda nadie.` }] }; })}
+                          style={{ marginTop: 4, padding: "3px 8px", borderRadius: 5, cursor: "pointer",
+                            background: "transparent", border: `1px solid ${C.line}`,
+                            color: C.muted, fontFamily: mono, fontSize: 10 }}>
+                          ✕ cerrar la red y dejar de pagarla
+                        </button>
+                      </div>
+                    );
+                    return (
+                      <button onClick={() => setState((st) => (redDeEspias(st, v.nombre) ? st : ({ ...st,
+                          espias: { ...(st.espias || {}), [v.nombre]: { desde: st.anio, calidad: 0.10 } },
+                          edu: { ...st.edu, oro: st.edu.oro - 25 },
+                          cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                            texto: `☙ Se monta una red en ${v.nombre}: al principio son cuatro mercaderes `
+                              + `y un fraile, y tardan años en servir para algo. ⚜25 y ⚜${cuesta} al año.` }] })))}
+                        disabled={pensando || s.edu.oro < 25}
+                        style={{ width: "100%", marginTop: -4, marginBottom: 8, padding: "5px 9px",
+                          borderRadius: 5, background: "transparent",
+                          border: `1px solid ${C.violet}44`, color: C.violet,
+                          fontFamily: mono, fontSize: 10, cursor: "pointer", textAlign: "left" }}>
+                        ☙ montar una red de espías
+                        <span style={{ float: "right", color: C.muted }}>⚜25 · ⚜{cuesta}/año</span>
+                      </button>
+                    );
+                  })()}
                   {!s.guerra && v.estado !== "guerra" && (
                     <div style={{ marginTop: -4, marginBottom: 8 }}>
                       <button onClick={() => setPorQueGuerra(porQueGuerra === v.nombre ? null : v.nombre)}
