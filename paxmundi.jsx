@@ -10206,12 +10206,27 @@ const RADIO_PIE_KM = 14;          // el suelo que una hueste pisa de verdad
 const ALCANCE_KM = 58;            // el trecho de frente que una hueste aprieta
 const DIAS_DE_HAMBRE = 70;        // lo que aguanta un cercado sin socorro
 const OCUPAR_PARTE = 0.25;        // de la marcha diaria, lo que sirve para ocupar
-// Las dos fuerzas van a la misma vara. Una hueste de cien unidades pesa unas
-// ciento cincuenta, y una comarca medieval se defiende con quince: sin poner
-// las dos escalas juntas, el ejército pasaba por encima de todo el mapa sin
-// despeinarse, o no podía con la primera aldea.
-const FUERZA_HUESTE = 0.45;
-const FUERZA_PLAZA = 2.2;
+// Las dos fuerzas van a la misma vara, y cuál sea esa vara decide si el juego
+// tiene una guerra o no la tiene.
+//
+// Estuvo mucho tiempo mal puesta, y mal puesta de una manera que no se veía:
+// una comarca cualquiera proyectaba sobre cada palmo de su campo la defensa
+// entera de su plaza —muros, ciudad y toda la gente que puede subirse a
+// ellos—, que es el número de un asedio y no el de una batalla en campo
+// abierto. Contra eso hacían falta sesenta unidades para mover un solo palmo,
+// y un reino de 1200 puede poner siete. La cuenta no daba por un factor de
+// diez: no existía el ejército medieval capaz de invadir a su vecino, que es
+// media historia de Europa.
+//
+// La vara de ahora dice otra cosa, y es la que hay que poder leer del código:
+// LO QUE PARA A UN EJÉRCITO ES OTRO EJÉRCITO. Una comarca sola resiste, cuesta
+// y hace lenta la conquista, pero no la impide; lo que la impide es que haya
+// tropa enfrente. Con esto, ocho unidades —lo que ese siglo levanta de
+// verdad— arañan el frente sin ganarlo, veinte toman una comarca vacía en unos
+// meses y se estrellan si hay un ejército encima, y hace falta más del doble
+// para pasar por arriba de los dos.
+const FUERZA_HUESTE = 0.75;
+const FUERZA_PLAZA = 0.7;
 // Y lo que resiste una tierra ocupada, palmo por palmo. No es una guarnición:
 // es la gente que vive ahí y que no es tuya —el camino cortado, el mensajero
 // que no llega, la aldea que no da de comer—. Sin esto, un ejército sentado en
@@ -11370,8 +11385,17 @@ function pasoDelFrente(t, s, huestes, dt, desorden) {
     const ata = levanta + (mio ? t.hueSuyo[i] * fS + t.plaSuyo[i] * 0.25
                                : t.hueMio[i] * fM + t.plaMio[i] * 0.25);
     // al cercado se le acaba todo: al final se rinde aunque nadie lo asalte
+    //
+    // Y cada palmo se defiende un poco distinto: un vado, un desfiladero, un
+    // caserío de piedra. El número por palmo no puede quedarse solo en el
+    // ritmo —dividiendo la dureza— porque entonces, en cuanto el que ataca
+    // aprieta de verdad, todos los palmos caen igual y la línea sale lisa. El
+    // filo de un frente lo hacen los trechos que de verdad no se pueden tomar
+    // mientras los de al lado sí, así que el número tiene que estar también
+    // acá, en la fuerza. En promedio no cambia nada; lo que cambia es que la
+    // línea deja de ser un arco.
     const def = ((mio ? t.plaMio[i] + t.hueMio[i] * fM : t.plaSuyo[i] + t.hueSuyo[i] * fS))
-      * (1 - 0.92 * t.hambre[i]);
+      * (1 - 0.92 * t.hambre[i]) * (0.55 + 0.9 * t.azar[i]);
     if (ata <= 0) { t.pres[i] *= 0.94; continue; }
     const ataca = mio ? 0 : 1;
     const j = i % t.GW;
@@ -11392,8 +11416,12 @@ function pasoDelFrente(t, s, huestes, dt, desorden) {
     // para siempre y ahí se plantaba. Dividiendo, la montaña tarda el doble
     // —que es lo que hace la montaña—; lo que no hace es volver inmortal.
     const dureza = tt.def * (1 - desorden * 0.55 + desorden * 1.1 * t.azar[i]);
-    // el alcance ya está en las fuerzas: acá solo la razón entre ellas
-    const razon = ata / (ata + def * 1.35);
+    // El alcance ya está en las fuerzas: acá solo la razón entre ellas. El
+    // coeficiente es la ventaja que se le pide al que ataca para mover un
+    // palmo, y va apenas por encima de uno: el que empuja tiene que ganar,
+    // pero no tiene que ganar por un tercio. Pidiéndole un tercio, dos
+    // ejércitos parejos se quedaban clavados para siempre.
+    const razon = ata / (ata + def * 1.12);
     t.pres[i] += (((razon - 0.5) * 3.6) / dureza) * dt;
     if (t.pres[i] >= 1) { t.due[i] = ataca; t.pres[i] = 0; }
     else if (t.pres[i] < 0) t.pres[i] = 0;

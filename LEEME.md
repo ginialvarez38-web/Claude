@@ -177,6 +177,21 @@ por eso se comporta como un frente.
   lo sostenía. Si llega una hueste suya a romper el cerco, deja de estar
   perdido y el juego lo sabe.
 
+La vara con la que se miden las dos fuerzas estuvo mucho tiempo mal puesta, y
+mal puesta de una manera que no se veía: una comarca cualquiera proyectaba
+sobre cada palmo de su campo la defensa entera de su plaza —muros, ciudad y
+toda la gente que puede subirse a ellos—, que es el número de un asedio y no el
+de una batalla en campo abierto. Contra eso hacían falta sesenta unidades para
+mover un solo palmo, y un reino de 1200 puede poner siete. No existía el
+ejército medieval capaz de invadir a su vecino, que es media historia de
+Europa.
+
+Ahora la vara dice otra cosa: **lo que para a un ejército es otro ejército.**
+Una comarca sola resiste, cuesta y hace lenta la conquista, pero no la impide.
+Ocho unidades —lo que ese siglo levanta de verdad— arañan el frente sin ganarlo;
+veinte toman una comarca vacía en unos meses y se estrellan si hay tropa
+encima; y hace falta más del doble para pasar por arriba de las dos cosas.
+
 Debajo hay un campo de fuerza por bando que nace en las huestes y en las plazas
 y se propaga de palmo en palmo perdiendo por el camino: poco por tierra propia,
 mucho por la del otro, y bastante por la conquistada —la gente no es tuya, los
