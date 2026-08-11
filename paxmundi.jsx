@@ -11051,6 +11051,185 @@ function capacidadLogistica(p, s) {
     * (p.ocupada ? 0.35 : 1);
 }
 
+// ═══ LA CADENA: DE LA MINA AL CAÑÓN ══════════════════════════════════════
+//
+// Hasta acá los pertrechos salían de la nada. El ejército gastaba munición y
+// el reino la cubría con población y caminos, igual que el pan. Para el pan
+// está bien —lo hace el campo, y el campo está en todas partes—; para todo lo
+// demás está mal. Una lanza no la hace un labrador: la hacen una mina, una
+// fundición y un taller, en ese orden, y si falta cualquiera de los tres no
+// hay lanza por mucha gente que haya.
+//
+// La cadena tiene tres eslabones y produce lo que deje pasar el más angosto.
+// Esa es la única regla, y de ella sale todo lo interesante: se puede tener
+// todo el mineral del mundo y ninguna fundición, o fundiciones de sobra y nada
+// que fundir, o las dos cosas y ningún taller que convierta el acero en
+// espoletas. Los tres casos existieron y los tres perdieron guerras.
+
+// Los minerales que sirven para hacer armas. El cobre da la mitad que el
+// hierro y sirve mientras no haya otra cosa, que es exactamente lo que pasó.
+const MENAS = { cobre: 0.55, hierro: 1.0 };
+// La escala: pone la cadena en la misma vara que lo que el ejército pide por
+// día, que es la única forma de que la cuenta signifique algo. Está puesta
+// para que un reino medieval sostenga la hueste que su siglo levanta y ni una
+// unidad más, y para que uno industrial sostenga un ejército de masas: entre
+// los dos hay un factor de treinta, y ese factor es de lo que trata el asunto.
+const PERTRECHO_ESCALA = 0.175;
+
+// Lo que multiplica lo que se saca de una mina. Es la tabla que más crece de
+// las tres, y tiene que serlo: entre picar con azada y volar un frente con
+// dinamita y sacarlo en vagonetas hay dos órdenes de magnitud, y esa es la
+// razón por la que el siglo XIX pudo armar ejércitos que el XVII no podía ni
+// imaginar. La bomba de vapor está acá y no en otro lado porque su primer uso,
+// el que la pagó, fue sacar el agua de las minas de carbón.
+const MINA_SABER = {
+  "quimica.metalurgia.hierro": 0.45,
+  "ingenierias.hidraulica.bomba_piston": 0.55,
+  "quimica.metalurgia.acero": 0.50,
+  "ingenierias.termicas.maquina_vapor": 2.20,
+  "ingenierias.termicas.alta_presion": 1.10,
+  "ingenierias.transporte.locomotora": 1.20,
+  "ingenierias.transporte.ferrocarril": 2.60,
+  "ingenierias.militar.explosivo_alto": 2.80,
+  "ingenierias.produccion.fabrica": 1.30,
+  "quimica.metalurgia.acero_industrial": 1.80,
+  "ingenierias.electrica.motor_electrico": 1.60,
+  "ingenierias.produccion.par_produccion_masa": 1.40,
+};
+
+// ——— el primer eslabón: lo que sale de la tierra ———
+// Un yacimiento no es producción: es la posibilidad de producción. Lo que sale
+// de él depende de cuántos brazos se le pongan encima y de si hay camino para
+// sacarlo, y se acaba cuando se acaba.
+function mineralDeComarca(p, s) {
+  if (!p) return 0;
+  let ley = 0;
+  for (const y of yacimientosVisibles(p, (s && s.anio) || 0)) {
+    const k = MENAS[y.id];
+    if (!k) continue;
+    if (reservaActual(s, p, y.id) <= 0) continue;         // agotado: se acabó
+    ley += k;
+  }
+  if (ley <= 0) return 0;
+  const gente = Math.pow(Math.max(1, p.poblacion || 0), 0.34);
+  const via = acotar(Math.round(p.via || 0), 0, 3);
+  return ley * gente * (0.55 + via * 0.28) * (p.ocupada ? 0.25 : 1);
+}
+
+// ——— el segundo: con qué se funde ———
+// Antes de la hulla se fundía con carbón vegetal, y por eso las ferrerías se
+// comían los bosques y se mudaban cuando no quedaba ninguno: el techo de la
+// siderurgia europea durante mil años fue la leña, no el mineral. Con carbón
+// de piedra ese techo desaparece de golpe, y ahí empieza todo lo demás.
+function hullaDelReino(s) {
+  const provs = (s && s.provincias) || [];
+  let v = 0;
+  for (const p of provs) {
+    for (const y of yacimientosVisibles(p, (s && s.anio) || 0)) {
+      if (y.id !== "carbon" || reservaActual(s, p, y.id) <= 0) continue;
+      v += 1 + acotar(Math.round(p.via || 0), 0, 3) * 0.25;
+    }
+  }
+  return v > 0 ? 1.7 + Math.min(1.3, v * 0.35) : 0;
+}
+const FORJA_SABER = {
+  "quimica.metalurgia.horno_fundicion": 0.18,
+  "quimica.metalurgia.fuelle": 0.22,
+  "quimica.metalurgia.hierro": 0.32,
+  "quimica.metalurgia.fundicion_hierro": 0.28,
+  "quimica.metalurgia.alto_horno": 0.75,
+  "quimica.metalurgia.acero": 0.45,
+  "ingenierias.materiales.laminador": 0.60,
+  "ingenierias.termicas.maquina_vapor": 1.20,
+  "quimica.metalurgia.acero_industrial": 3.20,
+  "ingenierias.materiales.acero_util": 1.10,
+  "ingenierias.electrica.motor_electrico": 1.30,
+  "ingenierias.termicas.turbina_vapor": 1.20,
+};
+function fundicionDeComarca(p, s, hulla) {
+  if (!p) return 0;
+  // La leña de al lado, o la hulla del reino, que viaja y no depende del
+  // bosque que uno tenga enfrente.
+  const bosque = acotar(p.bosque != null ? p.bosque : 0.3, 0, 1);
+  const fuego = Math.max(0.35 + bosque * 1.15, hulla);
+  const gente = Math.pow(Math.max(1, p.poblacion || 0), 0.36);
+  return gente * fuego * (p.ocupada ? 0.3 : 1);
+}
+
+// ——— el tercero: quién lo convierte en armas ———
+// Una barra de acero no dispara. Hace falta quien la trabaje, y eso vive en
+// las ciudades y depende de saberes que no son de metalurgia sino de cómo se
+// organiza un taller: piezas intercambiables, fábrica, cadena de montaje. Ahí
+// está la diferencia entre un arsenal que hace mil fusiles al año y uno que
+// hace mil por día, y no en el acero, que es el mismo.
+const MAESTRANZA_SABER = {
+  "ingenierias.produccion.taller_artesanal": 0.15,
+  "ingenierias.produccion.division_tareas": 0.28,
+  "quimica.metalurgia.polvora": 0.32,
+  "ingenierias.militar.artilleria": 0.28,
+  "ingenierias.materiales.prensa_hidraulica": 0.35,
+  "ingenierias.produccion.par_intercambiable": 0.65,
+  "ingenierias.produccion.fabrica": 0.85,
+  "ingenierias.militar.explosivo_alto": 0.55,
+  "ingenierias.produccion.ensamblaje": 1.90,
+  "ingenierias.produccion.par_produccion_masa": 3.10,
+  "ingenierias.produccion.control_calidad": 0.90,
+  "ingenierias.produccion.estudio_tiempos": 0.70,
+  "ingenierias.electrica.motor_electrico": 1.10,
+  "ingenierias.militar.canon_estriado": 0.50,
+  "quimica.metalurgia.acero_industrial": 1.20,
+};
+function maestranzaDeComarca(p, s) {
+  if (!p) return 0;
+  const urbe = Math.max(0, (p.ciudad && p.ciudad.pob) || 0);
+  const gente = Math.pow(Math.max(1, p.poblacion || 0), 0.30) + Math.pow(urbe, 0.52) * 1.8;
+  return gente * (p.ocupada ? 0.2 : 1);
+}
+
+const sumaSaber = (tabla, s) => {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let m = 0;
+  for (const [id, v] of Object.entries(tabla)) if (sab.has(id)) m += v;
+  return m;
+};
+
+// La cadena entera del reino, en pertrechos por día: lo que sale de cada
+// eslabón y cuál es el que aprieta. El cuello no es un adorno: es lo único que
+// el que gobierna necesita saber, porque es lo único que sirve arreglar.
+function cadenaDeGuerra(s) {
+  const provs = (s && s.provincias) || [];
+  const hulla = hullaDelReino(s);
+  let mineralBruto = 0, fundicionBruta = 0, maestranzaBruta = 0;
+  for (const p of provs) {
+    mineralBruto += mineralDeComarca(p, s);
+    fundicionBruta += fundicionDeComarca(p, s, hulla);
+    maestranzaBruta += maestranzaDeComarca(p, s);
+  }
+  const mina = mineralBruto * (1 + sumaSaber(MINA_SABER, s)) * PERTRECHO_ESCALA;
+  const fundicion = fundicionBruta * (1 + sumaSaber(FORJA_SABER, s)) * PERTRECHO_ESCALA * 0.30;
+  const maestranza = maestranzaBruta * (1 + sumaSaber(MAESTRANZA_SABER, s)) * PERTRECHO_ESCALA * 0.42;
+  // Lo que pasa por el más angosto, y nada más. No se promedia: una cadena no
+  // rinde el promedio de sus eslabones.
+  const metal = Math.min(mina, fundicion);
+  const pertrechos = Math.min(metal, maestranza);
+  const partes = [
+    { id: "mina", n: "la mina", v: mina, dice: hulla > 0 && mina < fundicion
+        ? "hay con qué fundir y no qué fundir" : "lo que sale de la tierra" },
+    { id: "fundicion", n: "la fundición", v: fundicion,
+      dice: hulla > 0 ? "hornos de hulla" : "hornos de carbón vegetal: el techo lo pone el bosque" },
+    { id: "maestranza", n: "la maestranza", v: maestranza,
+      dice: "quien convierte el metal en armas" },
+  ];
+  const cuello = partes.slice().sort((a, b) => a.v - b.v)[0];
+  return { mina, fundicion, maestranza, metal, pertrechos, hulla, partes, cuello };
+}
+
+// Cuánto puede sacar el reino de sus depósitos por día sin vaciarlos de golpe.
+// Un almacén no se reparte entero en una semana: se reparte a un ritmo, y ese
+// ritmo es lo que separa un depósito de un montón de cajones.
+const DEPOSITO_ANOS = 2;          // lo que se puede guardar, en años de producción
+function depositoTope(s) { return Math.max(60, cadenaDeGuerra(s).pertrechos * 365 * DEPOSITO_ANOS); }
+
 // El campo del abasto: cuánto alcanza a llegar a cada palmo. Sale de las
 // comarcas propias y solo viaja por suelo propio —un convoy no cruza tierra
 // del otro—, así que una hueste cercada se queda literalmente sin nada, sin
@@ -11132,21 +11311,36 @@ function propagarAbasto(t, s, campo, bando) {
 // una campaña entera sin abasto no deja nada. Es como se deshicieron los
 // ejércitos de verdad, mucho más que a tiros.
 const ABASTO_HAMBRE = 0.012;
+// El pan y los pertrechos se cuentan aparte, porque salen de sitios distintos
+// y se acaban en momentos distintos. Una hueste puede estar bien comida y sin
+// una bala, que es un estado muy concreto y muy frecuente, y hasta ahora el
+// juego no lo sabía decir.
 function abastoDeHueste(h, t, s, despensa) {
   const g = gastoDeHueste(h, s);
   const pide = g.pan + g.pertrechos;
   if (pide <= 0) return { parte: 1, pide: 0, llega: 0, porque: "no necesita nada" };
   const k = t ? celdaTeatro(t, h.x, h.y) : -1;
-  // lo que el camino puede traer hasta ahí
+  // lo que el camino puede traer hasta ahí. El camino es uno solo: por él
+  // viajan las dos cosas y se reparte a prorrata.
   const camino = t && k >= 0 && t.prov[k] >= 0 ? (h.de ? t.abaSuyo : t.abaMio)[k] : 0;
-  // y lo que hay en los almacenes del reino para repartir
-  const enCasa = despensa == null ? pide : despensa;
-  const llega = Math.max(0, Math.min(pide, camino, enCasa));
+  const porCamino = Math.max(0, Math.min(1, pide > 0 ? camino / pide : 1));
+  // y lo que hay en los almacenes del reino de cada cosa
+  const hay = despensa == null ? { pan: g.pan, pertrechos: g.pertrechos }
+            : typeof despensa === "number" ? { pan: despensa, pertrechos: despensa } : despensa;
+  const pan = Math.min(g.pan, Math.max(0, hay.pan || 0)) * porCamino;
+  const per = Math.min(g.pertrechos, Math.max(0, hay.pertrechos || 0)) * porCamino;
+  const llega = pan + per;
   const parte = llega / pide;
-  const porque = camino < pide * 0.98
-    ? (camino <= pide * 0.05 ? "cortado: no llega nada" : "el camino no da para tanto")
-    : enCasa < pide ? "no hay de dónde sacarlo" : "abastecida";
-  return { parte, pide, llega, camino, porque };
+  const faltaPan = g.pan > 0 && pan < g.pan * 0.98;
+  const faltaPer = g.pertrechos > 0 && per < g.pertrechos * 0.98;
+  const porque = porCamino < 0.98
+    ? (porCamino <= 0.05 ? "cortado: no llega nada" : "el camino no da para tanto")
+    : faltaPan && faltaPer ? "sin pan y sin pertrechos: no hay de dónde sacarlo"
+    : faltaPer ? "sin pertrechos: la cadena no da para tanto"
+    : faltaPan ? "sin pan: no hay grano que mandar"
+    : "abastecida";
+  return { parte, pide, llega, camino, porque,
+           pan: g.pan > 0 ? pan / g.pan : 1, pertrechos: g.pertrechos > 0 ? per / g.pertrechos : 1 };
 }
 
 // ——— un paso del frente ———
@@ -11643,17 +11837,33 @@ function correrCampana(s, dias, rnd) {
   const corriente = ((s && s.provincias) || [])
     .reduce((a, p) => a + capacidadLogistica(p, s), 0) * 2;
   const despensa = corriente + Math.max(0, (s && s.reservaGrano) || 0) * 4;
-  const pidenTodas = enPie.filter((h) => !h.de)
-    .reduce((a, h) => { const g = gastoDeHueste(h, s); return a + g.pan + g.pertrechos; }, 0);
-  // si no alcanza para todas, a todas les llega la misma parte
-  const raciona = pidenTodas > 0 ? Math.min(1, despensa / pidenTodas) : 1;
-  let consumo = 0;
+  // Y los pertrechos, que no salen del campo sino de la cadena. Lo que se
+  // puede repartir por día es lo que produce la cadena más lo que se pueda
+  // sacar del depósito sin vaciarlo de golpe: un almacén se reparte a un
+  // ritmo, y ese ritmo es lo que separa un depósito de un montón de cajones.
+  const cadena = cadenaDeGuerra(s);
+  const guardado = Math.max(0, (s && s.deposito) || 0);
+  const delDeposito = Math.min(guardado / Math.max(1, dias), guardado / 30);
+  const perDisponible = cadena.pertrechos + delDeposito;
+  const mias = enPie.filter((h) => !h.de);
+  const pidePan = mias.reduce((a, h) => a + gastoDeHueste(h, s).pan, 0);
+  const pidePer = mias.reduce((a, h) => a + gastoDeHueste(h, s).pertrechos, 0);
+  // si no alcanza para todas, a todas les llega la misma parte de cada cosa
+  const racPan = pidePan > 0 ? Math.min(1, despensa / pidePan) : 1;
+  const racPer = pidePer > 0 ? Math.min(1, perDisponible / pidePer) : 1;
+  let consumo = 0, gastoPer = 0;
   const conAbasto = enPie.map((h) => {
-    const a = abastoDeHueste(h, teatro, s, h.de ? null : (gastoDeHueste(h, s).pan
-      + gastoDeHueste(h, s).pertrechos) * raciona);
-    if (!h.de) consumo += a.llega * dias;
-    return { ...h, abasto: a.parte, porque: a.porque, pide: a.pide };
+    const g = gastoDeHueste(h, s);
+    const a = abastoDeHueste(h, teatro, s, h.de ? null
+      : { pan: g.pan * racPan, pertrechos: g.pertrechos * racPer });
+    if (!h.de) { consumo += a.pan * g.pan * dias; gastoPer += a.pertrechos * g.pertrechos * dias; }
+    return { ...h, abasto: a.parte, porque: a.porque, pide: a.pide,
+             pan: a.pan, pertrechos: a.pertrechos };
   });
+  // Lo que queda en el depósito: lo que la cadena produjo estos días menos lo
+  // que la guerra se llevó. En paz se llena solo; en guerra se vacía, y ahí es
+  // cuando se descubre si la industria daba o no daba.
+  const depositoFin = acotar(guardado + (cadena.pertrechos * dias - gastoPer), 0, depositoTope(s));
   // Del granero sale lo que la cosecha del año no alcanzó a cubrir, y nada
   // más. Un reino que puede alimentar a su ejército no vacía su despensa por
   // tenerlo en pie; la vacía el ejército que es más grande que el país.
@@ -11934,6 +12144,8 @@ function correrCampana(s, dias, rnd) {
   return { huestes: finales, provincias: nuevas, hechos, tomadas, frentes, ganadas,
            teatro: guardarTeatro(teatro), comido: Math.round(comido / 6),
            instruccion: instruccionTrasElTiempo(s, dias),
+           // Lo que queda de pertrechos y de qué eslabón depende que haya más.
+           deposito: Math.round(depositoFin), cadena,
            // Lo que se supo del otro lado, que es lo único que el mapa va a
            // enseñar de él.
            avistados: partesDeGuerra(s, finales, dias) };
@@ -19007,6 +19219,8 @@ export default function PaxMundi() {
         adiestramiento: "revista", instruccion: 34,
         // De nadie se sabe nada todavía, que es como empieza cualquier guerra.
         avistados: {},
+        // Y los almacenes vacíos: lo que haya de pertrechos habrá que hacerlo.
+        deposito: 0,
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -20246,6 +20460,8 @@ export default function PaxMundi() {
         instruccion: camp.instruccion,
         // Y lo que se supo del enemigo: partes, no verdades.
         avistados: camp.avistados,
+        // Lo que queda en los depósitos de pertrechos.
+        deposito: camp.deposito,
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -23511,6 +23727,88 @@ export default function PaxMundi() {
                     )}
                   </div>
                 )}
+
+                {/* ── la cadena de la guerra ──
+                    De qué está hecho lo que el ejército dispara. Va arriba de
+                    todo porque es lo que decide cuánto ejército se puede tener
+                    en pie de verdad, que no es lo mismo que cuánto se puede
+                    reclutar. */}
+                {(() => {
+                  const cad = cadenaDeGuerra(s);
+                  const dep = Math.max(0, s.deposito || 0);
+                  const gastan = (s.huestes || []).filter((h) => !h.de)
+                    .reduce((a2, h) => a2 + gastoDeHueste(h, s).pertrechos, 0);
+                  const cubre = gastan > 0 ? (cad.pertrechos + dep / 30) / gastan : null;
+                  const dias = gastan > cad.pertrechos ? dep / (gastan - cad.pertrechos) : null;
+                  const mayor = Math.max(cad.mina, cad.fundicion, cad.maestranza, 0.001);
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⚒ LA CADENA DE LA GUERRA
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: C.gold }}>
+                          {cad.pertrechos.toFixed(1)} de pertrechos al día
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        Una lanza no la hace un labrador: la hacen una mina, una fundición y un taller.
+                        La cadena produce lo que deja pasar el eslabón más angosto, y nada más.
+                      </div>
+                      <div style={{ marginTop: 7 }}>
+                        {cad.partes.map((q) => {
+                          const flojo = q.id === cad.cuello.id;
+                          return (
+                            <div key={q.id} style={{ marginTop: 5 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between",
+                                fontSize: 11.5, color: flojo ? C.red : C.ink }}>
+                                <span>{flojo ? "▸ " : "  "}{q.n}
+                                  <span style={{ color: C.muted, fontSize: 10.5 }}> · {q.dice}</span>
+                                </span>
+                                <span style={{ fontFamily: mono, color: flojo ? C.red : C.muted }}>
+                                  {q.v.toFixed(1)}
+                                </span>
+                              </div>
+                              <div style={{ height: 4, marginTop: 2, borderRadius: 2,
+                                background: "rgba(0,0,0,0.35)", overflow: "hidden" }}>
+                                <div style={{ width: `${Math.round((q.v / mayor) * 100)}%`, height: "100%",
+                                  background: flojo ? C.red : `${C.brass}99` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: C.gold, marginTop: 7, lineHeight: 1.45 }}>
+                        ▸ Lo que aprieta es <b>{cad.cuello.n}</b>. Mientras no crezca, todo lo demás sobra.
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12,
+                        color: C.muted, marginTop: 6 }}>
+                        <span>En los depósitos</span>
+                        <span style={{ fontFamily: mono, color: dep > 0 ? C.ink : C.red }}>
+                          {Math.round(dep)} de {Math.round(depositoTope(s))}
+                        </span>
+                      </div>
+                      {gastan > 0 && (
+                        <div style={{ fontSize: 11, marginTop: 5, lineHeight: 1.45,
+                          color: cubre >= 1 ? C.green : C.red }}>
+                          {cubre >= 1
+                            ? `Lo que hay en pie de guerra pide ${gastan.toFixed(1)} al día y la cadena lo cubre.`
+                            : `Lo que hay en pie de guerra pide ${gastan.toFixed(1)} al día y la cadena da `
+                              + `${cad.pertrechos.toFixed(1)}: `
+                              + (dias != null && dias < 3000
+                                  ? `el depósito aguanta ${Math.round(dias)} días más y después se pelea sin nada.`
+                                  : "se pelea a media ración.")}
+                        </div>
+                      )}
+                      {cad.hulla > 0 && (
+                        <div style={{ fontSize: 10.5, color: C.violet, marginTop: 5, fontFamily: mono }}>
+                          hay hulla: los hornos dejaron de depender del bosque
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── cómo está organizado ──
                     Lo que cambió en dos mil años no es cuántos hombres podía

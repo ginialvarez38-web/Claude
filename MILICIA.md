@@ -26,6 +26,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 13-14 | Logística | El ejército come pan y gasta pertrechos según su rama; lo que le llega sale de las comarcas, viaja por los caminos y se apaga con la distancia. Una campaña honda se deshace sin que nadie la ataque. |
 | 8 | Entrenamiento | Cuatro planes de adiestramiento, con su precio al año, su techo y quién hace falta para darlos. Sube despacio, baja si se deja de pagar y se diluye con cada leva. |
 | 9 | Experiencia | La veteranía se gana peleando, sitiando y marchando, y se pierde cuando muere el cuadro que sabía. Una hueste veterana pesa más, sangra menos, no se le rompe la moral y aguanta hambre que a una leva la disuelve. |
+| 32-33 | Industria militar | Tres eslabones —mina, fundición, maestranza— cada uno con su gente, su terreno y sus saberes; la cadena rinde lo que deja pasar el más angosto. Los pertrechos ya no salen del campo, y hay depósitos que se llenan en paz y se vacían en guerra. |
 | 2-3 | Escala y estructura | Seis escalones de organización, cada uno con su saber: cuántas unidades aguanta una hueste y cuántas huestes lleva un general. Poner en pie de guerra reparte, y se puede partir a mano. |
 | 12 | Cadena de mando | Cada hueste tiene su general, repartidos solos. Uno estirado deja de servir; las huestes con el mismo jefe pelean juntas y las sueltas llegan de a una. |
 | 22-23 | Niebla e inteligencia | Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
@@ -34,7 +35,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 | § | Qué falta |
 |---|---|
-| 15-16 | **Combustible y munición como recursos.** El gasto está contado —cada rama pide sus pertrechos— pero sale de una despensa única en vez de una cadena que se pueda cortar. |
+| 15-16 | **Combustible como recurso.** La munición ya tiene su cadena y su depósito; el combustible no se lleva aparte —una división motorizada consume pertrechos, no gasóleo—. |
 | 30 | **Prisioneros.** Las bajas se pierden; nadie se rinde ni se canjea. |
 | 34 | **Doctrina.** Hay saberes militares sueltos, pero no una forma de pelear que se elija y que cambie cómo se pelea. |
 | 39 | **Consecuencias sociales.** La población ya sufre la leva y las bajas; falta lo que deja una guerra larga —viudas, mutilados, deuda, radicalización—. |
@@ -78,8 +79,10 @@ un solo número por época —cuántas formaciones puede un hombre llevar al mis
 campo el mismo día— del que salen las tres cosas: partir el ejército, repartir
 el mando y concentrar.
 
-**5 · Industria militar.** La cadena de hierro a acero a cañón. Se apoya en el
-abasto: es lo que llena los depósitos.
+**5 · Industria militar.** ✔ Hecho. La cadena de hierro a acero a cañón. Se
+apoya en el abasto: es lo que llena los depósitos. Lo que la hace una decisión
+y no una contabilidad es el cuello de botella: la ficha dice cuál de los tres
+eslabones aprieta, y ensanchar cualquiera de los otros dos no sirve de nada.
 
 **6 · Objetivo político de la guerra.** Armisticio, paz negociada, guerra
 limitada. Lo que hace que una guerra termine por algo y no cuando no queda

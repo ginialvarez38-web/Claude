@@ -391,6 +391,53 @@ contrario de lo que pasó siempre. Cannae y Austerlitz fueron aniquilaciones
 porque fueron desparejas; Borodino y Malplaquet dejaron dos ejércitos rotos en
 el campo porque estuvieron parejas.
 
+## De la mina al cañón
+
+Hasta ahora los pertrechos salían de la nada: el ejército gastaba munición y el
+reino la cubría con población y caminos, igual que el pan. Para el pan está
+bien —lo hace el campo, y el campo está en todas partes—. Para todo lo demás
+está mal: una lanza no la hace un labrador, la hacen una mina, una fundición y
+un taller, en ese orden, y si falta cualquiera de los tres no hay lanza por
+mucha gente que haya.
+
+**La cadena produce lo que deja pasar su eslabón más angosto**, y no el
+promedio. De esa única regla sale todo lo demás, incluido lo más importante:
+ensanchar el eslabón que no aprieta no produce ni un pertrecho más. La ficha
+del ejército dice cuál es el que aprieta, porque es lo único que sirve
+arreglar.
+
+- **La mina.** Un yacimiento no es producción: es la posibilidad de producción.
+  Hace falta gente que pique y camino para sacarlo, la mena se agota, y de una
+  mina ocupada por el enemigo no sale casi nada. Es el eslabón que más crece
+  con el siglo: entre picar con azada y volar un frente con dinamita y sacarlo
+  en vagonetas hay dos órdenes de magnitud.
+- **La fundición.** Antes de la hulla se fundía con carbón vegetal, así que el
+  techo de la siderurgia europea durante mil años no fue el mineral sino la
+  leña: las ferrerías se comían el bosque y se mudaban. Con carbón de piedra
+  ese techo desaparece de golpe, porque la hulla viaja y el bosque no.
+- **La maestranza.** Una barra de acero no dispara. Los talleres viven en las
+  ciudades, y lo que multiplica un arsenal no es el acero sino cómo se organiza
+  el taller: piezas intercambiables, fábrica, cadena de montaje. Ahí está la
+  diferencia entre mil fusiles al año y mil por día, y no en el metal, que es
+  el mismo.
+
+Entre 1200 y 2000 la cadena de un mismo país se multiplica por veinticinco, y
+el escalón más grande está entre 1870 y 1940: ahí se armaron los ejércitos de
+masas.
+
+**El pan y los pertrechos se cuentan aparte**, porque salen de sitios distintos
+y se acaban en momentos distintos. Setenta unidades en la Castilla de 1200
+comen el cien por cien y se arman el doce: un reino medieval podía alimentar
+perfectamente un ejército que no podía equipar, y ahora el juego lo sabe decir
+—la hueste dice «sin pertrechos: la cadena no da para tanto» y no solo un
+porcentaje—. La hueste que ese siglo sostiene de verdad, unas once unidades, va
+entera.
+
+**Y hay depósitos.** En paz se llenan solos hasta dos años de producción; en
+guerra se vacían, y cuando se acaban se pelea con lo que sale de la fábrica ese
+día y nada más. Eso es lo que separa una guerra corta de una larga, y es la
+razón por la que todo el mundo planeó guerras cortas.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
