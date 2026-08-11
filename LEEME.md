@@ -342,6 +342,55 @@ De ahí salen cuatro cosas que se sienten al jugar:
 Y vale para los dos lados: un ejército enemigo no sale derecho a buscar una
 hueste tuya que está a cuatrocientos kilómetros y de la que nadie le dijo nada.
 
+## Cuánto puede llevar un solo hombre
+
+Lo que cambió en dos mil años de guerra no es cuántos hombres podía levantar un
+país. Es cuántos podía mover a la vez sin que se le deshicieran por el camino.
+Un rey medieval con cuarenta mil hombres tenía cuarenta mil hombres y un
+problema; Napoleón con cuarenta mil tenía cuatro divisiones.
+
+La ficha del ejército dice en qué escalón está el reino —la mesnada, la
+ordenanza, el regimiento, la división, el cuerpo de ejército, el grupo de
+ejércitos— y cada uno da dos números:
+
+- **Bulto**: cuántas unidades aguanta una hueste antes de estorbarse a sí
+  misma. Pasado eso marcha la mitad, come casi el doble por cabeza —el forraje
+  del camino se lo comieron los de adelante— y no llega a poner en el campo
+  todo lo que trae. De las tres, la del combate es la más leve: los ejércitos
+  demasiado grandes se murieron más de hambre y de camino que de tiros.
+- **Mando**: cuántas huestes puede un general llevar al mismo campo el mismo
+  día. Ese número es literal: en 1200 es una, y por eso dos huestes tuyas que
+  estén al lado pelean una después de la otra y las deshacen por separado. Con
+  disciplina de formación son dos, y con estado mayor, seis.
+
+Ninguno viene por el año que es: cada escalón hay que saberlo.
+
+**Poner en pie de guerra reparte.** Si lo que tenés libre no entra en una
+hueste, salen varias, cada una con de todo —media hueste de solo cañones no es
+media hueste— y con su jefe. También se puede partir una a mano en cualquier
+momento.
+
+**El general es la estructura.** Cada hueste lleva el suyo, y se reparten
+solos: nadie quiere administrar esto turno a turno. Una hueste sin jefe se
+conduce sola y se nota; una con un jefe de oficio pesa más en el campo; un
+general muerto no sigue mandando desde la tumba. Y un general estirado —con más
+huestes de las que su época le deja— deja de servir de mucho, aunque nunca es
+peor que no tener ninguno.
+
+Lo que se compra con todo esto es **concentrar**. Dos huestes con el mismo jefe
+que llegan al mismo campo pelean juntas, y eso suele ser la diferencia entre
+perder y ganar la misma batalla. Por eso partir el ejército conviene cuando hay
+quien mande las partes, y no antes: en 1200 sesenta unidades son tres mesnadas
+de las que al campo llega una sola, y por eso los reyes medievales iban en un
+solo bulto.
+
+Y de paso se corrigió algo que estaba al revés desde siempre: **a un ejército no
+se lo destruye en la batalla, se lo destruye en la persecución**. Antes una
+batalla pareja costaba más bajas al vencido que una aplastante, que es lo
+contrario de lo que pasó siempre. Cannae y Austerlitz fueron aniquilaciones
+porque fueron desparejas; Borodino y Malplaquet dejaron dos ejércitos rotos en
+el campo porque estuvieron parejas.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

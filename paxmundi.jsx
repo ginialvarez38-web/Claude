@@ -9637,14 +9637,17 @@ function leguas(a, b) {
 // Kilómetros por día de una hueste por una provincia dada. El camino
 // multiplica y el terreno divide: una calzada por la llanura y una senda por
 // la montaña se llevan tres a uno.
-function velocidadHueste(h, prov) {
+function velocidadHueste(h, prov, s) {
   const ramas = Object.keys((h && h.ramas) || {})
     .filter((r) => h.ramas[r] > 0 && PASO_RAMA[r] > 0);
   if (!ramas.length) return 0;
   const base = Math.min(...ramas.map((r) => PASO_RAMA[r]));
   const t = TERRENOS[(prov && prov.terreno) || "llanura"] || TERRENOS.llanura;
   const via = viaDe(prov || {});
-  return base * (0.75 + via.soc * 0.75) * (t.com || 1);
+  // Y el bulto. Una columna más grande de lo que su época sabe organizar tarda
+  // un día en pasar por donde la cabeza pasó en una hora: es la razón por la
+  // que se inventó dividir un ejército, mucho antes que ninguna otra.
+  return base * (0.75 + via.soc * 0.75) * (t.com || 1) * estorboEnLaMarcha(desbordeDe(h, s));
 }
 
 // ═══ EL TEMPLE: LO QUE LE ENSEÑARON Y LO QUE VIVIÓ ════════════════════════
@@ -9775,6 +9778,211 @@ const aprender = (v, cuanto) => acotar((v || 0) + cuanto * (1 - (v || 0) / 118),
 const sangrarTemple = (v, parte) =>
   acotar((v || 0) * (1 - Math.max(0, (parte || 0) - 0.16) * 1.8), 0, 100);
 
+// ═══ LA ESTRUCTURA: CUÁNTO PUEDE LLEVAR UN SOLO HOMBRE ════════════════════
+//
+// Lo que cambió en dos mil años de guerra no es cuántos hombres podía levantar
+// un país. Es cuántos podía mover a la vez sin que se le deshicieran por el
+// camino. Un rey medieval con cuarenta mil hombres tenía cuarenta mil hombres y
+// un problema; Napoleón con cuarenta mil tenía cuatro divisiones.
+//
+// La legión, el tercio, el regimiento, la división, el cuerpo de ejército:
+// todos son la misma respuesta a la misma pregunta —qué bulto puede llevar un
+// solo hombre— y ninguno se inventó por gusto. Se inventaron porque el anterior
+// se quedó chico y los ejércitos empezaron a perder batallas por no poder darse
+// vuelta a tiempo.
+//
+// Acá eso son dos números por época. BULTO es cuántas unidades aguanta una
+// hueste antes de estorbarse a sí misma: pasado eso marcha más lenta, come más
+// por cabeza y no consigue traer al frente todo lo que trae. MANDO es cuántas
+// huestes puede coordinar un general a la vez, y es lo que convierte varias
+// huestes sueltas en un cuerpo que converge sobre el mismo campo.
+//
+// La lista va de menos a más y el reino usa la última que sabe.
+const ORGANIZACION = [
+  { id: "mesnada", n: "la mesnada", bulto: 20, mando: 1,
+    dice: "cada señor trae a los suyos y el rey manda lo que alcanza a ver" },
+  { id: "ordenanza", n: "la ordenanza", bulto: 34, mando: 2,
+    req: "organizacion.militar_org.disciplina_formacion",
+    dice: "cuadros que forman y maniobran a la voz: ya se mueve más de lo que se ve" },
+  { id: "regimiento", n: "el regimiento", bulto: 52, mando: 3,
+    req: "organizacion.militar_org.ejercito_permanente",
+    dice: "unidades permanentes con su plana, su número y su gente de siempre" },
+  { id: "division", n: "la división", bulto: 78, mando: 4,
+    req: "organizacion.militar_org.cuadro_oficiales",
+    dice: "cada división lleva de todo y puede pelear sola una jornada entera" },
+  { id: "cuerpo", n: "el cuerpo de ejército", bulto: 118, mando: 6,
+    req: "organizacion.militar_org.estado_mayor",
+    dice: "una plana mayor que escribe órdenes para gente a la que no ve" },
+  { id: "grupo", n: "el grupo de ejércitos", bulto: 175, mando: 9,
+    req: "organizacion.militar_org.guerra_total",
+    dice: "millones de hombres movidos por horario, por mapa y por teléfono" },
+];
+const ORG_IDX = Object.fromEntries(ORGANIZACION.map((x) => [x.id, x]));
+function organizacionDe(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let mejor = ORGANIZACION[0];
+  for (const o of ORGANIZACION) if (!o.req || sab.has(o.req)) mejor = o;
+  return mejor;
+}
+// Lo que a una hueste le sobra de tamaño para lo que su siglo sabe organizar.
+// Cero mientras entre en el bulto de su época; de ahí para arriba, la parte que
+// sobra. Se corta en tres: pasado el cuádruple ya no hay nada peor que pueda
+// pasarle, es un gentío y se acabó.
+const DESBORDE_TOPE = 3;
+function desbordeDe(h, s) {
+  const org = organizacionDe(s);
+  const n = unidadesTotales((h && h.ramas) || {});
+  return n <= org.bulto ? 0 : Math.min(DESBORDE_TOPE, (n - org.bulto) / org.bulto);
+}
+// Y lo que eso cuesta. Son tres cosas distintas y la peor no es la del combate:
+// una hueste demasiado grande pelea algo peor, pero marcha la mitad y come casi
+// el doble por cabeza, porque la cola tarda un día en pasar por donde la cabeza
+// pasó en una hora. Así se murieron más ejércitos que a tiros.
+// La del campo va suave a propósito: un soldado de un ejército demasiado grande
+// no pelea peor, lo que pasa es que la mitad de la línea llega tarde. Lo que de
+// verdad mata a un ejército desmesurado son las otras dos, y por eso Rusia se
+// tragó a los que la invadieron con más hombres.
+const estorboEnElCampo = (d) => 1 / (1 + d * 0.08);
+const estorboEnLaMarcha = (d) => 1 / (1 + d * 0.50);
+const estorboEnElPan = (d) => 1 + d * 0.40;
+
+// ——— quién la manda ———
+//
+// Hasta acá los generales eran una lista con nombres y un bono global: el mejor
+// que tuvieras mejoraba todo el ejército estuviera donde estuviera, que es
+// exactamente lo que un general no puede hacer. Ahora cada hueste tiene el suyo,
+// o no tiene ninguno y se conduce sola, que es peor.
+// Lo que vale una hueste que nadie manda: exactamente lo que valía antes de que
+// existieran los generales. El oficio del que la lleva es todo ganancia y nada
+// castigo, y eso es a propósito: un reino nuevo no tiene ningún general —hay
+// que pagarlos— y cobrarle un impuesto escondido por el estado en el que
+// empieza no le enseña nada, solo lo empeora sin decírselo.
+const SIN_JEFE = 1;
+const idGeneral = (g) => (g ? (g.id || g.nombre) : null);
+function generalDe(h, s) {
+  if (!h || !h.general) return null;
+  return ((s && s.generales) || []).find((g) => idGeneral(g) === h.general) || null;
+}
+// Cuántas huestes lleva encima un general. Pasado el mando de su época está
+// estirado: firma órdenes para gente que ya no alcanza a mirar.
+function huestesDe(g, s) {
+  const id = idGeneral(g);
+  return ((s && s.huestes) || []).filter((q) => q && !q.de && q.general === id);
+}
+function manoDelGeneral(h, s) {
+  if (h && h.de) return 1;                         // del otro lado no llevamos cuenta
+  const g = generalDe(h, s);
+  if (!g) return SIN_JEFE;
+  const org = organizacionDe(s);
+  const cuantas = huestesDe(g, s).length;
+  const estira = cuantas > org.mando ? 1 + (cuantas - org.mando) * 0.42 : 1;
+  const edad = ((s && s.anio) || 0) - (g.nacio || 0);
+  const merma = edad > 62 ? 0.88 : 1;              // los viejos ya no cabalgan
+  // El suelo es no tener jefe. Un general estirado deja de servir de mucho,
+  // pero nunca es peor que nadie: si lo fuera, lo que convendría sería no
+  // nombrar generales, y eso es un disparate que el juego no debe premiar.
+  return acotar((1 + ((g.pericia || 5) / 42) * merma) / estira, SIN_JEFE, 1.30);
+}
+// Dos huestes pelean juntas si las manda el mismo hombre. No hay más magia que
+// esa: un cuerpo de ejército es varias unidades que alguien puede hacer
+// converger sobre el mismo campo, y un montón de huestes sueltas no puede.
+//
+// Y no todas las que lleva: solo las que su época le deja hacer converger. Ese
+// es el sentido literal del número de mando —cuántas formaciones puede uno
+// llevar al mismo campo el mismo día— y es la razón por la que un rey medieval
+// peleaba con un ejército y Napoleón con seis. Las que no llegan a tiempo
+// llegan después, solas, contra un enemigo que ya ganó una vez.
+function mismoMando(a, b) {
+  if (!a || !b || !!a.de !== !!b.de) return false;
+  if (a.de) return a.de === b.de;                  // el vecino pelea como uno solo
+  return !!a.general && a.general === b.general;
+}
+// Repartir el mando: las huestes sin jefe se lo llevan del general más libre y
+// con más oficio que haya. Se hace solo porque nadie quiere administrar esto
+// turno a turno, y se puede cambiar a mano donde importa.
+function repartirElMando(huestes, s) {
+  const gen = ((s && s.generales) || []).filter((g) => g);
+  if (!gen.length) return huestes.map((h) => (h.de || !h.general ? h : { ...h, general: null }));
+  const validos = new Set(gen.map(idGeneral));
+  const carga = new Map(gen.map((g) => [idGeneral(g), 0]));
+  const salida = huestes.map((h) => {
+    if (h.de) return h;
+    // un general muerto deja la hueste sin jefe, no con un fantasma
+    const suyo = h.general && validos.has(h.general) ? h.general : null;
+    if (suyo) carga.set(suyo, (carga.get(suyo) || 0) + 1);
+    return suyo === h.general ? h : { ...h, general: null };
+  });
+  for (let i = 0; i < salida.length; i++) {
+    const h = salida[i];
+    if (h.de || h.general) continue;
+    let mejor = null;
+    for (const g of gen) {
+      const id = idGeneral(g);
+      const c = carga.get(id) || 0;
+      if (!mejor || c < mejor.c || (c === mejor.c && (g.pericia || 0) > (mejor.g.pericia || 0)))
+        mejor = { g, c, id };
+    }
+    if (!mejor) break;
+    carga.set(mejor.id, mejor.c + 1);
+    salida[i] = { ...h, general: mejor.id };
+  }
+  return salida;
+}
+// Poner en pie de guerra no es hacer un montón: es hacer las unidades que tu
+// siglo sabe manejar. Si lo que hay libre no entra en una, salen varias, y cada
+// rama se reparte entre todas —una división de solo cañones no es una división—.
+function repartirEnHuestes(libre, org) {
+  const total = unidadesTotales(libre || {});
+  if (total <= 0) return [];
+  const cuantas = Math.max(1, Math.ceil(total / Math.max(1, org.bulto)));
+  const partes = Array.from({ length: cuantas }, () => ({}));
+  for (const r of RAMAS_EJERCITO) {
+    let n = (libre || {})[r.id] || 0;
+    if (!n) continue;
+    for (let i = 0; i < cuantas && n > 0; i++) {
+      const toca = i === cuantas - 1 ? n : Math.round(((libre[r.id] || 0) / cuantas));
+      const v = Math.min(n, Math.max(0, toca));
+      if (v > 0) partes[i][r.id] = (partes[i][r.id] || 0) + v;
+      n -= v;
+    }
+    // lo que quedó por el redondeo va a la primera
+    if (n > 0) partes[0][r.id] = (partes[0][r.id] || 0) + n;
+  }
+  return partes.filter((p) => unidadesTotales(p) > 0);
+}
+// Las huestes que se mueven como una: la elegida y las de su mismo jefe que
+// estén en el mismo sitio. Sin esto, un ejército repartido en tres cuerpos
+// obligaba a dar tres veces la misma orden, que es la clase de trabajo que un
+// juego no tiene que pedirle a nadie.
+const JUNTO_KM = 30;
+function elCuerpoDe(s, id) {
+  const hs = (s && s.huestes) || [];
+  const yo = hs.find((h) => h.id === id);
+  const set = new Set(yo ? [yo.id] : []);
+  if (!yo || yo.de) return set;
+  // Acá el «sin jefe» también junta: si el reino no tiene un solo general, sus
+  // huestes las manda la corona y se mueven todas. Para pelear no es lo mismo
+  // —un ejército sin nadie que lo mande no converge, y eso lo decide
+  // mismoMando— pero para caminar hasta el mismo sitio sí lo es, y obligar a
+  // dar tres veces la misma orden no le enseña nada a nadie.
+  for (const q of hs) {
+    if (q.de || q.id === yo.id || (q.general || null) !== (yo.general || null)) continue;
+    if (leguas({ x: yo.x, y: yo.y }, { x: q.x, y: q.y }) <= JUNTO_KM) set.add(q.id);
+  }
+  return set;
+}
+// Partir una hueste en dos mitades parejas. Es la orden más vieja que hay y
+// hasta ahora no se podía dar.
+function partirRamas(ramas) {
+  const a = {}, b = {};
+  for (const [k, n] of Object.entries(ramas || {})) {
+    if (!n) continue;
+    a[k] = Math.ceil(n / 2);
+    if (n - a[k] > 0) b[k] = n - a[k];
+  }
+  return [a, b];
+}
+
 // Cuánto pesa una hueste en un campo de batalla. No es la cuenta de hombres:
 // una rama vale lo que el saber de la época la hace valer, que es lo que ya
 // calcula el resto del juego.
@@ -9796,8 +10004,13 @@ function pesoDeHueste(h, s) {
   // que una hueste veterana valga por tres no está en este número sino en que
   // pierde menos gente, no se le rompe la moral y no se deshace de hambre.
   const tem = templeDe(h);
+  // Y lo que la organización pone y quita: una hueste más grande de lo que su
+  // siglo sabe manejar no trae al frente todo lo que trae, y una que nadie
+  // manda hace lo que puede. Es poco cada cosa y mucho las dos juntas, que es
+  // como funciona un ejército.
   return f * (0.55 + 0.45 * acotar((h && h.moral != null ? h.moral : 100) / 100, 0, 1))
-           * (0.34 + 0.66 * ab) * (0.78 + 0.85 * tem);
+           * (0.34 + 0.66 * ab) * (0.78 + 0.85 * tem)
+           * estorboEnElCampo(desbordeDe(h, s)) * manoDelGeneral(h, s);
 }
 
 // ——— lo que cuesta tomar una plaza ———
@@ -10584,7 +10797,12 @@ function propagarCampo(t, s, campo, bando, huestes, deHuestes) {
         const i = ci + di, j = cj + dj;
         if (i < 0 || j < 0 || i >= t.GW || j >= t.GH) continue;
         const k = j * t.GW + i;
-        if (t.prov[k] >= 0 && peso > campo[k]) campo[k] = peso;
+        // Se suman, no se pisan. Dos huestes en el mismo suelo aprietan las
+        // dos: si acá se tomara la mayor, partir un ejército en tres lo
+        // dejaría empujando como uno, y entonces organizarse sería un castigo.
+        // Lejos no hay riesgo de contar dos veces —el campo se apaga en unas
+        // leguas y dos huestes separadas no se solapan—.
+        if (t.prov[k] >= 0) campo[k] += peso;
       }
     }
   } else {
@@ -10813,6 +11031,10 @@ function gastoDeHueste(h, s) {
   if (sab.has("organizacion.logistica.organizacion_campana")) merma *= 0.92;
   if (sab.has("organizacion.logistica.tren_suministro")) merma *= 0.85;
   if (sab.has("organizacion.logistica.cadena_suministro")) merma *= 0.80;
+  // Y lo que se pierde por ser demasiados juntos: la misma comarca tiene que
+  // dar de comer a una columna que tarda tres días en pasar, y el forraje del
+  // camino se lo comieron los de adelante.
+  merma *= estorboEnElPan(desbordeDe(h, s));
   return { pan: pan * merma, pertrechos: per * merma };
 }
 
@@ -11174,7 +11396,7 @@ function avanzarHueste(h, dias, provs, s) {
   const total = h.largo || leguas({ x: h.x, y: h.y }, d) || 1;
   // Por dónde va: la provincia bajo sus pies manda el terreno y el camino.
   const bajo = provinciaMasCerca(provs, h.x, h.y);
-  const v = velocidadHueste(h, bajo);
+  const v = velocidadHueste(h, bajo, s);
   if (v <= 0) return h;
   const anda = v * Math.max(0, dias);
   const falta = leguas({ x: h.x, y: h.y }, d);
@@ -11200,10 +11422,10 @@ const provinciaMasCerca = (provs, x, y) => {
 // Cuántos días faltan para llegar, con lo que se sabe hoy del camino. Es una
 // estimación honesta: si la hueste entra en montaña tardará más, y lo dirá
 // cuando llegue el momento.
-function diasDeMarcha(h, provs) {
+function diasDeMarcha(h, provs, s) {
   if (!h || !h.destino) return 0;
   const bajo = provinciaMasCerca(provs, h.x, h.y);
-  const v = velocidadHueste(h, bajo);
+  const v = velocidadHueste(h, bajo, s);
   if (v <= 0) return Infinity;
   return Math.ceil(leguas({ x: h.x, y: h.y }, h.destino) / v);
 }
@@ -11255,34 +11477,64 @@ function pesoEnCampo(h, prov, s) {
   return { total: Math.max(1, f), partes };
 }
 
+// Lo que pone en el campo un bando entero. Puede ser una hueste sola o varias
+// bajo el mismo hombre: eso es un cuerpo de ejército, y es toda la ventaja de
+// tener una estructura. Dos huestes sueltas del mismo tamaño llegan una después
+// de la otra y las derrotan por separado, que es lo que le pasó a todo el que
+// no supo concentrar.
+function pesoDelLado(hs, prov, s) {
+  const lista = Array.isArray(hs) ? hs : [hs];
+  let total = 0;
+  const partes = [];
+  for (const h of lista) {
+    const q = pesoEnCampo(h, prov, s);
+    total += q.total;
+    if (lista.length > 1) partes.push({ n: h.nombre, v: Math.round(q.total) });
+    else partes.push(...q.partes);
+  }
+  return { total: Math.max(1, total), partes };
+}
 // El que estaba plantado tiene la ventaja de elegir dónde: el terreno que
 // defiende, lo defiende para él.
 function pulsoDeBatalla(a, b, prov, s) {
-  const A2 = pesoEnCampo(a, prov, s);
-  const B2 = pesoEnCampo(b, prov, s);
+  const la = Array.isArray(a) ? a : [a], lb = Array.isArray(b) ? b : [b];
+  const A2 = pesoDelLado(la, prov, s);
+  const B2 = pesoDelLado(lb, prov, s);
   const t = TERRENOS[(prov && prov.terreno) || "llanura"] || TERRENOS.llanura;
-  // Quien no venía marchando espera; el que llega, llega cansado.
-  const esperaA = !a.destino, esperaB = !b.destino;
+  // Quien no venía marchando espera; el que llega, llega cansado. Con varias,
+  // espera el bando si ninguna venía en camino.
+  const esperaA = la.every((h) => !h.destino), esperaB = lb.every((h) => !h.destino);
   const vA = A2.total * (esperaA && !esperaB ? (t.def || 1) : 1);
   const vB = B2.total * (esperaB && !esperaA ? (t.def || 1) : 1);
   const razon = vA / Math.max(1, vB);
   return { a: Math.round(vA), b: Math.round(vB), partesA: A2.partes, partesB: B2.partes,
-           terreno: t, esperaA, esperaB, prob: acotar(razon / (1 + razon), 0.04, 0.96) };
+           terreno: t, esperaA, esperaB, juntasA: la.length, juntasB: lb.length,
+           prob: acotar(razon / (1 + razon), 0.04, 0.96) };
 }
 
 function batallar(a, b, prov, s, rnd) {
   const q = pulsoDeBatalla(a, b, prov, s);
   const ganaA = rnd() < q.prob;
-  // Lo parejo que estuvo decide lo que costó. Una batalla despareja se resuelve
-  // barata para el que gana; una pareja sangra a los dos.
+  // Lo parejo que estuvo decide lo que costó, y no de la misma manera para los
+  // dos. Al que gana, una batalla pareja le sale cara y una despareja barata:
+  // eso siempre estuvo bien. Al que pierde le pasa lo contrario, y estaba al
+  // revés: los ejércitos no se destruyen en la batalla, se destruyen en la
+  // persecución, y a un ejército no se lo persigue hasta deshacerlo si el
+  // propio quedó tan maltrecho como él. Cannae y Austerlitz fueron
+  // aniquilaciones porque fueron desparejas; Borodino y Malplaquet dejaron dos
+  // ejércitos rotos en el campo porque estuvieron parejas.
   const parejo = 1 - Math.abs(q.prob - 0.5) * 2;
   const delGana = acotar(0.05 + parejo * 0.16, 0.03, 0.28);
-  const delPierde = acotar(0.18 + parejo * 0.30, 0.12, 0.62);
+  const delPierde = acotar(0.12 + parejo * 0.16 + (1 - parejo) * 0.30, 0.12, 0.62);
   // El que sabe pierde menos, y no porque lo maten menos: porque se retira en
   // orden, recoge a los suyos y no deja media hueste tirada por el camino, que
   // es donde de verdad se pierde un ejército derrotado. Acá está la mitad de
   // lo que vale un veterano.
-  const menos = (h) => 1 - 0.32 * templeDe(h);
+  const menos = (h) => {
+    const l = Array.isArray(h) ? h : [h];
+    const t = l.reduce((x, q2) => x + templeDe(q2), 0) / Math.max(1, l.length);
+    return 1 - 0.32 * t;
+  };
   return { ganaA, prob: q.prob, pulso: q,
            bajasA: (ganaA ? delGana : delPierde) * menos(a),
            bajasB: (ganaA ? delPierde : delGana) * menos(b) };
@@ -11352,7 +11604,12 @@ function correrCampana(s, dias, rnd) {
     const o = h.objetivo ? ((s.provincias || []).find((p) => p.id === h.objetivo) || h.plaza) : null;
     if (o) cercoAntes.set(o.id, cercoDeLaPlaza(teatro, o, h.de ? 0 : 1));
   }
-  const enPie0 = [...((s && s.huestes) || [])];
+  // Antes que nada, quién manda qué. Una hueste sin jefe se conduce sola y peor,
+  // y un general muerto no sigue mandando desde la tumba: esto se rehace todos
+  // los turnos y por eso se arregla solo.
+  const conMando = repartirElMando([...((s && s.huestes) || [])], s);
+  s = { ...s, huestes: conMando };
+  const enPie0 = [...conMando];
   // Quién tomó qué. Sin esta distinción, una plaza que te tomaba el enemigo
   // quedaba marcada como recién conquistada por vos: la guerra al revés.
   const porElEnemigo = [];
@@ -11360,7 +11617,7 @@ function correrCampana(s, dias, rnd) {
   const nacidas = levantarEnemigas(s, rnd);
   if (nacidas.length)
     hechos.push(`${nacidas[0].nombre} cruza la raya con ${unidadesTotales(nacidas[0].ramas)} unidades.`);
-  const enPie = [...((s && s.huestes) || []), ...nacidas];
+  const enPie = [...conMando, ...nacidas];
   correrFrente(teatro, s, enPie, dias);
   const reparto = repartoDelTeatro(teatro);
   // Y ahora se mira. Va acá, con el frente ya corrido y las huestes todavía en
@@ -11543,50 +11800,82 @@ function correrCampana(s, dias, rnd) {
   // ——— y ahora las que se cruzaron ———
   // Se mira después de mover a todas: dos huestes que terminaron el turno en el
   // mismo campo no pueden seguir de largo como si no se hubieran visto.
+  //
+  // Y no pelean de a una: las que llevan el mismo jefe y llegan al mismo campo
+  // pelean juntas. Eso es un cuerpo de ejército, y es toda la ventaja de tener
+  // una estructura —dos huestes sueltas del mismo tamaño llegan una después de
+  // la otra y las deshacen por separado, que es lo que le pasó a todo el que no
+  // supo concentrar—.
   const vivas = huestes.slice();
+  const porId = new Map(vivas.map((h, i) => [h.id, i]));
   const caidas = new Set();
+  const pelearon = new Set();
   for (let i = 0; i < vivas.length; i++) {
-    for (let j = i + 1; j < vivas.length; j++) {
-      const a = vivas[i], b = vivas[j];
-      if (!a || !b || caidas.has(a.id) || caidas.has(b.id)) continue;
-      if (!!a.de === !!b.de) continue;                     // del mismo bando no pelean
-      if (leguas({ x: a.x, y: a.y }, { x: b.x, y: b.y }) > RADIO_BATALLA) continue;
-      const campo = provinciaMasCerca(provs, (a.x + b.x) / 2, (a.y + b.y) / 2);
-      const r = batallar(a, b, campo, s, rnd);
-      const gana = r.ganaA ? a : b, pierde = r.ganaA ? b : a;
-      const pg = r.ganaA ? r.bajasA : r.bajasB, pp = r.ganaA ? r.bajasB : r.bajasA;
-      const donde = campo ? ` en ${campo.nombre}` : "";
-      hechos.push(`Batalla${donde}: ${gana.nombre} deshace a ${pierde.nombre}. `
-        + `${Math.round(pp * 100)} de cada cien del vencido quedaron en el campo, `
-        + `${Math.round(pg * 100)} del vencedor.`);
-      // Una batalla es lo que más enseña y lo que más caro cobra la lección.
-      // El que gana barato sale con un ejército mejor del que entró; el que
-      // gana caro sale con uno peor, aunque el mapa diga que ganó. Ahí está
-      // la diferencia entre una victoria y una victoria pírrica, y no en una
-      // palabra que ponga la crónica.
-      const nuevoG = { ...gana, ramas: mermar(gana.ramas, pg),
-        experiencia: sangrarTemple(aprender(gana.experiencia, 10), pg),
-        instruccion: sangrarTemple(gana.instruccion != null ? gana.instruccion : INSTRUCCION_BASE, pg),
-        moral: acotar((gana.moral || 100) + 6, 20, 100) };
-      const ramasP = mermar(pierde.ramas, pp);
-      // Del que pierde aprenden los que vuelven, que son menos.
-      const tempP = templeDe(pierde);
-      // El que pierde se retira por donde vino, si le queda alguien.
-      const quedan = unidadesTotales(ramasP);
-      const nuevoP = quedan > 0
-        ? { ...pierde, ramas: ramasP,
-            experiencia: sangrarTemple(aprender(pierde.experiencia, 7), pp),
-            instruccion: sangrarTemple(pierde.instruccion != null ? pierde.instruccion : INSTRUCCION_BASE, pp),
-            moral: acotar((pierde.moral || 100) - 26 * (1 - 0.45 * tempP), 15, 100),
-            orden: null, destino: null, objetivo: null, cola: [], largo: 0, recorrido: 0,
-            x: pierde.x + (pierde.x - gana.x) * 0.35, y: pierde.y + (pierde.y - gana.y) * 0.35 }
-        : null;
-      if (!nuevoP) {
-        caidas.add(pierde.id);
-        hechos.push(`De ${pierde.nombre} no queda nada.`);
+    const a = vivas[i];
+    if (!a || caidas.has(a.id) || pelearon.has(a.id)) continue;
+    // el de enfrente más cercano que quede al alcance
+    let j = -1, dm = Infinity;
+    for (let k = 0; k < vivas.length; k++) {
+      const b = vivas[k];
+      if (!b || caidas.has(b.id) || pelearon.has(b.id) || !!a.de === !!b.de) continue;
+      const d = leguas({ x: a.x, y: a.y }, { x: b.x, y: b.y });
+      if (d <= RADIO_BATALLA && d < dm) { dm = d; j = k; }
+    }
+    if (j < 0) continue;
+    const b = vivas[j];
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    // quiénes llegan a ese campo bajo el mismo mando
+    const cuantasJuntan = Math.max(1, organizacionDe(s).mando);
+    const junta = (h) => {
+      const l = vivas.filter((q) => q && !caidas.has(q.id) && !pelearon.has(q.id)
+        && (q.id === h.id || (mismoMando(q, h)
+            && leguas({ x: cx, y: cy }, { x: q.x, y: q.y }) <= RADIO_BATALLA)));
+      if (h.de) return l;                          // el vecino llega como llegue
+      // las más cercanas son las que alcanzan a estar ahí, y no más de las que
+      // su época sabe hacer converger
+      l.sort((p, q) => (p.id === h.id ? -1 : q.id === h.id ? 1
+        : leguas({ x: cx, y: cy }, p) - leguas({ x: cx, y: cy }, q)));
+      return l.slice(0, cuantasJuntan);
+    };
+    const ladoA = junta(a), ladoB = junta(b);
+    for (const h of [...ladoA, ...ladoB]) pelearon.add(h.id);
+    const campo = provinciaMasCerca(provs, cx, cy);
+    const r = batallar(ladoA, ladoB, campo, s, rnd);
+    const gana = r.ganaA ? ladoA : ladoB, pierde = r.ganaA ? ladoB : ladoA;
+    const pg = r.ganaA ? r.bajasA : r.bajasB, pp = r.ganaA ? r.bajasB : r.bajasA;
+    const donde = campo ? ` en ${campo.nombre}` : "";
+    const comoSeLlama = (l) => (l.length === 1 ? l[0].nombre
+      : `${l.length} huestes al mando de ${(generalDe(l[0], s) || {}).nombre || "nadie"}`);
+    hechos.push(`Batalla${donde}: ${comoSeLlama(gana)} deshace a ${comoSeLlama(pierde)}. `
+      + `${Math.round(pp * 100)} de cada cien del vencido quedaron en el campo, `
+      + `${Math.round(pg * 100)} del vencedor.`);
+    // Una batalla es lo que más enseña y lo que más caro cobra la lección.
+    // El que gana barato sale con un ejército mejor del que entró; el que
+    // gana caro sale con uno peor, aunque el mapa diga que ganó. Ahí está
+    // la diferencia entre una victoria y una victoria pírrica, y no en una
+    // palabra que ponga la crónica.
+    for (const g of gana) {
+      vivas[porId.get(g.id)] = { ...g, ramas: mermar(g.ramas, pg),
+        experiencia: sangrarTemple(aprender(g.experiencia, 10), pg),
+        instruccion: sangrarTemple(g.instruccion != null ? g.instruccion : INSTRUCCION_BASE, pg),
+        moral: acotar((g.moral || 100) + 6, 20, 100) };
+    }
+    // El que pierde se retira por donde vino, si le queda alguien; y se retira
+    // el bando entero, no la unidad que chocó primero.
+    const hacia = { x: gana[0].x, y: gana[0].y };
+    for (const q of pierde) {
+      const ramasP = mermar(q.ramas, pp);
+      if (unidadesTotales(ramasP) <= 0) {
+        caidas.add(q.id);
+        hechos.push(`De ${q.nombre} no queda nada.`);
+        continue;
       }
-      vivas[r.ganaA ? i : j] = nuevoG;
-      vivas[r.ganaA ? j : i] = nuevoP || pierde;
+      vivas[porId.get(q.id)] = { ...q, ramas: ramasP,
+        experiencia: sangrarTemple(aprender(q.experiencia, 7), pp),
+        instruccion: sangrarTemple(q.instruccion != null ? q.instruccion : INSTRUCCION_BASE, pp),
+        moral: acotar((q.moral || 100) - 26 * (1 - 0.45 * templeDe(q)), 15, 100),
+        orden: null, destino: null, objetivo: null, cola: [], largo: 0, recorrido: 0,
+        x: q.x + (q.x - hacia.x) * 0.35, y: q.y + (q.y - hacia.y) * 0.35 };
     }
   }
   const finales = vivas.filter((h) => h && !caidas.has(h.id) && unidadesTotales(h.ramas) > 0);
@@ -18093,9 +18382,11 @@ const ACCIONES = [
     rotulo: (p, s, x) => {
       const luego = !!(x.hueste && x.hueste.orden);
       const d = x.hueste && !luego
-        ? diasDeMarcha({ ...x.hueste, destino: { x: p.x, y: p.y } }, s.provincias) : 0;
-      if (luego) return "…y después marchar hasta aquí";
-      return Number.isFinite(d) ? `marchar hasta aquí · ${d} días` : "marchar hasta aquí";
+        ? diasDeMarcha({ ...x.hueste, destino: { x: p.x, y: p.y } }, s.provincias, s) : 0;
+      const n = x.hueste ? elCuerpoDe(s, x.hueste.id).size : 1;
+      const cuantas = n > 1 ? ` · ${n} cuerpos` : "";
+      if (luego) return "…y después marchar hasta aquí" + cuantas;
+      return (Number.isFinite(d) ? `marchar hasta aquí · ${d} días` : "marchar hasta aquí") + cuantas;
     },
     hace: (p) => ({ tipo: "campana", orden: "marchar", id: p.id, idx: p.idx, x: p.x, y: p.y,
       nombre: p.comarca || p.nombre }) },
@@ -20341,8 +20632,14 @@ export default function PaxMundi() {
              : pedido.x != null ? { id: pedido.id, nombre: pedido.nombre, x: pedido.x, y: pedido.y,
                                     ajena: true, terreno: "llanura", poblacion: 25000 } : null);
         if (!p) return st;
+        // La orden no va a la hueste: va al cuerpo. Las que llevan el mismo
+        // jefe y están en el mismo sitio marchan juntas, que es lo que hace un
+        // cuerpo de ejército y lo que evita tener que dar tres veces la misma
+        // orden. Para mandar una sola a un lado se le cambia el jefe antes: los
+        // botones de mando están en su ficha.
+        const alMando = elCuerpoDe(st, huesteSel);
         return { ...st, huestes: (st.huestes || []).map((h) => {
-          if (h.id !== huesteSel) return h;
+          if (!alMando.has(h.id)) return h;
           // Con algo entre manos, la orden nueva va al final del plan.
           if (h.orden) return { ...h, cola: [...(h.cola || []),
             { orden: pedido.orden, id: pedido.id, x: p.x, y: p.y,
@@ -22932,15 +23229,26 @@ export default function PaxMundi() {
                             setState((st) => {
                               const lib = ejercitoLibre(st);
                               if (unidadesTotales(lib) <= 0) return st;
-                              const id = "hu" + ((st.huestes || []).length + 1) + "-" + st.turno;
-                              return { ...st, huestes: [...(st.huestes || []),
-                                huesteNueva(id, lib, capital.x, capital.y, `hueste de ${capital.nombre}`,
-                                  // sale con lo que el reino le enseñó y sin
-                                  // nada de lo que solo se aprende afuera
-                                  { instruccion: st.instruccion ?? INSTRUCCION_BASE, experiencia: 0 })],
+                              // No sale un montón: salen las unidades que este
+                              // siglo sabe manejar. Si lo libre no entra en una,
+                              // salen varias y se reparten los jefes.
+                              const org = organizacionDe(st);
+                              const trozos = repartirEnHuestes(lib, org);
+                              const nac = trozos.map((r, k) => huesteNueva(
+                                "hu" + ((st.huestes || []).length + 1 + k) + "-" + st.turno,
+                                r, capital.x, capital.y,
+                                trozos.length > 1 ? `${k + 1}.ª ${org.n} de ${capital.nombre}`
+                                                  : `hueste de ${capital.nombre}`,
+                                // sale con lo que el reino le enseñó y sin
+                                // nada de lo que solo se aprende afuera
+                                { instruccion: st.instruccion ?? INSTRUCCION_BASE, experiencia: 0 }));
+                              return { ...st,
+                                huestes: repartirElMando([...(st.huestes || []), ...nac], st),
                                 cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
-                                  texto: `Se ponen en pie de guerra ${unidadesTotales(lib)} unidades en ${capital.nombre}: `
-                                    + `${gradoDeTemple(templeDe({ instruccion: st.instruccion ?? INSTRUCCION_BASE, experiencia: 0 })).n}, `
+                                  texto: `Se ponen en pie de guerra ${unidadesTotales(lib)} unidades en ${capital.nombre}`
+                                    + (nac.length > 1 ? `, repartidas en ${nac.length} ${nac.length === 2 ? "cuerpos" : "cuerpos"}`
+                                        + ` porque ${org.n} no aguanta más de ${org.bulto} unidades` : "")
+                                    + `: ${gradoDeTemple(templeDe({ instruccion: st.instruccion ?? INSTRUCCION_BASE, experiencia: 0 })).n}, `
                                     + `${planDeAdiestramiento(st).n}.` }] };
                             });
                             // Se despliega y se va a verlo: desplegar sin ver
@@ -22980,7 +23288,7 @@ export default function PaxMundi() {
                       {hs.filter((h) => !h.de).map((h) => {
                         const donde = provinciaMasCerca(s.provincias, h.x, h.y);
                         const o = ORDENES[h.orden] || null;
-                        const dias = h.destino ? diasDeMarcha(h, s.provincias) : 0;
+                        const dias = h.destino ? diasDeMarcha(h, s.provincias, s) : 0;
                         const sel = huesteSel === h.id;
                         const largo = h.largo || 0;
                         const hecho = largo > 0 ? acotar((h.recorrido || 0) / largo, 0, 1) : 0;
@@ -22995,6 +23303,52 @@ export default function PaxMundi() {
                                 {unidadesTotales(h.ramas)} ud · moral {Math.round(h.moral || 100)}
                               </span>
                             </div>
+                            {/* Quién la manda y cuánto le sobra de bulto. Las dos
+                                cosas se deciden acá y no en una pantalla aparte:
+                                el que mira la lista de sus huestes es el que
+                                tiene que poder repartir el mando. */}
+                            {(() => {
+                              const g = generalDe(h, s);
+                              const org = organizacionDe(s);
+                              const des = desbordeDe(h, s);
+                              const bajo = g ? huestesDe(g, s).length : 0;
+                              const estirado = g && bajo > org.mando;
+                              const libres = (s.generales || []);
+                              return (
+                                <div style={{ fontSize: 11.5, marginTop: 3, lineHeight: 1.5,
+                                  color: g ? (estirado ? C.gold : C.muted) : C.red }}>
+                                  {g ? `✦ al mando de ${g.nombre}, pericia ${g.pericia}`
+                                     : "✦ sin jefe: se conduce sola, y no gana lo que un buen jefe le daría"}
+                                  {estirado && ` — con ${bajo} huestes encima, más de las ${org.mando} `
+                                    + `que ${org.n} le deja llevar`}
+                                  {des > 0 && (
+                                    <div style={{ color: C.red }}>
+                                      ▲ {unidadesTotales(h.ramas)} unidades para {org.n}, que aguanta {org.bulto}:
+                                      {" "}marcha al {Math.round(estorboEnLaMarcha(des) * 100)}%,
+                                      {" "}come {Math.round(estorboEnElPan(des) * 100)}% por cabeza
+                                      {" "}y pelea al {Math.round(estorboEnElCampo(des) * 100)}%.
+                                    </div>
+                                  )}
+                                  {libres.length > 1 && (
+                                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+                                      {libres.map((q) => (
+                                        <button key={q.nombre}
+                                          onClick={() => setState((st) => ({ ...st,
+                                            huestes: (st.huestes || []).map((z) => (z.id === h.id
+                                              ? { ...z, general: (q.id || q.nombre) } : z)) }))}
+                                          style={{ fontSize: 9.5, fontFamily: mono, padding: "1px 5px",
+                                            borderRadius: 8, cursor: "pointer",
+                                            background: (q.id || q.nombre) === h.general ? `${C.gold}22` : "transparent",
+                                            border: `1px solid ${(q.id || q.nombre) === h.general ? C.gold : C.line}`,
+                                            color: (q.id || q.nombre) === h.general ? C.gold : C.muted }}>
+                                          {q.nombre}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {/* El temple. Va con nombre y no con número porque
                                 lo que el que manda necesita saber es a quién
                                 puede mandar a lo difícil, y eso se dice con una
@@ -23058,6 +23412,28 @@ export default function PaxMundi() {
                                   color: C.gold, fontFamily: mono, fontSize: 10.5 }}>
                                 ◎ verla en el mapa
                               </button>
+                              {unidadesTotales(h.ramas) > 3 && (
+                                <button onClick={() => setState((st) => {
+                                    const z = (st.huestes || []).find((q) => q.id === h.id);
+                                    if (!z) return st;
+                                    const [ra, rb] = partirRamas(z.ramas);
+                                    if (unidadesTotales(rb) <= 0) return st;
+                                    const hija = { ...z, id: z.id + "b" + st.turno, ramas: rb,
+                                      nombre: z.nombre.replace(/^(\d+)\.ª /, "") + " (segunda)",
+                                      orden: null, destino: null, objetivo: null, plaza: null,
+                                      cola: [], largo: 0, recorrido: 0, cerco: 0, aguante: 0,
+                                      x: z.x + 0.12, y: z.y + 0.12 };
+                                    return { ...st, huestes: repartirElMando(
+                                      (st.huestes || []).flatMap((q) => (q.id === h.id
+                                        ? [{ ...q, ramas: ra }, hija] : [q])), st) };
+                                  })}
+                                  title="dos mitades: se mueven aparte y, con el mismo jefe, pelean juntas"
+                                  style={{ padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+                                    background: "transparent", border: `1px solid ${C.line}`,
+                                    color: C.muted, fontFamily: mono, fontSize: 10.5 }}>
+                                  ⑂ partirla en dos
+                                </button>
+                              )}
                               {h.orden && (
                                 <button onClick={() => setState((st) => ({ ...st,
                                     huestes: (st.huestes || []).map((q) => (q.id === h.id
@@ -23135,6 +23511,71 @@ export default function PaxMundi() {
                     )}
                   </div>
                 )}
+
+                {/* ── cómo está organizado ──
+                    Lo que cambió en dos mil años no es cuántos hombres podía
+                    levantar un país sino cuántos podía mover a la vez. Va antes
+                    del adiestramiento porque es lo que decide en cuántos
+                    pedazos sale el ejército al mapa. */}
+                {(() => {
+                  const org = organizacionDe(s);
+                  const sig = ORGANIZACION[ORGANIZACION.indexOf(org) + 1];
+                  const hs3 = (s.huestes || []).filter((h) => !h.de);
+                  const gordas = hs3.filter((h) => desbordeDe(h, s) > 0);
+                  const gen3 = s.generales || [];
+                  const estirados = gen3.filter((g) => huestesDe(g, s).length > org.mando);
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⛊ CÓMO ESTÁ ORGANIZADO
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: C.gold }}>{org.n}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        {capitalizar(org.dice)}.
+                      </div>
+                      {[["Lo que aguanta una hueste", `${org.bulto} unidades`, C.ink],
+                        ["Huestes que lleva un general", `${org.mando}`, C.ink],
+                        ["Generales con bastón", `${gen3.length} de ${cupoGenerales(s.ciencia)}`,
+                          gen3.length ? C.ink : C.red]].map(([a2, b2, col]) => (
+                        <div key={a2} style={{ display: "flex", justifyContent: "space-between",
+                          fontSize: 12, color: C.muted, marginTop: 3 }}>
+                          <span>{a2}</span><span style={{ color: col, fontFamily: mono }}>{b2}</span>
+                        </div>
+                      ))}
+                      {gordas.length > 0 && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          ▲ {gordas.length === 1 ? "Una hueste es" : `${gordas.length} huestes son`} más
+                          {" "}grande{gordas.length > 1 ? "s" : ""} de lo que este siglo sabe llevar: marcha
+                          {gordas.length > 1 ? "n" : ""} más lento, come{gordas.length > 1 ? "n" : ""} más por
+                          cabeza y no llega{gordas.length > 1 ? "n" : ""} a poner todo lo que traen en el campo.
+                          Partirlas es gratis.
+                        </div>
+                      )}
+                      {estirados.length > 0 && (
+                        <div style={{ fontSize: 11, color: C.gold, marginTop: 6, lineHeight: 1.45 }}>
+                          ▲ {estirados.map((g) => g.nombre).join(" y ")} lleva{estirados.length > 1 ? "n" : ""}
+                          {" "}más huestes de las que {org.n} deja: firma órdenes para gente a la que ya no
+                          alcanza a mirar.
+                        </div>
+                      )}
+                      {hs3.length > 1 && (
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
+                          Las huestes con el mismo jefe que llegan al mismo campo pelean juntas. Las de
+                          jefes distintos llegan una después de la otra, y a esas las deshacen por separado.
+                        </div>
+                      )}
+                      {sig && (
+                        <div style={{ fontSize: 10.5, color: C.violet, marginTop: 6, fontFamily: mono }}>
+                          después viene {sig.n} — con «{MED_IDX[sig.req]?.nombre || sig.req}»:
+                          {" "}{sig.bulto} unidades por hueste y {sig.mando} huestes por general
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── cómo se adiestra ──
                     La otra mitad de lo que vale un ejército, y la que se paga

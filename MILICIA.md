@@ -16,7 +16,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 5 | Ejército según la época | Cada rama se abre con su saber: sin artillería no hay cañones. Y el muro que enfrentan cambia con el siglo: cerca, cantería, baluarte. |
 | 6 | Reclutamiento | Leva señorial, mercenarios, ejército permanente, conscripción y leva en masa, cada uno con su época, su cuota, su precio en oro y lo que le quita al campo. |
 | 10 | Moral | Sube al ganar, baja al perder, al sitiar y al ser deshecho; pesa en la fuerza de la hueste. |
-| 11 | Mando | Generales con nombre, con su vara, que mueren y se reemplazan. |
+| 11 | Mando | Generales con nombre, con su vara, que mueren y se reemplazan; cada uno con las huestes que lleva encima. |
 | 18 | Terreno | Once terrenos con su defensa, su comercio y lo que cuesta atravesarlos; el mapa los usa para marchar, para ocupar y para pelear. |
 | 19 | Clima | Lluvia, sequía y bioma por comarca, y desastres que dejan huella años. |
 | 26 | Batallas | Se resuelven en el mapa estratégico. Sin modo táctico y sin hacer falta. |
@@ -26,6 +26,8 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 13-14 | Logística | El ejército come pan y gasta pertrechos según su rama; lo que le llega sale de las comarcas, viaja por los caminos y se apaga con la distancia. Una campaña honda se deshace sin que nadie la ataque. |
 | 8 | Entrenamiento | Cuatro planes de adiestramiento, con su precio al año, su techo y quién hace falta para darlos. Sube despacio, baja si se deja de pagar y se diluye con cada leva. |
 | 9 | Experiencia | La veteranía se gana peleando, sitiando y marchando, y se pierde cuando muere el cuadro que sabía. Una hueste veterana pesa más, sangra menos, no se le rompe la moral y aguanta hambre que a una leva la disuelve. |
+| 2-3 | Escala y estructura | Seis escalones de organización, cada uno con su saber: cuántas unidades aguanta una hueste y cuántas huestes lleva un general. Poner en pie de guerra reparte, y se puede partir a mano. |
+| 12 | Cadena de mando | Cada hueste tiene su general, repartidos solos. Uno estirado deja de servir; las huestes con el mismo jefe pelean juntas y las sueltas llegan de a una. |
 | 22-23 | Niebla e inteligencia | Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
 
 ## Lo que está a medias
@@ -40,8 +42,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 ## Lo que no existe
 
-Niveles de escala y cadena de mando (§2-3, §12), reparaciones (§17), guerra
-aérea (§20), guerra naval como sistema (§21), operaciones con objetivos
+Reparaciones (§17), guerra aérea (§20), guerra naval como sistema (§21), operaciones con objetivos
 delegados (§24-25), modo táctico (§27), industria militar y su cadena (§32-33),
 armas estratégicas y nucleares (§36-37), economía de guerra (§38).
 
@@ -70,9 +71,12 @@ Lo que queda de §23 para después: espionaje que devuelva partes sin mandar
 tropa —la acción de montar una red de espías existe, pero todavía no levanta
 niebla—, y desinformación.
 
-**4 · La estructura.** Divisiones y cuerpos en vez de un montón de unidades
-sueltas, con la organización cambiando por época. Recién acá, cuando hay algo
-que organizar: abastecer, entrenar y enterarse.
+**4 · La estructura.** ✔ Hecho. Divisiones y cuerpos en vez de un montón de
+unidades sueltas, con la organización cambiando por época. Recién acá, cuando
+hay algo que organizar: abastecer, entrenar y enterarse. Lo que la sostiene es
+un solo número por época —cuántas formaciones puede un hombre llevar al mismo
+campo el mismo día— del que salen las tres cosas: partir el ejército, repartir
+el mando y concentrar.
 
 **5 · Industria militar.** La cadena de hierro a acero a cañón. Se apoya en el
 abasto: es lo que llena los depósitos.
