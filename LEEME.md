@@ -622,6 +622,70 @@ prisiones de los dos lados —fue la cláusula que tuvo casi todo tratado de la
 historia y la que se cumplía primero, porque a esa altura los presos son una
 carga para los dos—.
 
+## El teatro que no toma tierra
+
+La tentación con el aire es tratarlo como una rama más y dejar que gane
+batallas. No es lo que pasó. Ninguna guerra la ganó una fuerza aérea sola, y
+todos los que lo prometieron se equivocaron. **El aire no toma un palmo de
+tierra**: la toma el que camina encima. Lo que hace lo hace a través de cosas
+que el juego ya tenía montadas — lo que se ve, lo que el ejército come, lo
+rápido que se mueve y las ganas que le quedan al otro.
+
+La **aviación** es una sexta rama, la más cara de mantener con diferencia, y la
+única que **no marcha con nadie**: no se reparte en huestes, se queda en el
+reino y opera sobre el teatro entero. Un reino que solo tenga aviones no pone
+nada en el mapa.
+
+**El cuello de botella son las tripulaciones, no los aparatos.** Alemania y
+Japón terminaron la guerra con más células que gente que supiera volarlas. Una
+tripulación tarda dos años en hacerse y se pierde en una tarde, y el techo lo
+pone lo que el reino sabe *más* si tiene la costumbre de adiestrar a su
+infantería: las dos cosas salen del mismo estado mayor. Los mismos veinte
+aviones valen tres veces más con tripulaciones hechas que con reclutas.
+
+**Primero hay que ganar el cielo, y se le gana a su aviación, no al suelo.**
+Hasta que eso está resuelto, lo demás no vuela: mandar a cortar puentes sin
+tener el cielo no corta absolutamente nada. Y ganarlo no es alquilar una
+ventaja que se paga todos los turnos — es **destruirle la fuerza aérea al
+otro**, y lo roto queda roto. Cinco años de cazar y nada más no dejan nada de
+su aviación, y recién entonces se puede pasar a otra cosa sin perder el cielo.
+Es lo que pasó en 1944: los cazas de escolta deshicieron a la caza alemana
+entre enero y abril, y recién después la Novena pudo dedicarse a los puentes.
+
+Hay cuatro cosas que puede hacer, y son cuatro y no todas:
+
+- **Ganar el cielo.** No enseña ningún resultado. Hace posibles a las otras tres.
+- **Cortarle el abasto.** Lo que de verdad le hizo el aire a los ejércitos: no
+  destruirlos, dejarlos sin nada. Pega en la pérdida por palmo, así que el que
+  está pegado a su base casi no la siente y el que está a trescientos
+  kilómetros dentro de una bolsa se queda sin comer.
+- **Apoyar al ejército.** Necesita **radio** — alguien tiene que decirle al
+  piloto dónde tirar, y por eso esto es de 1940 y no de 1917. Y rinde poco:
+  los cazabombarderos reclamaron un orden de magnitud más blindados de los que
+  destruyeron.
+- **Bombardear su país.** Necesita un bombardero de gran radio, y hace lo
+  contrario de lo que prometieron: **les baja poco la producción y les sube las
+  ganas de pelear**. Eso no es una opinión, es lo que midió el Strategic
+  Bombing Survey y lo que ya había enseñado el Blitz. Un país bombardeado no se
+  rinde, se enoja. Además es la misión que más aviones cuesta.
+
+Lo que sí hace siempre, gane quien gane las discusiones: **ver mucho más
+lejos** y **no dejar moverse de día**. Las divisiones que fueron a Normandía
+tardaron semanas en un viaje de días, y casi ninguna vio una bomba.
+
+Contra todo eso está la **antiaérea**, que no es aviación: son cañones. Sale de
+la artillería que el reino ya tiene, y vale mucho más con radar que sin él.
+Treinta cañones sin un solo avión levantan un cielo perdido del todo a un
+cielo caro de cruzar, y le encarecen el trabajo al que viene a cortar
+puentes. Lo que no hacen es ganar el cielo: un cañón no persigue a un avión
+hasta su campo.
+
+Y una fuerza aérea **se gasta sola**. Hasta en paz se pierden aparatos —
+accidentes, fatiga, tiempo—, y el que va perdiendo el cielo se desangra al
+triple y pierde tripulaciones más rápido de lo que la escuela las hace. Ahí
+está la espiral: se muere el que sabe, entra el que no sabe, y el que no sabe
+se muere antes.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

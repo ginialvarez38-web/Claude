@@ -12,7 +12,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 | § | Qué | Cómo está |
 |---|---|---|
-| 4 | Tipos de tropa | Cinco ramas —infantería, caballería, artillería, ingenieros, marina— con coste, mantenimiento, brazos y peso propios. |
+| 4 | Tipos de tropa | Seis ramas —infantería, caballería, artillería, ingenieros, marina, aviación— con coste, mantenimiento, brazos y peso propios. La aviación no marcha con ninguna columna. |
 | 5 | Ejército según la época | Cada rama se abre con su saber: sin artillería no hay cañones. Y el muro que enfrentan cambia con el siglo: cerca, cantería, baluarte. |
 | 6 | Reclutamiento | Leva señorial, mercenarios, ejército permanente, conscripción y leva en masa, cada uno con su época, su cuota, su precio en oro y lo que le quita al campo. |
 | 10 | Moral | Sube al ganar, baja al perder, al sitiar y al ser deshecho; pesa en la fuerza de la hueste. |
@@ -33,6 +33,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 12 | Cadena de mando | Cada hueste tiene su general, repartidos solos. Uno estirado deja de servir; las huestes con el mismo jefe pelean juntas y las sueltas llegan de a una. |
 | 22-23 | Niebla e inteligencia | Redes de espías que se montan, se pagan, mejoran con los años y se descubren: dan partes de todo el país del otro donde no hay tropa, con poco detalle. Y desinformación: señuelos que mueven su ejército a un campo vacío y velos que esconden el propio, pagados quemando la red y sin manera de saber desde casa si cuajaron. Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
 | 30 | Prisioneros | Una parte de las bajas del vencido se rinde en vez de morir: más cuanto más despareja fue la derrota, menos cuanto más veterana la tropa, y casi todos en una bolsa. Comen de la misma despensa que el ejército. Cinco destinos —rescate, palabra, trabajo, canje desde 1650, cuchillo— y una fama que decide cuánta gente se te entrega y cuánto aguanta el otro antes de firmar. |
+| 20 | Guerra aérea | Una sexta rama que no marcha con nadie: opera sobre el teatro entero. El cuello de botella son las tripulaciones, no los aparatos. Hay que ganarle el cielo a su aviación antes de poder hacer nada más, y ganarlo es destruírsela: lo roto queda roto. Cuatro misiones —cazar, cortar el abasto, apoyar al ejército con radio, bombardear su país— y la antiaérea, que sale de la artillería y del radar. Bombardear ciudades les baja poco la producción y les SUBE las ganas de pelear. |
 
 ## Lo que está a medias
 
@@ -43,9 +44,9 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 ## Lo que no existe
 
-Reparaciones (§17), guerra aérea (§20), guerra naval como sistema (§21),
-operaciones con objetivos delegados (§24-25), modo táctico (§27), armas
-estratégicas y nucleares (§36-37), economía de guerra (§38).
+Reparaciones (§17), guerra naval como sistema (§21), operaciones con objetivos
+delegados (§24-25), modo táctico (§27), armas estratégicas y nucleares
+(§36-37), economía de guerra (§38).
 
 ## El orden
 
@@ -87,10 +88,10 @@ limita lo que se puede firmar, y salirse de eso tiene un precio puesto de
 antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
-el espionaje con su desinformación, la doctrina y los prisioneros; lo que queda
-son piezas sueltas que ya no se apoyan unas en otras: aire, mar, operaciones
-delegadas, economía de guerra y armas estratégicas, en ese orden por lo que
-cuestan.
+el espionaje con su desinformación, la doctrina, los prisioneros y el aire; lo
+que queda son piezas sueltas que ya no se apoyan unas en otras: mar,
+operaciones delegadas, economía de guerra y armas estratégicas, en ese orden
+por lo que cuestan.
 
 ## Lo que no se va a hacer
 

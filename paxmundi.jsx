@@ -9556,6 +9556,19 @@ const RAMAS_EJERCITO = [
     mej: { "ingenierias.naval.timon_popa": .4, "ingenierias.naval.trazado_casco": .5,
            "ingenierias.naval.casco_hierro": .7, "ingenierias.naval.buque_vapor": .9,
            "tierra_espacio.navegacion.travesia_oceanica_larga": .5, "ingenierias.militar.blindaje": .6 } },
+  // La aviación no marcha con nadie: `vuela` la deja fuera del reparto en
+  // huestes, porque un grupo aéreo no camina detrás de una columna —opera
+  // sobre el teatro entero desde sus campos—. Y es lo más caro que compra un
+  // estado por hombre en filas: casi nada de brazos, casi todo mantenimiento,
+  // y la mayoría de esos brazos son mecánicos y no pilotos, que es una de las
+  // cosas más contraintuitivas y más ciertas de una fuerza aérea.
+  { id: "aviacion", n: "Aviación", ico: "✈", col: "#68C5D8", vuela: true,
+    req: "ingenierias.aeronautica.aeroplano",
+    costo: 95, mant: 26, brazos: 5, peso: 0.6, rol: "ve, corta el abasto y no toma ni un palmo",
+    mej: { "ingenierias.aeronautica.perfil_alar": .5, "ingenierias.aeronautica.tunel_viento": .4,
+           "ingenierias.aeronautica.ensayo_vuelo": .5, "ingenierias.telecom.radio": .6,
+           "ingenierias.militar.radar": .6, "ingenierias.aeronautica.turborreactor": .9,
+           "ingenierias.aeronautica.cabina_presurizada": .5 } },
 ];
 // Lo que rinde una unidad de cada rama con el saber que tenés hoy.
 // Calidad de una rama: qué le suma cada saber que ya tenés.
@@ -9647,8 +9660,15 @@ function velocidadHueste(h, prov, s) {
   // Y el bulto. Una columna más grande de lo que su época sabe organizar tarda
   // un día en pasar por donde la cabeza pasó en una hora: es la razón por la
   // que se inventó dividir un ejército, mucho antes que ninguna otra.
+  // Y bajo qué cielo se marcha. Es el efecto más constante que tuvo la
+  // aviación sobre un ejército y el que menos se cuenta: no lo destruye, le
+  // prohíbe moverse de día. Las divisiones alemanas que fueron a Normandía
+  // tardaron semanas en un viaje de días, y no porque las bombardearan
+  // —muchas no vieron una bomba— sino porque solo podían andar de noche.
+  const aire = (h && h.de ? -1 : 1) * cielo(s);
   return base * (0.75 + via.soc * 0.75) * (t.com || 1)
-    * estorboEnLaMarcha(desbordeDe(h, s)) * dctr(s, "marcha");
+    * estorboEnLaMarcha(desbordeDe(h, s)) * dctr(s, "marcha")
+    * acotar(1 + aire * 0.22, 0.72, 1.10);
 }
 
 // ═══ EL TEMPLE: LO QUE LE ENSEÑARON Y LO QUE VIVIÓ ════════════════════════
@@ -10044,6 +10064,326 @@ function resolverPresos(s, id) {
   };
 }
 
+// ═══ EL AIRE: EL TEATRO QUE NO TOMA TIERRA ════════════════════════════════
+//
+// La tentación con el aire es tratarlo como una rama más y dejar que gane
+// batallas. No es lo que pasó. Ninguna guerra la ganó una fuerza aérea sola, y
+// todos los que lo prometieron —Douhet, Trenchard, Harris— se equivocaron. El
+// aire no toma un palmo de tierra: la tierra la toma el que camina encima.
+//
+// Lo que el aire sí hace, y hace muchísimo, es a través de sistemas que este
+// juego ya tiene montados:
+//
+//   · VER. Es lo primero que hizo y lo que nunca dejó de hacer bien, desde el
+//     globo de Fleurus en 1794. Eso ya está en la vista.
+//   · CORTAR EL ABASTO. Lo que de verdad le hizo el aire a los ejércitos: no
+//     matarlos, sino dejar sin comer al que los alimenta. El plan de
+//     transportes de Normandía valió más que todos los cazatanques juntos.
+//   · APOYAR AL QUE PELEA. Real, y mucho menos de lo que dice la leyenda: los
+//     Sturmovik y los Typhoon destruyeron un orden de magnitud menos blindados
+//     de los que reclamaron. Lo que sí hicieron fue impedir moverse de día.
+//   · BOMBARDEAR EL PAÍS DEL OTRO. Y acá está la pieza incómoda: no funcionó
+//     como se prometió. La producción alemana SUBIÓ hasta 1944 bajo las
+//     bombas, y la moral no se quebró: se endureció, igual que la inglesa bajo
+//     el Blitz. Lo que el bombardeo sí consiguió fue obligar al otro a
+//     desviar un millón de hombres a la defensa antiaérea, y matar a su
+//     aviación en el intento.
+//
+// Y antes de todo eso hay una condición que no se puede saltear: hay que ganar
+// el cielo, y el cielo se le gana a la aviación del otro, no al suelo. Hasta
+// que eso está resuelto, lo demás no vuela.
+//
+// La última verdad, y la que ningún juego modela: el cuello de botella no son
+// los aviones sino los pilotos. Alemania y Japón terminaron la guerra con más
+// células que tripulaciones. Un piloto se hace en dos años y se pierde en una
+// tarde, y esa es la espiral que mata a una fuerza aérea.
+const AIRE_DESDE = 1914;          // el año en que el cielo pasa a ser un teatro
+// Lo que hace buena a una fuerza aérea. Es la lista de lo que de verdad separó
+// a un aeroplano de 1915 de uno de 1945, y no el número de aparatos.
+const AVION_SABER = {
+  "ingenierias.aeronautica.perfil_alar": 0.30,
+  "ingenierias.aeronautica.tunel_viento": 0.25,
+  "ingenierias.aeronautica.ensayo_vuelo": 0.30,
+  "ingenierias.aeronautica.giroscopo": 0.15,
+  "ingenierias.aeronautica.piloto_automatico": 0.20,
+  "ingenierias.telecom.radio": 0.35,
+  "ingenierias.militar.radar": 0.30,
+  "ingenierias.aeronautica.cabina_presurizada": 0.30,
+  "ingenierias.aeronautica.turborreactor": 0.60,
+  "quimica.metalurgia.acero_industrial": 0.15,
+  "ingenierias.produccion.fabrica": 0.15,
+};
+// Y lo que hace buenos a los pilotos, que es otra cosa y más lenta. Un país
+// puede comprar aviones en un año y no puede comprar tripulaciones.
+const PILOTO_SABER = {
+  "ingenierias.aeronautica.ensayo_vuelo": 0.30,
+  "ingenierias.aeronautica.piloto_automatico": 0.20,
+  "ingenierias.telecom.radio": 0.25,
+  "organizacion.militar_org.estado_mayor": 0.20,
+  "ingenierias.aeronautica.cabina_presurizada": 0.15,
+};
+const PILOTOS_BASE = 22;          // lo que sabe volar un país que recién empieza
+const PILOTOS_ANOS = 2;           // lo que tarda en hacerse una tripulación
+
+function sumaSaberAire(tabla, s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let m = 0;
+  for (const [id, v] of Object.entries(tabla)) if (sab.has(id)) m += v;
+  return m;
+}
+// Si el reino sabe volar. Sin esto todo lo de acá abajo es cero y el sistema
+// entero es invisible, que es como tiene que ser en 1200.
+function hayAviacion(s) {
+  return new Set(((s && s.ciencia) || {}).sabidos || []).has("ingenierias.aeronautica.aeroplano");
+}
+// Hasta dónde puede llevar a sus pilotos este reino. Una escuela de vuelo no
+// se improvisa: hace falta saber y hace falta un ejército que ya tenga la
+// costumbre de enseñar. El que no adiestra a su infantería tampoco va a
+// adiestrar a sus aviadores, y eso no es una regla arbitraria: las dos cosas
+// salen del mismo sitio, que es un estado mayor que cree en la instrucción.
+function techoDePilotos(s) {
+  if (!hayAviacion(s)) return 0;
+  const plan = planDeAdiestramiento(s);
+  return acotar(PILOTOS_BASE + sumaSaberAire(PILOTO_SABER, s) * 42 + plan.techo * 0.28, 0, 100);
+}
+// Lo que se adelanta en un año. Es lento a propósito: dos años de escuela para
+// una tripulación decente, y por eso una fuerza aérea que se desangra no se
+// recupera dentro de la misma guerra.
+function ritmoDePilotos(s) {
+  return techoDePilotos(s) / (PILOTOS_ANOS * Math.max(1, 1 + 0.6 * ((s && s.guerra) ? 1 : 0)));
+}
+function pilotosTrasElTiempo(s, dias) {
+  if (!hayAviacion(s)) return 0;
+  const techo = techoDePilotos(s);
+  const v = s && s.pilotos != null ? s.pilotos : Math.min(PILOTOS_BASE, techo);
+  const anos = Math.max(0, dias || 0) / 365;
+  return acotar(v < techo ? Math.min(techo, v + ritmoDePilotos(s) * anos)
+                          : Math.max(techo, v - 9 * anos), 0, 100);
+}
+// Y lo que valen las tripulaciones que hay hoy, en la misma vara que el temple
+// de la tropa. Un piloto malo en un buen avión es un avión perdido.
+function templeDePilotos(s) {
+  if (!hayAviacion(s)) return 0;
+  return acotar((s && s.pilotos != null ? s.pilotos : PILOTOS_BASE) / 100, 0, 1);
+}
+
+// Lo que el reino puede poner en el aire. Los aviones cuentan, la calidad
+// cuenta más, y las tripulaciones cuentan sobre todas las cosas: es el único
+// sitio del juego donde la gente pesa más que el material, y es así porque en
+// el aire fue así.
+function aireDelReino(s) {
+  if (!hayAviacion(s)) return { unidades: 0, calidad: 0, pilotos: 0, fuerza: 0 };
+  const unidades = ((s && s.ejercito) || {}).aviacion || 0;
+  const calidad = 1 + sumaSaberAire(AVION_SABER, s);
+  const pilotos = templeDePilotos(s);
+  // Un avión sin tripulación no es media fuerza aérea: es chatarra cara. Por
+  // eso las tripulaciones multiplican fuerte y no suman.
+  return { unidades, calidad, pilotos,
+           fuerza: unidades * calidad * (0.25 + 1.15 * pilotos) };
+}
+// Y lo que pone el otro. Del vecino no se lleva inventario —nunca se llevó—:
+// lo que hay es lo que un país de su tamaño tenía en ese año. Antes de 1914
+// no tiene nada, y para los años cuarenta un estado mediano ya dedica al aire
+// una parte enorme de todo lo que gasta en la guerra.
+function eraDelAire(anio) { return acotar(((anio || 0) - AIRE_DESDE) / 32, 0, 1); }
+function aireDelVecino(s) {
+  const g = s && s.guerra;
+  const era = eraDelAire((s && s.anio) || 0);
+  if (!g || era <= 0) return { fuerza: 0, era };
+  const v = ((s && s.vecinos) || []).find((q) => q.nombre === g.vecino) || { poder: 12 };
+  // La parte de su poder que está en el aire crece con el siglo, y su calidad
+  // también: no se pelea contra un vecino congelado en 1914. La proporción
+  // está medida contra lo que un reino puede poner: veinte aparatos buenos con
+  // tripulaciones hechas tienen que dar un cielo disputado contra un vecino
+  // corriente, y cuarenta tienen que ganarlo.
+  //
+  // Y lo que ya se le rompió, que es la pieza sin la cual todo esto no
+  // funciona. Ganar el cielo no es un estado que se sostenga pagando: es una
+  // campaña que destruye la aviación del otro, y una vez destruida se queda
+  // destruida un buen rato. Por eso se puede pelear por el cielo primero y
+  // dedicarse a otra cosa después, que es exactamente lo que pasó en 1944:
+  // los cazas de escolta deshicieron a la caza alemana entre enero y abril, y
+  // recién entonces la Novena pudo dedicarse a los puentes.
+  const roto = acotar((g.aireRoto || 0), 0, 0.9);
+  return { fuerza: poderVecino(v, s.anio) * era * era * 0.58 * (1 + era * 0.6) * (1 - roto),
+           era, roto };
+}
+// La defensa antiaérea, que no es aviación: son cañones. Es la pieza que
+// explica el bombardeo estratégico mejor que ninguna otra —la flak alemana se
+// llevó un millón de hombres y un tercio de la producción de artillería— y sale
+// de lo que el reino ya tiene, porque históricamente salía de ahí: baterías de
+// artillería apuntando para arriba, y radar para saber a dónde apuntar.
+function defensaAntiaerea(s) {
+  const era = eraDelAire((s && s.anio) || 0);
+  if (era <= 0) return 0;
+  const canones = ((s && s.ejercito) || {}).artilleria || 0;
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  const ojo = 1 + (sab.has("ingenierias.militar.radar") ? 1.1 : 0)
+                + (sab.has("ingenierias.telecom.radio") ? 0.3 : 0);
+  return canones * era * 0.55 * ojo;
+}
+
+// Para qué se usa la fuerza aérea. Esta lista es la discusión que tuvieron
+// todos los estados mayores del siglo XX y que casi siempre se resolvió mal:
+// Harris contra el plan de transportes, y el plan de transportes tenía razón.
+//
+// Lo importante es que las cuatro compiten por lo mismo. No hay fuerza aérea
+// que haga las cuatro: elegir una es no hacer las otras tres, y por eso esto
+// es una decisión y no una lista de bonos.
+const MISIONES_AIRE = [
+  { id: "cielo", n: "ganar el cielo", ico: "✕", cielo: 1,
+    dice: "cazar a su aviación y nada más",
+    cuesta: "no se ve ningún resultado, y es lo que hace posible todo lo demás" },
+  { id: "abasto", n: "cortarle el abasto", ico: "⛒", cielo: 0.35, corta: 1,
+    dice: "puentes, vías y convoyes detrás de su frente",
+    cuesta: "no mata a nadie hoy y deja al ejército de enfrente sin comer en un mes" },
+  { id: "campo", n: "apoyar al ejército", ico: "⌖", cielo: 0.35, campo: 1,
+    req: "ingenierias.telecom.radio", falta: "sin radio no hay quien le diga al piloto dónde tirar",
+    dice: "volar sobre el campo de batalla y sobre las columnas que marchan",
+    cuesta: "rinde menos de lo que promete y expone a la aviación al fuego de tierra" },
+  { id: "pais", n: "bombardear su país", ico: "☄", cielo: 0.25, pais: 1,
+    req: "ingenierias.aeronautica.cabina_presurizada",
+    falta: "sin un bombardero de gran radio no se llega a sus fábricas",
+    dice: "sus fábricas, sus ciudades y la gente que vive en ellas",
+    cuesta: "les baja algo la producción, les endurece las ganas de pelear y desangra a la propia aviación" },
+];
+const MISION_IDX = Object.fromEntries(MISIONES_AIRE.map((x) => [x.id, x]));
+function misionDisponible(m, s) {
+  const x = typeof m === "string" ? MISION_IDX[m] : m;
+  if (!x) return false;
+  if (!hayAviacion(s)) return false;
+  return !x.req || new Set(((s && s.ciencia) || {}).sabidos || []).has(x.req);
+}
+function misionDelAire(s) {
+  const x = MISION_IDX[(s && s.mision) || "cielo"] || MISION_IDX.cielo;
+  return misionDisponible(x, s) ? x : MISION_IDX.cielo;
+}
+
+// Quién manda en el cielo. De −1 a +1, y en el medio está lo que de verdad
+// pasaba casi siempre: un cielo disputado donde los dos pueden volar y a los
+// dos les cuesta caro.
+//
+// La defensa antiaérea entra acá y solo de un lado: la flak no gana el cielo
+// sobre el país del otro, lo defiende sobre el propio. Por eso el que ataca
+// necesita mucho más que empatar.
+function dominioDelCielo(s) {
+  const mio = aireDelReino(s);
+  const suyo = aireDelVecino(s);
+  if (mio.fuerza <= 0 && suyo.fuerza <= 0) return null;
+  const m = misionDelAire(s);
+  // Lo que cada uno pone a pelear por el cielo. El vecino reparte como
+  // repartía cualquiera que no fuera un fanático: la mitad a cazar.
+  const mioCielo = mio.fuerza * m.cielo + defensaAntiaerea(s) * 0.8;
+  // El vecino también pelea por el cielo, y pelea en serio: nadie regaló el
+  // aire. Deja algo suelto para lo demás, y por eso el que se dedica a cazar
+  // y nada más tiene ventaja —que es toda la razón de que la misión exista—.
+  const suyoCielo = suyo.fuerza * 0.75;
+  const total = mioCielo + suyoCielo;
+  const dominio = total <= 0 ? 0 : acotar((mioCielo - suyoCielo) / total, -1, 1);
+  const quien = dominio > 0.35 ? "mio" : dominio < -0.35 ? "suyo" : "nadie";
+  return { mio: mio.fuerza, suyo: suyo.fuerza, mioCielo, suyoCielo, dominio, quien,
+    flak: defensaAntiaerea(s), pilotos: mio.pilotos, unidades: mio.unidades,
+    roto: suyo.roto || 0,
+    dice: quien === "mio" ? "el cielo es tuyo: se vuela de día y ellos no"
+        : quien === "suyo" ? "el cielo es suyo: tus columnas se mueven de noche"
+        : "cielo disputado: los dos vuelan y a los dos les cuesta" };
+}
+// Un atajo, porque se pregunta desde media docena de sitios y siempre por el
+// mismo número. Cero significa «no hay aire»: ni ventaja ni castigo.
+function cielo(s) { const d = dominioDelCielo(s); return d ? d.dominio : 0; }
+
+// Lo que la aviación le corta al otro. Es lo que de verdad hizo el aire contra
+// un ejército: no destruirlo, dejarlo sin nada. Y no funciona si no se tiene
+// el cielo primero, que es toda la lección de 1944.
+function interdiccion(s, contraMi) {
+  const d = dominioDelCielo(s);
+  if (!d) return 0;
+  // Contra mí corta el vecino, y el vecino siempre reparte algo a esto.
+  const m = misionDelAire(s);
+  const esfuerzo = contraMi ? 0.3 : (m.corta || 0);
+  const gana = contraMi ? -d.dominio : d.dominio;
+  if (esfuerzo <= 0 || gana <= 0) return 0;
+  // Ni con el cielo entero se corta todo: siempre pasa algo de noche, por
+  // caminos secundarios y a pie. Eso también es historia: ni la Novena Fuerza
+  // Aérea dejó a los alemanes en cero.
+  return acotar(gana * esfuerzo * 0.55, 0, 0.55);
+}
+// Lo que el bombardeo del país le hace al otro. Acá está la pieza que casi
+// todos los juegos ponen al revés: la producción baja poco y la voluntad SUBE.
+// No es una opinión, es lo que midió el Strategic Bombing Survey y lo que
+// enseñó el Blitz antes: a un país bombardeado no se le acaban las ganas de
+// pelear, se le endurecen. Lo que sí se consigue es obligarlo a defenderse.
+function bombardeoDelPais(s) {
+  const d = dominioDelCielo(s);
+  if (!d) return null;
+  const m = misionDelAire(s);
+  if (!(m.pais > 0) || d.dominio <= 0) return null;
+  const peso = acotar(d.dominio * 0.9, 0, 0.9);
+  return {
+    peso,
+    // Lo que le baja la producción. Poco, y con techo: las fábricas se
+    // dispersan, se reparan y se trabaja de noche.
+    produccion: acotar(peso * 0.28, 0, 0.28),
+    // Y lo que se le endurecen las ganas de seguir. Este número es positivo a
+    // propósito y es lo más importante del bloque.
+    voluntad: Math.round(peso * 18),
+    dice: "les baja algo la producción y les endurece la voluntad: un país bombardeado no se rinde, se enoja",
+  };
+}
+// Lo que cuesta tener una fuerza aérea en el aire. Una fuerza aérea es un
+// bien que se consume: se pierden aparatos y tripulaciones todos los días,
+// peleen o no, y el que va perdiendo el cielo los pierde muchísimo más rápido.
+// Ahí está la espiral que deshizo a la Luftwaffe y a la aviación naval japonesa:
+// se muere el que sabe, lo reemplaza el que no sabe, y el que no sabe se muere
+// antes. Se devuelve la parte de la fuerza aérea que se pierde y lo que se
+// llevan de las tripulaciones.
+function desgasteAereo(s, dias) {
+  const d = dominioDelCielo(s);
+  if (!d || d.unidades <= 0) return { aviones: 0, pilotos: 0 };
+  const anos = Math.max(0, dias || 0) / 365;
+  // El desgaste de paz: accidentes, fatiga de material, tiempo. Existió
+  // siempre y se llevó más aviones que el enemigo en casi todos los años.
+  let parte = 0.10 * anos;
+  if (s && s.guerra) {
+    // Y el de la guerra, que depende de cómo va el cielo y de la flak que
+    // tenga enfrente el que ataca. El que va perdiendo el cielo pierde el
+    // triple que el que lo tiene, y ahí está la espiral entera.
+    const mal = acotar((1 - d.dominio) / 2, 0, 1);
+    parte += (0.09 + 0.40 * mal) * anos;
+    // Bombardear el país del otro es la misión más cara que hay: se vuela
+    // lejos, de día y sobre su artillería. La Octava Fuerza Aérea perdió más
+    // hombres que todo el Cuerpo de Marines.
+    if (misionDelAire(s).pais) parte += 0.18 * anos;
+  }
+  parte = acotar(parte, 0, 0.55);
+  const aviones = Math.round(d.unidades * parte);
+  // Y las tripulaciones, que es lo que de verdad duele: se pierden más rápido
+  // de lo que se hacen, y el reemplazo baja la media del que queda.
+  const pilotos = parte * 62;
+  return { aviones, pilotos, parte };
+}
+
+// Cómo queda la fuerza aérea al cabo de unos días: los aparatos que no
+// volvieron y las tripulaciones que quedan. Se resuelven juntas porque son la
+// misma cosa vista dos veces: se pierde el que sabe, entra el que no sabe, y
+// el que no sabe se pierde antes. Un reino que deja que esto se le vaya de las
+// manos no lo recupera dentro de la misma guerra, y esa es la historia entera
+// de la Luftwaffe desde 1943 y de la aviación naval japonesa desde Filipinas.
+function aireTrasElTiempo(s, dias) {
+  if (!hayAviacion(s)) return { aviones: 0, perdidos: 0, pilotos: 0, dice: null };
+  const tenia = ((s && s.ejercito) || {}).aviacion || 0;
+  const d = desgasteAereo(s, dias);
+  const aviones = Math.max(0, tenia - d.aviones);
+  // Las tripulaciones: primero lo que se pierde, después lo que la escuela
+  // alcanza a reponer. En ese orden y no al revés, porque el reemplazo no
+  // reemplaza: baja la media de los que quedan.
+  const sangrado = acotar((s.pilotos != null ? s.pilotos : PILOTOS_BASE) - d.pilotos, 0, 100);
+  const pilotos = pilotosTrasElTiempo({ ...s, pilotos: sangrado }, dias);
+  return { aviones, perdidos: d.aviones, pilotos: Math.round(pilotos),
+    dice: d.aviones > 0
+      ? `No vuelven ${d.aviones} aparatos y las tripulaciones bajan a ${Math.round(pilotos)}.` : null };
+}
+
 // ——— quién la manda ———
 //
 // Hasta acá los generales eran una lista con nombres y un bono global: el mejor
@@ -10131,11 +10471,19 @@ function repartirElMando(huestes, s) {
 // siglo sabe manejar. Si lo que hay libre no entra en una, salen varias, y cada
 // rama se reparte entre todas —una división de solo cañones no es una división—.
 function repartirEnHuestes(libre, org) {
-  const total = unidadesTotales(libre || {});
+  // Lo que vuela no cuenta ni para el total: si contara, un reino con treinta
+  // aviones y diez de infantería saldría al mapa con tres huestes vacías.
+  const enTierra = { ...(libre || {}) };
+  for (const r of RAMAS_EJERCITO) if (r.vuela) delete enTierra[r.id];
+  const total = unidadesTotales(enTierra);
   if (total <= 0) return [];
   const cuantas = Math.max(1, Math.ceil(total / Math.max(1, org.bulto)));
   const partes = Array.from({ length: cuantas }, () => ({}));
   for (const r of RAMAS_EJERCITO) {
+    // Lo que vuela no se reparte: una fuerza aérea no se corta en pedazos y se
+    // le da uno a cada columna. Opera sobre el teatro entero y se queda en el
+    // reino, que es de donde sale todo lo que hace.
+    if (r.vuela) continue;
     let n = (libre || {})[r.id] || 0;
     if (!n) continue;
     for (let i = 0; i < cuantas && n > 0; i++) {
@@ -10793,7 +11141,15 @@ function alcanceDeVista(h, s) {
   for (const [id, v] of Object.entries(VER_SABER)) if (sab.has(id)) m += v;
   // Y la tropa que sabe lo que hace explora; la que no, se pierde. Un
   // reconocimiento es la cosa más difícil que se le puede pedir a un bisoño.
-  return base * (1 + m) * (0.72 + 0.5 * templeDe(h)) * dctr(s, "ojo");
+  //
+  // Y por último quién manda en el cielo, que es lo que decide si el avión de
+  // reconocimiento vuelve con las fotos o no vuelve. Saber volar y poder volar
+  // son dos cosas distintas: la primera está arriba, en la tabla de saberes;
+  // la segunda se pelea todos los días contra la aviación del otro. Se mira
+  // desde el lado de cada uno —el cielo que es mío es de ellos al revés—.
+  const c = (h && h.de ? -1 : 1) * cielo(s);
+  return base * (1 + m) * (0.72 + 0.5 * templeDe(h)) * dctr(s, "ojo")
+    * acotar(1 + c * 0.45, 0.55, 1.45);
 }
 function velocidadDelAviso(s) {
   const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
@@ -11631,6 +11987,13 @@ function propagarAbasto(t, s, campo, bando) {
     if (v > campo[k]) campo[k] = v;
   }
   const claves = Object.keys(TERRENOS);
+  // Y lo que le está cortando la aviación del otro. Va acá, en la pérdida por
+  // palmo, y no en el origen: la interdicción no vuela las cosechas, vuela los
+  // puentes y las vías y los convoyes por el camino. Por eso el que está
+  // pegado a su base casi no la siente y el que está a trescientos kilómetros
+  // dentro de una bolsa se queda sin nada, que es exactamente lo que le pasó
+  // al Séptimo Ejército en Normandía y no a las guarniciones de la retaguardia.
+  const cortado = interdiccion(s, bando === 1);
   // Lo que se pierde por palmo. Por tierra propia con camino se pierde poco;
   // por tierra recién tomada, mucho más —no hay depósitos, no hay carreteros
   // que quieran ir—; por tierra del otro, nada llega.
@@ -11648,8 +12011,9 @@ function propagarAbasto(t, s, campo, bando) {
     // dos tercios del abasto y un ejército modesto plantado en su propia
     // frontera se moría de hambre. Perder algo con la distancia es real;
     // perder eso, no.
-    const base = t.due[k] !== bando ? 0.72 : t.nat[k] === bando ? 0.9885 : 0.955;
-    return base * (0.72 + 0.28 * tt.com);
+    const base = (t.due[k] !== bando ? 0.72 : t.nat[k] === bando ? 0.9885 : 0.955)
+      - cortado * 0.030;
+    return Math.max(0.5, base) * (0.72 + 0.28 * tt.com);
   };
   for (let v = 0; v < 2; v++) {
     for (let j = 1; j < t.GH; j++) for (let i = 1; i < t.GW; i++) {
@@ -12056,6 +12420,20 @@ function pesoEnCampo(h, prov, s) {
     f += c;
     partes.push({ n: "los cañones pesan menos sin muro enfrente", v: Math.round(c) });
   }
+  // Y lo que baja del cielo. Mucho menos de lo que promete la leyenda: los
+  // cazabombarderos destruyeron un orden de magnitud menos blindados de los
+  // que reclamaron, y lo que de verdad hicieron sobre un campo de batalla fue
+  // desarmar la moral del que lo aguanta y romperle las comunicaciones. Por
+  // eso pesa poco y pesa: nunca decide una batalla, y decide muchas.
+  const aire = dominioDelCielo(s);
+  if (aire && misionDelAire(s).campo && Math.abs(aire.dominio) > 0.05) {
+    // Vale para el que tiene el cielo, y en contra del que no lo tiene: los
+    // mismos aviones son un apoyo de un lado y un castigo del otro.
+    const a = f * aire.dominio * 0.16 * (h && h.de ? -1 : 1);
+    f += a;
+    partes.push({ n: aire.dominio > 0 ? "la aviación sobre el campo"
+                                      : "su aviación sobre el campo", v: Math.round(a) });
+  }
   // Y cómo pelea este reino. Es lo último que se aplica porque es lo que
   // envuelve a todo lo demás: los mismos hombres, otra manera de usarlos.
   const dc = dctr(s, "campo");
@@ -12154,7 +12532,11 @@ function levantarEnemigas(s, rnd) {
   // Guerra contra alguien que no está en la lista de vecinos: pasa cuando la
   // guerra se declaró desde el mapa a un país que no era vecino de la ficha.
   // Sin esto, el turno entero reventaba al ir a buscarle el poder.
-  const poder = Math.max(2, Math.round(poderVecino(v || { poder: 12 }, s.anio) / 9));
+  // Y lo que el bombardeo le sacó de encima. Poco, y con techo: la producción
+  // alemana subió hasta bien entrado 1944 bajo las bombas. Lo que el bombardeo
+  // de verdad consiguió fue obligarlos a defenderse, no dejarlos sin fábricas.
+  const rota = 1 - (s.guerra.bombardeado || 0) * 0.28;
+  const poder = Math.max(2, Math.round(poderVecino(v || { poder: 12 }, s.anio) * rota / 9));
   // De dónde sale: del borde del reino más lejos de tu corte, que es por donde
   // uno entra cuando no quiere que lo vean venir.
   const provs = s.provincias || [];
@@ -12611,6 +12993,11 @@ function correrCampana(s, dias, rnd) {
     if ((propia && parte > 0.995) || (!propia && parte < 0.005)) continue;
     frentes.push({ idx, nombre, pais: g ? g.pais : null, parte, cercado: o.hambre });
   }
+  // Y cómo quedó el aire. Se cuenta en la crónica porque si no, una fuerza
+  // aérea se derrite sin que nadie se entere de por qué: no la mató nadie en
+  // ninguna batalla que se pueda leer, se gastó volando.
+  const aire = aireTrasElTiempo(s, dias);
+  if (aire.dice) hechos.push(aire.dice);
   // Y lo que el reino adelantó adiestrando estos días, que pasa a la tropa que
   // todavía no salió. Se devuelve con lo demás para que el turno lo guarde: la
   // instrucción no es de ninguna hueste en particular, es del reino.
@@ -12630,6 +13017,9 @@ function correrCampana(s, dias, rnd) {
            // con ellos. La fama se despinta con los años porque se muere la
            // gente que se acuerda, no porque nadie perdone.
            presos, nuestrosPresos, trato: tratoTrasElTiempo({ trato }, dias),
+           // Y cómo quedó el aire: los aparatos que no volvieron y las
+           // tripulaciones, que es lo que de verdad se acaba.
+           aire,
            enganos: enganosVivos({ ...s, anio: (s.anio || 0) + Math.floor(((s.dia || 0) + dias) / 365),
              dia: ((s.dia || 0) + dias) % 365 }) };
 }
@@ -12881,6 +13271,12 @@ function voluntadDelVecino(g, s) {
   // salida, y una guerra contra un enemigo así dura el doble. Es lo que le
   // costó a más de un conquistador la fama que se había ganado a propósito.
   v += (1 - famaDelTrato(s)) * 30;
+  // Y lo que le hicieron desde el aire, que va en el mismo sentido y por la
+  // misma razón. Esto es el hallazgo del Strategic Bombing Survey y de todo lo
+  // que enseñó el Blitz antes: bombardear las ciudades del otro no le quita
+  // las ganas de pelear, se las endurece. El que quería que se rindieran
+  // consiguió que trabajaran los domingos.
+  v += (g.bombardeado || 0) * 22;
   return Math.round(acotar(v, 0, 100));
 }
 // Y cuánto le queda al propio. Acá está la pieza que hace que una guerra
@@ -19840,6 +20236,10 @@ export default function PaxMundi() {
         // Sin nadie preso de ningún lado, y con la fama que tiene cualquiera
         // que todavía no hizo nada: la de tratar bien a los que se entregan.
         presos: 0, nuestrosPresos: 0, trato: 1,
+        // Y sin nadie que sepa volar, que es como se empieza en cualquier
+        // siglo hasta el veinte. La misión por defecto es la única que
+        // siempre hay que hacer primero.
+        pilotos: 0, mision: "cielo",
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -21026,6 +21426,44 @@ export default function PaxMundi() {
           guerraNueva.gastado = (guerraNueva.gastado || 0) + costoOro;
           guerraNueva.bajas = (guerraNueva.bajas || 0) + bajas;
           bajasGuerra += bajas;
+          // ——— la campaña por el cielo ———
+          //
+          // El cielo no se alquila: se conquista rompiéndole la aviación al
+          // otro, y lo roto queda roto. Mientras se le gana se le va
+          // destruyendo lo que tiene, y en cuanto se afloja lo repone. Sin
+          // esto, elegir cualquier misión que no fuera cazar devolvía el cielo
+          // en el acto y las otras tres no se podían usar nunca.
+          const cieloHoy = cielo({ ...state, guerra: guerraNueva,
+            anio: anioNuevo, vecinos: vecinosNuevos });
+          guerraNueva.aireRoto = acotar((guerraNueva.aireRoto || 0)
+            + (cieloHoy > 0 ? cieloHoy * 0.40 : cieloHoy * 0.55) * esc, 0, 0.9);
+          if (guerraNueva.aireRoto > 0.55 && !guerraNueva.avisoCielo) {
+            guerraNueva.avisoCielo = true;
+            entradasGuerra.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+              texto: `✈ La aviación de ${enemigo.nombre} ha dejado de aparecer. No la derrotó una `
+                + `batalla: se la fue gastando mes a mes, y ahora sus columnas se mueven de noche `
+                + `y las nuestras de día. A partir de acá la aviación puede dedicarse a otra cosa.` });
+          }
+          // ——— y lo que se le hizo desde el aire ———
+          //
+          // El bombardeo del país no es un golpe: es una campaña que se
+          // acumula mientras se sostiene y se deshace en cuanto se afloja,
+          // porque del otro lado se repara, se dispersa y se trabaja de noche.
+          // Por eso sube despacio hacia lo que la aviación de hoy consigue y
+          // baja hacia cero cuando se deja de hacer.
+          const bomba = bombardeoDelPais({ ...state, guerra: guerraNueva,
+            anio: anioNuevo, vecinos: vecinosNuevos });
+          const bAntes = guerraNueva.bombardeado || 0;
+          guerraNueva.bombardeado = acotar(
+            bAntes + ((bomba ? bomba.peso : 0) - bAntes) * Math.min(1, 0.5 * esc), 0, 1);
+          if (bomba && !guerraNueva.avisoBomba && guerraNueva.bombardeado > 0.2) {
+            guerraNueva.avisoBomba = true;
+            entradasGuerra.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+              texto: `✈ Las ciudades de ${enemigo.nombre} arden todas las noches. `
+                + `Su producción baja algo y sus fábricas se mudan al campo. Y en las colas del pan `
+                + `de allá no se habla de rendirse: se habla de aguantar. Un país bombardeado no se `
+                + `quiebra, se endurece —eso lo aprendieron ellos con nosotros y nosotros con ellos—.` });
+          }
           // ——— y ahora, para qué se peleaba ———
           //
           // El enemigo no pelea hasta el último hombre: pelea hasta que le
@@ -21190,7 +21628,13 @@ export default function PaxMundi() {
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
         facciones: facNueva,
         facPeso: pesoNuevo,
-        ejercito: state.ejercito || {},
+        // Y lo que quedó de la fuerza aérea: los aparatos que volvieron. Es
+        // el único sitio donde una rama del ejército se gasta sola sin que
+        // nadie la ataque, y es así porque una fuerza aérea es eso.
+        ejercito: camp.aire && camp.aire.perdidos
+          ? { ...(state.ejercito || {}), aviacion: camp.aire.aviones }
+          : (state.ejercito || {}),
+        pilotos: camp.aire ? camp.aire.pilotos : (state.pilotos || 0),
         guerra: guerraNueva,
         bajasRecientes: Math.round(bajasNuevas + bajasGuerra),
         tributos: tributosNuevos,
@@ -24649,6 +25093,95 @@ export default function PaxMundi() {
                           );
                         })}
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── el cielo ──
+                    Solo existe cuando el reino sabe volar. Antes de eso el
+                    bloque entero no está, que es lo que corresponde en 1200. */}
+                {hayAviacion(s) && (() => {
+                  const d = dominioDelCielo(s);
+                  const a = aireDelReino(s);
+                  const m = misionDelAire(s);
+                  const gasta = desgasteAereo(s, 365);
+                  const bomba = bombardeoDelPais(s);
+                  const col = !d ? C.muted : d.quien === "mio" ? C.green
+                            : d.quien === "suyo" ? C.red : C.brass;
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ✈ EL CIELO
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: col }}>
+                          {d && s.guerra ? d.quien === "mio" ? "es tuyo"
+                            : d.quien === "suyo" ? "es suyo" : "disputado" : "sin nadie enfrente"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        El aire no toma un palmo de tierra: lo toma el que camina encima. Lo que hace
+                        es ver, cortarle el abasto al otro y no dejarlo moverse de día — y nada de eso
+                        se puede hacer antes de ganarle el cielo a su aviación.
+                      </div>
+                      {[["Aparatos", `${a.unidades}`, a.unidades ? C.ink : C.red],
+                        ["Tripulaciones", `${Math.round((s.pilotos || 0))} de ${Math.round(techoDePilotos(s))}`,
+                          (s.pilotos || 0) > techoDePilotos(s) * 0.6 ? C.ink : C.red],
+                        ["Antiaérea", `${Math.round(defensaAntiaerea(s))}`,
+                          defensaAntiaerea(s) > 0 ? C.ink : C.muted],
+                        ["Se pierden al año", `${gasta.aviones} aparatos`,
+                          gasta.aviones > a.unidades * 0.35 ? C.red : C.brass]].map(([x, y, c]) => (
+                        <div key={x} style={{ display: "flex", justifyContent: "space-between",
+                          fontSize: 12, color: C.muted, marginTop: 3 }}>
+                          <span>{x}</span><span style={{ color: c, fontFamily: mono }}>{y}</span>
+                        </div>
+                      ))}
+                      {(s.pilotos || 0) < techoDePilotos(s) * 0.5 && a.unidades > 0 && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          Hay más aviones que gente que sepa volarlos. Una tripulación se hace en dos
+                          años y se pierde en una tarde: así se acabaron la Luftwaffe y la aviación
+                          naval japonesa, con los hangares llenos.
+                        </div>
+                      )}
+                      {d && s.guerra && (
+                        <div style={{ fontSize: 11, color: col, marginTop: 6, lineHeight: 1.45 }}>
+                          {capitalizar(d.dice)}.
+                          {d.roto > 0.05 && ` De su aviación queda el ${Math.round((1 - d.roto) * 100)} `
+                            + `por ciento: lo demás se lo fuimos gastando, y eso no lo repone en esta guerra.`}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                        {MISIONES_AIRE.map((x) => {
+                          const puede = misionDisponible(x, s);
+                          const act = m.id === x.id;
+                          return (
+                            <button key={x.id} disabled={!puede || pensando || act}
+                              onClick={() => setState((st) => ({ ...st, mision: x.id,
+                                cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                  texto: `${x.ico} La aviación pasa a ${x.n}: ${x.dice}. Y ${x.cuesta}.` }] }))}
+                              style={{ textAlign: "left", padding: "7px 9px", borderRadius: 6,
+                                cursor: puede && !act ? "pointer" : "default",
+                                background: act ? `${C.gold}18` : "transparent",
+                                border: `1px solid ${act ? C.gold : C.line}`, opacity: puede ? 1 : 0.45 }}>
+                              <div style={{ fontSize: 12.5, color: act ? C.gold : C.ink }}>
+                                {x.ico} {capitalizar(x.n)}
+                              </div>
+                              <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                {puede ? `${capitalizar(x.dice)}. Y ${x.cuesta}.`
+                                  : `hace falta saber «${MED_IDX[x.req]?.nombre || x.req}»: ${x.falta}`}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {bomba && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 7, lineHeight: 1.45 }}>
+                          Les baja la producción un {Math.round(bomba.produccion * 100)} por ciento
+                          y les sube las ganas de pelear. Un país bombardeado no se rinde: se enoja.
+                          Eso lo midieron después de la guerra y lo sabían durante.
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
