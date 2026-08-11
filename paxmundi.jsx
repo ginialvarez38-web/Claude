@@ -12323,12 +12323,117 @@ function provinciaConquistada(provs, enemigo, ciencia, semilla) {
 }
 
 // Términos posibles según lo aplastado que esté el enemigo.
-function terminosDisponibles(frente) {
+// ═══ POR QUÉ SE PELEA ════════════════════════════════════════════════════
+//
+// Hasta acá una guerra se declaraba y después se veía. No se declaraba POR
+// nada: se empezaba, se tomaba lo que el frente diera, y terminaba cuando uno
+// de los dos no podía más. Así no funcionó casi ninguna guerra de la historia,
+// y sobre todo así no se entiende ninguna: lo que decide cuándo y cómo termina
+// una guerra no es cuánta gente queda, es para qué se empezó.
+//
+// Una guerra tiene un objetivo político declarado. Ese objetivo hace tres
+// cosas a la vez, y por eso vale la pena:
+//
+//   · dice cuándo se ganó, que es lo que permite que una guerra corta exista;
+//   · limita lo que se puede exigir en la paz, porque pedir en la mesa lo que
+//     no se pidió al declarar es una traición a ojos de todos —de los propios
+//     y de los que miran—;
+//   · y le pone precio al escándalo, que es lo que cambia con los siglos: en
+//     1200 borrar del mapa a un vecino era una hazaña, y en 1900 es un
+//     problema con todas las cortes de Europa.
+const OBJETIVOS_GUERRA = [
+  { id: "escarmiento", n: "un escarmiento", termino: "blanca", pide: 25, escandalo: 0,
+    dice: "que se sepa quién manda en esta frontera. No se quiere su tierra: se quiere que no vuelvan",
+    logro: "les diste el escarmiento que buscabas" },
+  { id: "tributo", n: "que paguen tributo", termino: "tributo", pide: 40, escandalo: 0.5,
+    dice: "oro todos los años durante una década, y el rencor que viene con él",
+    logro: "están en condiciones de aceptar el tributo" },
+  // El término de una guerra por una comarca es la paz blanca: lo que se tomó
+  // en el mapa ya es tuyo y no hace falta ninguna cláusula que lo diga. Esa es
+  // exactamente la guerra limitada —se toma lo que se fue a tomar y se firma—.
+  { id: "comarca", n: "quedarse una comarca", termino: "blanca", pide: 55, escandalo: 1.2, sobre: true,
+    dice: "una tierra concreta, nombrada desde el primer día: la guerra termina cuando es tuya",
+    logro: "la comarca que se fue a buscar está en tus manos" },
+  { id: "concesion", n: "arrancar concesiones", termino: "concesion", pide: 60, escandalo: 0.8,
+    dice: "puertos y rutas: su comercio pasa a rendirte a vos sin quitarle una legua de tierra",
+    logro: "no pueden negarte los puertos" },
+  { id: "someter", n: "someterlo entero", termino: "anexion", pide: 85, escandalo: 3,
+    dice: "que deje de existir. Se puede, cuesta años, y no se olvida en un siglo",
+    logro: "no queda quién les mande: es tuyo si lo querés" },
+];
+const OBJETIVO_IDX = Object.fromEntries(OBJETIVOS_GUERRA.map((o) => [o.id, o]));
+function objetivoDeGuerra(g) {
+  return OBJETIVO_IDX[(g && g.objetivo) || "escarmiento"] || OBJETIVO_IDX.escarmiento;
+}
+// Lo que cuesta en las cancillerías, que no es lo mismo en todos los siglos.
+// Antes del orden de Westfalia un reino que se comía a otro era un reino
+// afortunado; después empieza a ser un reino peligroso, y de 1815 en adelante,
+// un problema que todos los demás se juntan a resolver.
+function escandaloDe(obj, anio) {
+  const o = typeof obj === "string" ? OBJETIVO_IDX[obj] : obj;
+  if (!o) return 0;
+  const siglo = acotar((((anio || 1200) - 1600) / 350), 0, 1);
+  return o.escandalo * (1 + siglo * 2.2);
+}
+// ¿Ya está? Un objetivo cumplido es lo que convierte una guerra en una guerra
+// ganada, y hasta ahora eso no existía: se seguía peleando porque sí.
+function logradoDe(g, s) {
+  if (!g) return false;
+  const o = objetivoDeGuerra(g);
+  if (o.id === "comarca")
+    return g.sobreIdx != null && ((s && s.provincias) || []).some((p) => p.idx === g.sobreIdx);
+  return (g.frente || 0) >= o.pide;
+}
+// Cuánto le queda al vecino de ganas de seguir. Un país no pelea hasta el
+// último hombre: pelea hasta que le sale más caro seguir que ceder, y eso pasa
+// mucho antes. Cuando esto se acaba, ofrece lo que le pediste.
+function voluntadDelVecino(g, s) {
+  if (!g) return 100;
+  const ocupadas = ((s && s.provincias) || []).filter((p) => p.ocupada).length;
+  const suyasTuyas = ((s && s.frentes) || []).filter((f) => f.pais && f.parte > 0.5).length;
+  let v = 100 - (g.agotaEnem || 0) - Math.max(0, g.frente || 0) * 0.55 - suyasTuyas * 7;
+  v += ocupadas * 6;                       // si te está ganando, aguanta más
+  return Math.round(acotar(v, 0, 100));
+}
+// Y cuánto le queda al propio. Acá está la pieza que hace que una guerra
+// limitada sea limitada de verdad: conseguido lo que se fue a buscar, seguir
+// peleando deja de tener sentido para todo el mundo menos para el que manda, y
+// eso se paga en casa todos los turnos.
+function voluntadPropia(g, s) {
+  if (!g) return 100;
+  const anios = Math.max(0, ((s && s.anio) || 0) - (g.desde || 0));
+  const pueblo = ((s && s.facciones) || {}).pueblo ?? 50;
+  let v = 100 - (g.agotaProp || 0) - Math.max(0, -(g.frente || 0)) * 0.55 - anios * 3.5;
+  v -= Math.max(0, 50 - pueblo) * 0.6;
+  if (logradoDe(g, s)) v -= 28;            // «ya ganamos, ¿qué hacemos acá?»
+  return Math.round(acotar(v, 0, 100));
+}
+// Los términos que se pueden imponer. Dos cosas los gobiernan: lo que el
+// frente permite y lo que se dijo al declarar. Se puede pedir más de lo que se
+// pidió al empezar —nadie lo impide— pero eso es lo que cuesta caro.
+function terminosDisponibles(g, s) {
+  // respaldo para las llamadas viejas, que pasaban solo el frente
+  const gg = typeof g === "number" ? { frente: g, objetivo: "someter" } : (g || {});
+  const frente = gg.frente || 0;
+  const obj = objetivoDeGuerra(gg);
+  const anio = (s && s.anio) || 1200;
   const t = [];
-  if (frente >= 40) t.push({ id: "tributo", n: "Exigir tributo", desc: "Pagan por diez años. Oro seguro, rencor asegurado." });
-  if (frente >= 60) t.push({ id: "concesion", n: "Arrancar concesiones", desc: "Puertos y rutas: su comercio pasa a rendirte a vos." });
-  if (frente >= 80) t.push({ id: "anexion", n: "Anexar sus tierras", desc: "Sus gentes y sus campos pasan a ser tuyos. Nadie lo olvidará." });
-  t.push({ id: "blanca", n: "Paz sin condiciones", desc: "Cada uno vuelve a lo suyo. Se acabó la sangría." });
+  const mete = (id, n, desc, pide) => {
+    if (frente < pide) return;
+    const dentro = obj.termino === id || (obj.id === "someter")
+      || OBJETIVOS_GUERRA.findIndex((o) => o.termino === id)
+         <= OBJETIVOS_GUERRA.findIndex((o) => o.id === obj.id);
+    const extra = dentro ? 0 : +escandaloDe(
+      OBJETIVOS_GUERRA.find((o) => o.termino === id) || obj, anio).toFixed(1);
+    t.push({ id, n, desc, dentro, extra,
+      aviso: dentro ? null
+        : `no es lo que dijiste al declarar la guerra: los tuyos y los de afuera toman nota` });
+  };
+  mete("tributo", "Exigir tributo", "Pagan por diez años. Oro seguro, rencor asegurado.", 40);
+  mete("concesion", "Arrancar concesiones", "Puertos y rutas: su comercio pasa a rendirte a vos.", 60);
+  mete("anexion", "Anexar sus tierras", "Sus gentes y sus campos pasan a ser tuyos. Nadie lo olvidará.", 80);
+  t.push({ id: "blanca", n: "Paz sin condiciones", dentro: true, extra: 0,
+    desc: "Cada uno vuelve a lo suyo. Se acabó la sangría." });
   return t;
 }
 
@@ -18694,9 +18799,14 @@ const ACCIONES = [
         const pv = poderVecino(v, s.anio);
         como = pm > pv * 1.25 ? " · los superás" : pm > pv * 0.8 ? " · parejo" : " · te superan";
       } catch (_) { como = ""; }
-      return `declararle la guerra a ${quien}${como}`;
+      // Se le declara la guerra por la comarca que se está señalando, que es
+      // el motivo más viejo y más común que hay: uno quiere ese pedazo. Los
+      // otros objetivos —tributo, concesiones, someterlo— se eligen en la
+      // ficha del ejército, donde hay sitio para explicarlos.
+      return `declararle la guerra a ${quien} por ${p.comarca || p.nombre}${como}`;
     },
-    hace: (p, s, x) => ({ tipo: "guerra", vecino: x.vecino || p.nombre }) },
+    hace: (p, s, x) => ({ tipo: "guerra", vecino: x.vecino || p.nombre,
+      objetivo: "comarca", sobre: { nombre: p.comarca || p.nombre, idx: p.idx } }) },
 ];
 const ACCION_IDX = Object.fromEntries(ACCIONES.map((a) => [a.id, a]));
 const TOPE_RUEDA = 7;   // más de siete y ya es una lista, que es lo que se venía a evitar
@@ -18945,6 +19055,8 @@ export default function PaxMundi() {
   // Qué hueste tiene la palabra. Sin una elegida, la rueda no ofrece marchar
   // ni asaltar: no habría con qué.
   const [huesteSel, setHuesteSel] = useState(null);
+  // A quién se le está por declarar la guerra, mientras se elige por qué.
+  const [porQueGuerra, setPorQueGuerra] = useState(null);
   // Dónde se puede guardar en este navegador. Se averigua una sola vez, y se
   // averigua escribiendo: preguntar no alcanza.
   const donde = useMemo(() => dondeSeGuarda(), []);
@@ -19388,9 +19500,10 @@ export default function PaxMundi() {
     });
   }
 
-  function declararGuerra(nombre) {
+  function declararGuerra(nombre, objetivo, sobre) {
     setState((st) => {
       if (st.guerra) return st;
+      const obj = OBJETIVO_IDX[objetivo] || OBJETIVO_IDX.escarmiento;
       // Si el país no estaba en la lista de vecinos —porque se lo eligió en el
       // mapa y no en el panel— entra ahora: el resto del juego cuenta con que
       // el enemigo esté ahí para saber su poder y su humor.
@@ -19400,13 +19513,21 @@ export default function PaxMundi() {
            { nombre, poder: 5, estado: "paz", relacion: -20, impulso: 0 }];
       st = { ...st, vecinos };
       return {
-        ...st, guerra: { vecino: nombre, desde: st.anio, frente: 0, agotaProp: 0, agotaEnem: 0 },
+        ...st, guerra: { vecino: nombre, desde: st.anio, frente: 0, agotaProp: 0, agotaEnem: 0,
+          // Por qué se pelea. Va escrito desde el primer día porque es lo que
+          // va a decidir cuándo se ganó y qué se puede pedir en la mesa.
+          objetivo: obj.id,
+          sobre: sobre ? sobre.nombre : null, sobreIdx: sobre ? sobre.idx : null },
         vecinos: (st.vecinos || []).map((v) => v.nombre === nombre ? { ...v, estado: "guerra", relacion: -55 } : v),
-        stats: { ...st.stats, prestigio: clamp(st.stats.prestigio - 2), diplomacia: clamp(st.stats.diplomacia - 6) },
+        // Declarar por un escarmiento cuesta poco; declarar para borrar a un
+        // vecino del mapa cuesta lo que cuesta en su siglo.
+        stats: { ...st.stats, prestigio: clamp(st.stats.prestigio - 2),
+          diplomacia: clamp(st.stats.diplomacia - 6 - escandaloDe(obj, st.anio) * 2.2) },
         facciones: { ...st.facciones, ejercito: Math.min(100, (st.facciones?.ejercito ?? 50) + 10),
                      mercaderes: Math.max(0, (st.facciones?.mercaderes ?? 50) - 12) },
         cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
-          texto: `⚔ Se declara la guerra a ${nombre}.` }],
+          texto: `⚔ Se declara la guerra a ${nombre} por ${obj.n}`
+            + (sobre ? `, ${sobre.nombre}` : "") + `: ${obj.dice}.` }],
       };
     });
   }
@@ -19421,6 +19542,11 @@ export default function PaxMundi() {
       const fac = { ...st.facciones };
       const stats = { ...st.stats };
       let txt;
+      // Lo que se pide en la mesa contra lo que se dijo al declarar. Pedir de
+      // más se puede; lo que no se puede es que no se note.
+      const term = terminosDisponibles(g, st).find((x) => x.id === termino);
+      const deMas = term && !term.dentro ? term.extra : 0;
+      const obj = objetivoDeGuerra(g);
       const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
       if (termino === "tributo") {
         trib.push({ hacia: g.vecino, monto: Math.round(ing * 0.13), quedan: 10 });
@@ -19452,6 +19578,18 @@ export default function PaxMundi() {
         txt = `⚔ PAZ BLANCA tras ${anios} años. Nadie ganó nada y quedan ${fmtPob(g.bajas || 0)} bajo tierra.`;
       }
       fac.pueblo = Math.min(100, (fac.pueblo ?? 50) + 8);
+      // Y el precio de haber cambiado de objetivo a mitad de camino: los de
+      // afuera lo leen como lo que es, y los de casa también.
+      if (deMas > 0) {
+        stats.diplomacia = clamp(stats.diplomacia - deMas * 3.5);
+        stats.prestigio = clamp(stats.prestigio - deMas * 1.2);
+        fac.pueblo = Math.max(0, (fac.pueblo ?? 50) - deMas * 3);
+        vec = vec.map((v) => ({ ...v, relacion: Math.max(-70, v.relacion - Math.round(deMas * 5)) }));
+        txt += ` Se declaró la guerra por ${obj.n} y se firmó otra cosa: eso no se olvida.`;
+      } else if (logradoDe(g, st)) {
+        txt += ` Era lo que se fue a buscar, y se consiguió.`;
+        stats.prestigio = clamp(stats.prestigio + 4);
+      }
       return { ...st, guerra: null, vecinos: vec, provincias: provNuevas,
         poblacion: poblacionTotal(provNuevas) || pob, tributos: trib, stats, facciones: fac,
         edu: { ...st.edu, oro },
@@ -20367,11 +20505,51 @@ export default function PaxMundi() {
           guerraNueva.gastado = (guerraNueva.gastado || 0) + costoOro;
           guerraNueva.bajas = (guerraNueva.bajas || 0) + bajas;
           bajasGuerra += bajas;
-          // el enemigo pide paz si va perdiendo y está exhausto
-          if (guerraNueva.frente > 55 && guerraNueva.agotaEnem > 55 && !guerraNueva.pidenPaz) {
+          // ——— y ahora, para qué se peleaba ———
+          //
+          // El enemigo no pelea hasta el último hombre: pelea hasta que le
+          // sale más caro seguir que ceder. Cuando se le acaban las ganas
+          // manda emisarios, y lo que ofrece es lo que se le pidió al
+          // declarar, no lo que a uno se le ocurra.
+          const estadoG = { ...state, guerra: guerraNueva, anio: anioNuevo,
+            provincias: provs, facciones: facNueva, frentes: state.frentes };
+          const objG = objetivoDeGuerra(guerraNueva);
+          const ganas = voluntadDelVecino(guerraNueva, estadoG);
+          const mias = voluntadPropia(guerraNueva, estadoG);
+          guerraNueva.ganasSuyas = ganas;
+          guerraNueva.ganasMias = mias;
+          const yaEsta = logradoDe(guerraNueva, estadoG);
+          guerraNueva.logrado = yaEsta;
+          if (ganas <= 22 && !guerraNueva.pidenPaz) {
             guerraNueva.pidenPaz = true;
             entradasGuerra.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
-              texto: `⚔ ${enemigo.nombre} envía emisarios: piden condiciones. Tenés el frente a tu favor y ellos ya no aguantan.` });
+              texto: `⚔ ${enemigo.nombre} envía emisarios: piden condiciones. `
+                + `Se les acabaron las ganas antes que los hombres, que es como se acaban las guerras.` });
+          }
+          // Conseguido lo que se fue a buscar, el reino se pregunta qué hace
+          // todavía ahí. Seguir peleando después de ganar es la forma más
+          // común de perder: cuesta estabilidad y gente todos los turnos, y no
+          // hay ningún objetivo que lo justifique porque ya se cumplió.
+          if (yaEsta && !guerraNueva.avisoLogro) {
+            guerraNueva.avisoLogro = true;
+            entradasGuerra.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+              texto: `⚔ Se declaró esta guerra por ${objG.n}`
+                + (guerraNueva.sobre ? `, ${guerraNueva.sobre}` : "") + `, y ${objG.logro}. `
+                + `Cada día de más a partir de acá hay que explicárselo a alguien.` });
+          }
+          if (yaEsta) {
+            nuevosStats.estabilidad = clamp(nuevosStats.estabilidad - 1.1 * esc);
+            facNueva.pueblo = Math.max(0, (facNueva.pueblo ?? 50) - 1.6 * esc);
+          }
+          // Y si al propio reino se le acaban las ganas del todo, el consejo
+          // deja de acompañar: no se puede hacer una guerra que nadie quiere.
+          if (mias <= 8 && !guerraNueva.avisoHartazgo) {
+            guerraNueva.avisoHartazgo = true;
+            entradasGuerra.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+              texto: `⚔ El reino está harto de esta guerra. En el consejo ya nadie la defiende, `
+                + `y en los caminos se habla de otra cosa: de quién la empezó.` });
+            nuevosStats.estabilidad = clamp(nuevosStats.estabilidad - 6);
+            facNueva.pueblo = Math.max(0, (facNueva.pueblo ?? 50) - 10);
           }
           // derrota: te imponen términos
           if (guerraNueva.frente <= -85 || (guerraNueva.agotaProp >= 100 && guerraNueva.frente < -25)) {
@@ -20821,7 +20999,9 @@ export default function PaxMundi() {
     if (pedido.tipo === "comparar") { alComparar(pedido.id); return; }
     if (pedido.tipo === "vista") { setProvSel(pedido.id); setVistaPedida({ id: pedido.vista, k: Date.now() }); return; }
     if (pedido.tipo === "sitio") { setProvSel(pedido.id); setSitio(pedido.obra); setTab(null); return; }
-    if (pedido.tipo === "guerra") { declararGuerra(pedido.vecino); return; }
+    if (pedido.tipo === "guerra") {
+      declararGuerra(pedido.vecino, pedido.objetivo, pedido.sobre); return;
+    }
     if (pedido.tipo === "desplegar") {
       setState((st) => {
         const p = (st.provincias || []).find((q) => q.id === pedido.id);
@@ -24061,7 +24241,7 @@ export default function PaxMundi() {
                 const enem = s.vecinos.find((v) => v.nombre === g.vecino);
                 const pv = enem ? poderVecino(enem, s.anio) : 0;
                 const pos = (g.frente + 100) / 2;
-                const terms = terminosDisponibles(g.frente);
+                const terms = terminosDisponibles(g, s);
                 return (
                   <div className="pm-fade" style={{ marginBottom: 10, padding: "11px 12px", borderRadius: 8,
                     background: `linear-gradient(135deg, ${C.red}18, transparent)`, border: `2px solid ${C.red}` }}>
@@ -24070,6 +24250,42 @@ export default function PaxMundi() {
                       <span style={{ fontSize: 10, fontFamily: mono, color: C.muted }}>{s.anio - g.desde} años</span>
                     </div>
                     <div style={{ fontSize: 14, color: C.ink, marginTop: 3 }}>contra {g.vecino}</div>
+                    {/* Para qué. Es lo primero que hay que poder leer de una
+                        guerra, y hasta ahora no estaba escrito en ningún lado
+                        porque no existía. */}
+                    {(() => {
+                      const o = objetivoDeGuerra(g);
+                      const hecho = logradoDe(g, s);
+                      const suyas = g.ganasSuyas != null ? g.ganasSuyas : voluntadDelVecino(g, s);
+                      const nuestras = g.ganasMias != null ? g.ganasMias : voluntadPropia(g, s);
+                      return (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontSize: 12, color: hecho ? C.green : C.gold, lineHeight: 1.5 }}>
+                            {hecho ? "✓" : "▸"} Se pelea por <b>{o.n}</b>
+                            {g.sobre ? `, ${g.sobre}` : ""}: {o.dice}.
+                          </div>
+                          <div style={{ fontSize: 11.5, marginTop: 3, lineHeight: 1.5,
+                            color: hecho ? C.green : C.muted }}>
+                            {hecho
+                              ? `Ya está: ${o.logro}. Cada día de más cuesta estabilidad y no compra nada.`
+                              : `Todavía no: hace falta llevar el frente a ${o.pide} y va por ${Math.round(g.frente)}.`}
+                          </div>
+                          <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: 10, fontFamily: mono }}>
+                            {[["ganas de seguir, tuyas", nuestras, nuestras > 40 ? C.gold : C.red],
+                              ["las suyas", suyas, suyas > 40 ? C.muted : C.green]].map(([t2, v2, col]) => (
+                              <div key={t2} style={{ flex: 1 }}>
+                                <div style={{ color: C.muted }}>{t2} {Math.round(v2)}%</div>
+                                <div style={{ height: 3, background: "rgba(255,255,255,0.06)",
+                                  borderRadius: 2, marginTop: 2 }}>
+                                  <div style={{ height: 3, width: `${Math.max(0, v2)}%`,
+                                    background: col, borderRadius: 2 }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   {(() => {
                     const pf = (s.provincias || []).find((p) => p.id === g.provincia);
                     const oc = (s.provincias || []).filter((p) => p.ocupada);
@@ -24142,10 +24358,18 @@ export default function PaxMundi() {
                         <button key={t.id} onClick={() => cerrarGuerra(t.id)} disabled={pensando}
                           style={{ width: "100%", textAlign: "left", padding: "7px 10px", marginBottom: 4, borderRadius: 5,
                             background: t.id === "blanca" ? "transparent" : `${C.gold}12`,
-                            border: `1px solid ${t.id === "blanca" ? C.line : C.gold}55`,
+                            border: `1px solid ${!t.dentro ? C.red : t.id === "blanca" ? C.line : C.gold}55`,
                             color: C.ink, fontFamily: serif, fontSize: 12, cursor: "pointer" }}>
                           {t.n}
+                          {!t.dentro && <span style={{ float: "right", fontFamily: mono, fontSize: 9.5, color: C.red }}>
+                            fuera de lo pactado
+                          </span>}
                           <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>{t.desc}</div>
+                          {!t.dentro && (
+                            <div style={{ fontSize: 10, color: C.red, marginTop: 2, lineHeight: 1.35 }}>
+                              {t.aviso}
+                            </div>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -24170,19 +24394,59 @@ export default function PaxMundi() {
                 <div key={i}>
                   <Vecino v={v} />
                   {!s.guerra && v.estado !== "guerra" && (
-                    <button onClick={() => declararGuerra(v.nombre)} disabled={pensando}
-                      style={{ width: "100%", marginTop: -4, marginBottom: 8, padding: "5px 9px", borderRadius: 5,
-                        background: "transparent", border: `1px solid ${C.red}44`, color: C.red,
-                        fontFamily: mono, fontSize: 10, cursor: "pointer", textAlign: "left" }}>
-                      ⚔ declarar la guerra
-                      <span style={{ float: "right", color: C.muted }}>
-                        {(() => {
-                          const pm = poderMilitar(s.stats, s.ciencia, s.poblacion, s.presupuesto, s.ejercito).total;
-                          const pv = poderVecino(v, s.anio);
-                          return pm > pv * 1.25 ? "los superás" : pm > pv * 0.8 ? "parejo" : "te superan";
-                        })()}
-                      </span>
-                    </button>
+                    <div style={{ marginTop: -4, marginBottom: 8 }}>
+                      <button onClick={() => setPorQueGuerra(porQueGuerra === v.nombre ? null : v.nombre)}
+                        disabled={pensando}
+                        style={{ width: "100%", padding: "5px 9px", borderRadius: 5,
+                          background: "transparent", border: `1px solid ${C.red}44`, color: C.red,
+                          fontFamily: mono, fontSize: 10, cursor: "pointer", textAlign: "left" }}>
+                        ⚔ declarar la guerra
+                        <span style={{ float: "right", color: C.muted }}>
+                          {(() => {
+                            const pm = poderMilitar(s.stats, s.ciencia, s.poblacion, s.presupuesto, s.ejercito).total;
+                            const pv = poderVecino(v, s.anio);
+                            return pm > pv * 1.25 ? "los superás" : pm > pv * 0.8 ? "parejo" : "te superan";
+                          })()}
+                        </span>
+                      </button>
+                      {/* Una guerra se declara POR algo. Lo que se elija acá
+                          decide cuándo está ganada y qué se puede pedir en la
+                          mesa: no es una etiqueta, es el contrato. */}
+                      {porQueGuerra === v.nombre && (
+                        <div className="pm-fade" style={{ marginTop: 5, padding: "8px 9px", borderRadius: 6,
+                          background: `${C.red}0C`, border: `1px solid ${C.red}55` }}>
+                          <div style={{ fontSize: 10, fontFamily: mono, color: C.muted, marginBottom: 5 }}>
+                            ¿POR QUÉ SE PELEA?
+                          </div>
+                          {OBJETIVOS_GUERRA.filter((o) => !o.sobre).map((o) => {
+                            const esc = escandaloDe(o, s.anio);
+                            return (
+                              <button key={o.id} disabled={pensando}
+                                onClick={() => { declararGuerra(v.nombre, o.id); setPorQueGuerra(null); }}
+                                style={{ width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4,
+                                  borderRadius: 5, background: "transparent",
+                                  border: `1px solid ${C.line}`, cursor: "pointer" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                  <span style={{ fontSize: 12, color: C.ink }}>{capitalizar(o.n)}</span>
+                                  <span style={{ fontFamily: mono, fontSize: 10,
+                                    color: esc > 2 ? C.red : esc > 0.5 ? C.gold : C.muted }}>
+                                    {esc > 2 ? "escándalo mayúsculo" : esc > 0.5 ? "les va a molestar"
+                                      : "nadie se escandaliza"}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                  {o.dice}. Hace falta llevar el frente a {o.pide}.
+                                </div>
+                              </button>
+                            );
+                          })}
+                          <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, lineHeight: 1.4 }}>
+                            Para quedarte una comarca concreta, señalala en el mapa con el clic derecho:
+                            la guerra se declara por ella y termina cuando es tuya.
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}

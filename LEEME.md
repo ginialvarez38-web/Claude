@@ -438,6 +438,43 @@ guerra se vacían, y cuando se acaban se pelea con lo que sale de la fábrica es
 día y nada más. Eso es lo que separa una guerra corta de una larga, y es la
 razón por la que todo el mundo planeó guerras cortas.
 
+## Por qué se pelea
+
+Hasta ahora una guerra se declaraba y después se veía: no se declaraba **por**
+nada. Se empezaba, se tomaba lo que el frente diera, y terminaba cuando uno de
+los dos no podía más. Así no funcionó casi ninguna guerra de la historia, y
+sobre todo así no se entiende ninguna: lo que decide cuándo y cómo termina una
+guerra no es cuánta gente queda, es para qué se empezó.
+
+Ahora hay que decirlo al declararla: **un escarmiento, que paguen tributo,
+quedarse una comarca, arrancar concesiones, o someterlo entero.** En el mapa,
+el clic derecho sobre tierra ajena declara la guerra por esa comarca —el motivo
+más viejo que hay—; los demás se eligen en la ficha del ejército, donde hay
+sitio para explicarlos.
+
+Ese objetivo hace tres cosas a la vez:
+
+- **Dice cuándo se ganó.** Un escarmiento se consigue con vencerlos en el
+  campo; una guerra por Landes termina cuando Landes es tuya, y arrasar el país
+  sin tomarla no la gana. Eso es lo que permite que exista una guerra corta.
+- **Limita lo que se puede exigir en la mesa.** Se puede pedir más de lo que se
+  anunció —nadie lo impide— pero sale marcado como «fuera de lo pactado» antes
+  de firmarlo, y cuesta prestigio, diplomacia y humor del pueblo. Pedir menos
+  nunca es una traición, y la paz blanca siempre está.
+- **Le pone precio al escándalo, y ese precio cambia con el siglo.** Borrar a
+  un vecino del mapa en 1200 es una hazaña; en 1900 es un problema con todas
+  las cortes de Europa. El mismo acto, tres veces más caro.
+
+**Nadie pelea hasta el último hombre.** Cada bando tiene ganas de seguir, y se
+acaban antes que los hombres: se pelea hasta que sale más caro seguir que
+ceder. Cuando al vecino se le acaban, manda emisarios. Si te está ocupando
+comarcas a vos, aguanta más, porque tiene con qué negociar.
+
+Y **ganar y no parar es la forma más común de perder**. Conseguido lo que se
+fue a buscar, al reino se le van las ganas de golpe —«ya ganamos, ¿qué hacemos
+acá?»— y cada turno de más cuesta estabilidad y humor. El parte de guerra dice
+las dos cosas: para qué se pelea y cuántas ganas le quedan a cada lado.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
