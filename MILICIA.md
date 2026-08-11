@@ -32,20 +32,20 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 2-3 | Escala y estructura | Seis escalones de organización, cada uno con su saber: cuántas unidades aguanta una hueste y cuántas huestes lleva un general. Poner en pie de guerra reparte, y se puede partir a mano. |
 | 12 | Cadena de mando | Cada hueste tiene su general, repartidos solos. Uno estirado deja de servir; las huestes con el mismo jefe pelean juntas y las sueltas llegan de a una. |
 | 22-23 | Niebla e inteligencia | Redes de espías que se montan, se pagan, mejoran con los años y se descubren: dan partes de todo el país del otro donde no hay tropa, con poco detalle. Y desinformación: señuelos que mueven su ejército a un campo vacío y velos que esconden el propio, pagados quemando la red y sin manera de saber desde casa si cuajaron. Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
+| 30 | Prisioneros | Una parte de las bajas del vencido se rinde en vez de morir: más cuanto más despareja fue la derrota, menos cuanto más veterana la tropa, y casi todos en una bolsa. Comen de la misma despensa que el ejército. Cinco destinos —rescate, palabra, trabajo, canje desde 1650, cuchillo— y una fama que decide cuánta gente se te entrega y cuánto aguanta el otro antes de firmar. |
 
 ## Lo que está a medias
 
 | § | Qué falta |
 |---|---|
 | 15-16 | **Combustible como recurso.** La munición ya tiene su cadena y su depósito; el combustible no se lleva aparte —una división motorizada consume pertrechos, no gasóleo—. |
-| 30 | **Prisioneros.** Las bajas se pierden; nadie se rinde ni se canjea. |
 | 39 | **Consecuencias sociales.** La población ya sufre la leva y las bajas; falta lo que deja una guerra larga —viudas, mutilados, deuda, radicalización—. |
 
 ## Lo que no existe
 
-Reparaciones (§17), guerra aérea (§20), guerra naval como sistema (§21), operaciones con objetivos
-delegados (§24-25), modo táctico (§27), industria militar y su cadena (§32-33),
-armas estratégicas y nucleares (§36-37), economía de guerra (§38).
+Reparaciones (§17), guerra aérea (§20), guerra naval como sistema (§21),
+operaciones con objetivos delegados (§24-25), modo táctico (§27), armas
+estratégicas y nucleares (§36-37), economía de guerra (§38).
 
 ## El orden
 
@@ -87,13 +87,10 @@ limita lo que se puede firmar, y salirse de eso tiene un precio puesto de
 antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
-el espionaje con su desinformación y la doctrina; lo que queda son piezas
-sueltas que ya no se apoyan unas en otras: prisioneros, aire, mar, operaciones
+el espionaje con su desinformación, la doctrina y los prisioneros; lo que queda
+son piezas sueltas que ya no se apoyan unas en otras: aire, mar, operaciones
 delegadas, economía de guerra y armas estratégicas, en ese orden por lo que
 cuestan.
-
-Después, y en este orden por lo que cuestan: prisioneros, aire, mar,
-operaciones delegadas, economía de guerra, armas estratégicas.
 
 ## Lo que no se va a hacer
 

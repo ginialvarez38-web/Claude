@@ -569,6 +569,59 @@ enseña los pesos de cada una antes de elegir, y **cambiar cuesta**: la tropa
 tiene que volver a aprender su oficio y la instrucción cae un treinta por
 ciento, así que no se cambia todos los años.
 
+## Las bajas que no son muertos
+
+Hasta acá una hueste derrotada perdía gente y esa gente desaparecía del mundo.
+Es la simplificación más cara que quedaba, porque en casi todas las batallas de
+la historia los muertos fueron una minoría de las bajas: la mayoría **se
+rindió**, y lo que pasó después con esos hombres es media historia de la
+guerra.
+
+Ahora una parte de las bajas del vencido son **prisioneros**. Cuántos lo decide
+sobre todo lo desparejo que quedó el final —en una derrota aplastante se
+entrega la mitad larga de los que caen, y en una batalla pareja casi nadie,
+porque mientras la línea aguanta no hay a quién rendirse—. Y la veteranía
+cuenta acá al revés que en todo lo demás: **el que sabe se escapa**. Los que se
+entregan en masa son las levas nuevas.
+
+Donde salen a montones es en las **bolsas**. Una hueste cortada, sin pan y sin
+salida, no se muere de hambre entera: se entrega casi completa, porque no hay
+retirada que ordenar. Ulm, Sedán, Tannenberg, Stalingrado.
+
+**Y comen todos los días.** Un preso come un tercio largo de lo que come un
+soldado en armas, y de la misma despensa. Capturar un ejército es heredar el
+problema de alimentarlo: si el pan no alcanza, los presos se mueren, y del otro
+lado eso no se distingue de haberlos matado. La mayoría de los prisioneros que
+murieron en la historia murieron de hambre y de tifus, no de una orden.
+
+Por eso hay que decidir qué hacer con ellos, y hay cinco cosas —las cinco que
+se hicieron siempre—:
+
+- **Pedir rescate.** Lo que más oro deja, y era para lo que se los tomaba.
+- **Soltarlos bajo palabra.** No deja un escudo y deja todo lo demás:
+  relaciones, prestigio y la fama de tratar bien a los que se rinden.
+- **Ponerlos a trabajar.** A las minas y a los caminos. Algo de oro y una
+  mancha.
+- **Canjearlos por los nuestros.** Hombre por hombre, y **es el único que
+  devuelve gente a las filas**. No existe antes de 1650: hace falta que dos
+  estados se reconozcan y lleven listas.
+- **Pasarlos a cuchillo.** No cuesta oro y cobra en las otras cuatro monedas a
+  la vez, incluida la de adentro: es la única de las cinco que remueve la
+  estabilidad del propio reino.
+
+Todo eso deja una **fama**, de intachable a infame, y la fama no es una nota de
+conducta: **es información que circula**. Al que degüella a los que se rinden
+no se le rinde nadie —los que se habrían entregado se mueren peleando— y además
+el vecino aguanta mucho más antes de firmar, porque rendirse deja de ser una
+salida. Una guerra contra un rey así dura el doble, y eso le costó caro a más
+de un conquistador que se había ganado la fama a propósito.
+
+Una fama se olvida, pero en una generación: no porque nadie perdone, sino
+porque se muere la gente que se acuerda. Y al firmar la paz se abren las
+prisiones de los dos lados —fue la cláusula que tuvo casi todo tratado de la
+historia y la que se cumplía primero, porque a esa altura los presos son una
+carga para los dos—.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

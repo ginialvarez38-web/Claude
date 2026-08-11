@@ -9914,6 +9914,136 @@ function doctrinaDe(s) {
 // solo peso.
 const dctr = (s, k) => { const v = doctrinaDe(s)[k]; return v == null ? (k === "mando" ? 0 : 1) : v; };
 
+// ═══ LOS PRISIONEROS: LAS BAJAS QUE NO SON MUERTOS ═══════════════════════
+//
+// Hasta acá una hueste derrotada perdía gente y esa gente desaparecía. Es la
+// simplificación más cara que quedaba, porque en casi todas las batallas de la
+// historia los muertos fueron una minoría de las bajas: la mayoría se rindió, y
+// lo que pasó después con esos hombres es media historia de la guerra.
+//
+// Dos cosas hacen que valga la pena tenerlos. La primera es que son gente, no
+// un número: comen todos los días, y un ejército que captura más de lo que
+// puede alimentar tiene un problema y no un trofeo. La segunda es que lo que se
+// hace con ellos se sabe, y cambia lo que hace el otro: al que degüella a los
+// que se rinden no se le rinde nadie, y eso no es una regla moral metida a la
+// fuerza sino la cuenta que hacía cualquier soldado antes de tirar la lanza.
+const PRESO_PAN = 0.35;           // lo que come un preso comparado con un soldado
+// Cuántos de los que caen se rinden en vez de morir. Lo decide sobre todo lo
+// desparejo que estuvo: en una derrota limpia se rinde media hueste, y en una
+// carnicería pareja no se rinde casi nadie porque no hay a quién rendirse.
+// Y la veteranía cuenta al revés que en todo lo demás: el que sabe se escapa.
+function presosDeUnaDerrota(parte, prob, temple, s) {
+  const desparejo = Math.abs((prob == null ? 0.5 : prob) - 0.5) * 2;
+  const base = 0.18 + desparejo * 0.52;
+  const escapan = 1 - 0.35 * acotar(temple || 0, 0, 1);
+  // Y cómo se trata a los que se rinden: donde se sabe que al que se rinde lo
+  // matan, no se rinde nadie. Es la cuenta que hacía el soldado, no una regla.
+  return acotar(base * escapan * (0.35 + 0.65 * famaDelTrato(s)) * (parte || 0), 0, parte || 0);
+}
+// La fama que tiene el reino tratando prisioneros: uno al empezar, y baja o
+// sube con lo que se hace. No es una nota de conducta: es información que
+// circula, y de ella depende cuánta gente se te entrega.
+function famaDelTrato(s) {
+  return acotar(s && s.trato != null ? s.trato : 1, 0, 1);
+}
+// Lo que cuesta tenerlos, en la misma vara que come el ejército.
+function panDeLosPresos(s) {
+  return Math.max(0, ((s && s.presos) || 0)) * PRESO_PAN;
+}
+// Qué se puede hacer con ellos. La lista es la de la historia y está ordenada
+// por lo que fue posible en cada momento: el rescate es tan viejo como la
+// guerra, el canje necesita que dos estados se reconozcan, y el trato debido a
+// los prisioneros es una idea de anteayer que costó mucho asentar.
+const DESTINOS_PRESO = [
+  { id: "rescate", n: "pedir rescate", ico: "⚜",
+    dice: "se los devuelve a cambio de oro, que es para lo que se los tomaba",
+    oro: 0.55, trato: 0, rel: 4 },
+  { id: "soltar", n: "soltarlos bajo palabra", ico: "☖",
+    dice: "se van a su casa con la promesa de no volver a levantar armas. Muchos la cumplen",
+    oro: 0, trato: 0.16, rel: 12, prestigio: 3 },
+  { id: "trabajo", n: "ponerlos a trabajar", ico: "⚒",
+    dice: "a las minas y a los caminos: brazos que el reino no tiene que sacar del campo",
+    oro: 0.12, trato: -0.14, rel: -10, brazos: true },
+  { id: "canje", n: "canjearlos por los nuestros", ico: "⇄", desde: 1650,
+    dice: "hombre por hombre, y los nuestros vuelven con lo que aprendieron allá",
+    oro: 0, trato: 0.10, rel: 8, canje: true },
+  { id: "cuchillo", n: "pasarlos a cuchillo", ico: "☠",
+    dice: "se acaba el problema de darles de comer. Y se acaba también que alguien vuelva a rendirse",
+    oro: 0, trato: -0.55, rel: -32, prestigio: -12, estabilidad: -6 },
+];
+function destinoDisponible(d, s) {
+  const x = typeof d === "string" ? DESTINOS_PRESO.find((q) => q.id === d) : d;
+  if (!x) return false;
+  return !x.desde || ((s && s.anio) || 0) >= x.desde;
+}
+// Lo que valía un hombre. La cifra está atada a lo que cuesta levantar una
+// unidad de infantería —dieciocho— porque de eso se trataba el rescate: se
+// pagaba por no tener que volver a levantarla. Nadie pagaba más por un preso
+// que lo que costaba reemplazarlo, salvo cuando el preso era un señor, que es
+// justo el caso que este juego no distingue.
+const ORO_POR_PRESO = 20;
+// Una fama se olvida, pero despacio: en una generación. No es indulgencia, es
+// que se muere la gente que se acuerda. Y no se olvida hasta quedar impecable
+// desde cualquier punto: vuelve hacia el uno, que es lo que se supone de
+// cualquiera mientras no haga nada.
+const TRATO_OLVIDO_DIAS = 9000;
+function tratoTrasElTiempo(s, dias) {
+  const t = famaDelTrato(s);
+  return acotar(t + (1 - t) * Math.min(1, (dias || 0) / TRATO_OLVIDO_DIAS), 0, 1);
+}
+// Cómo se llama esa fama afuera, que es la única forma en que el jugador la va
+// a ver: nadie lleva la cuenta en decimales, se dice de qué clase de gente se
+// trata.
+const FAMAS_TRATO = [
+  [0.88, "intachable", "al que se rinde se lo trata como a un hombre"],
+  [0.62, "correcta", "no se hace nada que no haga cualquiera"],
+  [0.38, "dura", "corre la voz de que rendirse acá sale caro"],
+  [0.15, "temida", "los suyos prefieren pelear a entregarse"],
+  [-1, "infame", "nadie se rinde: se sabe lo que pasa después"],
+];
+function nombreDelTrato(s) {
+  const t = famaDelTrato(s);
+  const f = FAMAS_TRATO.find((x) => t >= x[0]) || FAMAS_TRATO[FAMAS_TRATO.length - 1];
+  return { n: f[1], dice: f[2], valor: t };
+}
+// Qué pasa si se elige un destino. Devuelve los cambios y nada más: quien
+// llama decide si los aplica. El canje es el único que mira las dos columnas
+// —lo que tenés de ellos y lo que tienen de vos— porque es el único que de
+// verdad es un trato entre dos y no una decisión de uno solo.
+function resolverPresos(s, id) {
+  const d = DESTINOS_PRESO.find((q) => q.id === id);
+  const presos = Math.max(0, Math.round((s && s.presos) || 0));
+  if (!d || !destinoDisponible(d, s) || presos <= 0) return null;
+  const nuestros = Math.max(0, Math.round((s && s.nuestrosPresos) || 0));
+  // Un canje es hombre por hombre: se cambia lo que alcance, y lo que sobra de
+  // un lado se queda donde está. Sin nadie del otro lado que rescatar no hay
+  // canje que hacer.
+  const cambian = d.canje ? Math.min(presos, nuestros) : presos;
+  if (d.canje && cambian <= 0) return null;
+  const escala = cambian / Math.max(1, presos);
+  // Y el tamaño del asunto, que no es lo mismo que la parte. Lo que la fama
+  // registra es qué clase de gente sos —degollar a dos es degollar—, pero lo
+  // que las cortes registran es el número: una matanza grande es una noticia y
+  // una chica es un rumor. Por eso una escala y la otra logarítmica: entre dos
+  // y veinte hay un mundo, y entre doscientos y cuatrocientos ya no.
+  const bulto = acotar(Math.log10(1 + cambian) / Math.log10(201), 0.25, 1);
+  return {
+    // Los que se van del padrón, y los nuestros que vuelven.
+    presos: presos - cambian,
+    nuestrosPresos: d.canje ? nuestros - cambian : nuestros,
+    // Y vuelven a las filas, que es para lo que se los canjeaba. No vuelven
+    // bisoños: vuelven con lo que aprendieron allá, y por eso el canje era
+    // sospechoso para más de un estado mayor.
+    vuelven: d.canje ? cambian : 0,
+    oro: Math.round(cambian * ORO_POR_PRESO * (d.oro || 0)),
+    trato: acotar(famaDelTrato(s) + (d.trato || 0) * escala, 0, 1),
+    rel: Math.round((d.rel || 0) * bulto),
+    prestigio: Math.round((d.prestigio || 0) * bulto),
+    estabilidad: Math.round((d.estabilidad || 0) * bulto),
+    cuantos: cambian, destino: d,
+  };
+}
+
 // ——— quién la manda ———
 //
 // Hasta acá los generales eran una lista con nombres y un bono global: el mejor
@@ -12105,6 +12235,12 @@ function correrCampana(s, dias, rnd) {
   // tiene que poder mantener en pie un ejército de campaña sin pasar hambre en
   // su propia casa. Lo que tiene que apretar es la distancia y el camino, no un
   // tope global —si el tope global aprieta, no hay decisión que tomar—.
+  // Los presos que hay al empezar el turno, de un lado y del otro, y la fama
+  // que el reino tiene tratándolos. Los tres cambian durante la campaña y se
+  // devuelven al final: son del reino, no de ninguna hueste.
+  let presos = Math.max(0, Math.round((s && s.presos) || 0));
+  let nuestrosPresos = Math.max(0, Math.round((s && s.nuestrosPresos) || 0));
+  let trato = famaDelTrato(s);
   const corriente = ((s && s.provincias) || [])
     .reduce((a, p) => a + capacidadLogistica(p, s), 0) * 2;
   const despensa = corriente + Math.max(0, (s && s.reservaGrano) || 0) * 4;
@@ -12117,12 +12253,17 @@ function correrCampana(s, dias, rnd) {
   const delDeposito = Math.min(guardado / Math.max(1, dias), guardado / 30);
   const perDisponible = cadena.pertrechos + delDeposito;
   const mias = enPie.filter((h) => !h.de);
-  const pidePan = mias.reduce((a, h) => a + gastoDeHueste(h, s).pan, 0);
+  // Y los presos comen. No es un detalle de contabilidad: es la razón por la
+  // que se los soltaba. Un ejército que captura más gente de la que su
+  // despensa aguanta se queda con dos problemas y ningún trofeo, y el segundo
+  // problema es que de esa despensa come también la tropa propia.
+  const panPresos = panDeLosPresos(s);
+  const pidePan = panPresos + mias.reduce((a, h) => a + gastoDeHueste(h, s).pan, 0);
   const pidePer = mias.reduce((a, h) => a + gastoDeHueste(h, s).pertrechos, 0);
   // si no alcanza para todas, a todas les llega la misma parte de cada cosa
   const racPan = pidePan > 0 ? Math.min(1, despensa / pidePan) : 1;
   const racPer = pidePer > 0 ? Math.min(1, perDisponible / pidePer) : 1;
-  let consumo = 0, gastoPer = 0;
+  let consumo = panPresos * racPan * dias, gastoPer = 0;
   const conAbasto = enPie.map((h) => {
     const g = gastoDeHueste(h, s);
     const a = abastoDeHueste(h, teatro, s, h.de ? null
@@ -12145,6 +12286,20 @@ function correrCampana(s, dias, rnd) {
   // solo. La ruina por sobrepasarse tiene que existir; la ruina por poner un
   // ejército en pie, no.
   const comido = Math.max(0, consumo - corriente * dias) / 4;
+  // Y lo que le pasa a los presos cuando el pan no alcanza. Casi nadie mandó
+  // matar a sus prisioneros; muchísimos los dejaron morir, que en el recuerdo
+  // del otro lado es lo mismo y por eso la fama cae igual. Andersonville y los
+  // pontones de Cádiz no fueron órdenes, fueron cuentas que no daban.
+  if (presos > 0 && racPan < 0.98) {
+    const falta = 1 - racPan;
+    const mueren = Math.min(presos, Math.round(presos * Math.min(0.7, falta * 0.02 * dias)));
+    if (mueren > 0) {
+      presos -= mueren;
+      trato = acotar(trato - (mueren / Math.max(1, presos + mueren)) * 0.35, 0, 1);
+      hechos.push(`Mueren ${mueren} de los prisioneros: no hay ración que darles. `
+        + `Del otro lado no se distingue eso de haberlos matado.`);
+    }
+  }
   enPie.length = 0;
   for (const h of conAbasto) enPie.push(h);
 
@@ -12280,6 +12435,21 @@ function correrCampana(s, dias, rnd) {
         if (!h.de && antesN - ahoraN >= 1)
           hechos.push(`${h.nombre} pierde ${antesN - ahoraN} unidades sin combatir: `
             + `${h.porque}. Le llega ${Math.round(h.abasto * 100)} de cada cien raciones.`);
+        // Una hueste cortada no se muere de hambre entera: se entrega. Es de
+        // donde salieron los prisioneros a montones —Ulm, Sedán, Tannenberg,
+        // Stalingrado— y la diferencia con una derrota en el campo es que ahí
+        // no hay a dónde retirarse, así que la veteranía no salva a nadie y se
+        // entregan casi todos los que caen.
+        if (h.porque === "cortado: no llega nada") {
+          const captor = h.de ? s : null;
+          const dan = Math.round(presosDeUnaDerrota(antesN - ahoraN, 1, 0, captor));
+          if (dan > 0) {
+            if (h.de) { presos += dan;
+              hechos.push(`Sin salida y sin pan, se entregan ${dan} de ${h.nombre}.`); }
+            else { nuestrosPresos += dan;
+              hechos.push(`Cercada y sin pan, ${h.nombre} deja ${dan} en manos del enemigo.`); }
+          }
+        }
       }
     }
     // Y la campaña en sí. No hace falta pelear para aprender: marchar de
@@ -12360,8 +12530,18 @@ function correrCampana(s, dias, rnd) {
     // El que pierde se retira por donde vino, si le queda alguien; y se retira
     // el bando entero, no la unidad que chocó primero.
     const hacia = { x: gana[0].x, y: gana[0].y };
+    // Quién se queda con los que se rinden. Si el que gana soy yo, mi fama
+    // pesa en cuántos se entregan; si gana el vecino, no le llevo la cuenta de
+    // la suya y se lo trata como a cualquiera.
+    const mioGana = !gana[0].de;
+    let rendidos = 0;
     for (const q of pierde) {
       const ramasP = mermar(q.ramas, pp);
+      // Las bajas del vencido no son todas muertos. La mayoría de las veces no
+      // lo fueron: se rindieron cuando ya no había línea a la que volver, y
+      // los que se salvaron de eso fueron los que sabían retirarse.
+      const caidos = Math.max(0, unidadesTotales(q.ramas) - unidadesTotales(ramasP));
+      rendidos += Math.round(presosDeUnaDerrota(caidos, r.prob, templeDe(q), mioGana ? s : null));
       if (unidadesTotales(ramasP) <= 0) {
         caidas.add(q.id);
         hechos.push(`De ${q.nombre} no queda nada.`);
@@ -12373,6 +12553,12 @@ function correrCampana(s, dias, rnd) {
         moral: acotar((q.moral || 100) - 26 * (1 - 0.45 * templeDe(q)), 15, 100),
         orden: null, destino: null, objetivo: null, cola: [], largo: 0, recorrido: 0,
         x: q.x + (q.x - hacia.x) * 0.35, y: q.y + (q.y - hacia.y) * 0.35 };
+    }
+    if (rendidos > 0) {
+      if (mioGana) { presos += rendidos;
+        hechos.push(`Se entregan ${rendidos} del vencido${donde}: son presos y hay que darles de comer.`); }
+      else { nuestrosPresos += rendidos;
+        hechos.push(`Quedan ${rendidos} de los nuestros en sus manos${donde}.`); }
     }
   }
   const finales = vivas.filter((h) => h && !caidas.has(h.id) && unidadesTotales(h.ramas) > 0);
@@ -12440,6 +12626,10 @@ function correrCampana(s, dias, rnd) {
            // engaños que se pasaron de fecha se caen solos: un rumor dura lo
            // que dura y después alguien va a mirar.
            espias: espiasTrasElTiempo(s, dias, true),
+           // Los presos de los dos lados, y la fama que deja lo que se hizo
+           // con ellos. La fama se despinta con los años porque se muere la
+           // gente que se acuerda, no porque nadie perdone.
+           presos, nuestrosPresos, trato: tratoTrasElTiempo({ trato }, dias),
            enganos: enganosVivos({ ...s, anio: (s.anio || 0) + Math.floor(((s.dia || 0) + dias) / 365),
              dia: ((s.dia || 0) + dias) % 365 }) };
 }
@@ -12686,6 +12876,11 @@ function voluntadDelVecino(g, s) {
   const suyasTuyas = ((s && s.frentes) || []).filter((f) => f.pais && f.parte > 0.5).length;
   let v = 100 - (g.agotaEnem || 0) - Math.max(0, g.frente || 0) * 0.55 - suyasTuyas * 7;
   v += ocupadas * 6;                       // si te está ganando, aguanta más
+  // Y contra quién se pelea. Un vecino que sabe lo que le pasa al que se
+  // entrega no se entrega: pelea hasta el final porque rendirse no es una
+  // salida, y una guerra contra un enemigo así dura el doble. Es lo que le
+  // costó a más de un conquistador la fama que se había ganado a propósito.
+  v += (1 - famaDelTrato(s)) * 30;
   return Math.round(acotar(v, 0, 100));
 }
 // Y cuánto le queda al propio. Acá está la pieza que hace que una guerra
@@ -19642,6 +19837,9 @@ export default function PaxMundi() {
         espias: {}, enganos: [],
         // Se pelea como se peleó siempre hasta que alguien decida otra cosa.
         doctrina: "plazas",
+        // Sin nadie preso de ningún lado, y con la fama que tiene cualquiera
+        // que todavía no hizo nada: la de tratar bien a los que se entregan.
+        presos: 0, nuestrosPresos: 0, trato: 1,
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -19899,8 +20097,19 @@ export default function PaxMundi() {
         txt += ` Era lo que se fue a buscar, y se consiguió.`;
         stats.prestigio = clamp(stats.prestigio + 4);
       }
+      // Y los presos se van a su casa. Es la cláusula que tuvo casi todo
+      // tratado de paz de la historia y la que se cumplía primero, porque a
+      // esa altura son una carga para los dos. Los nuestros vuelven a las
+      // filas; los suyos dejan de comer de nuestra despensa.
+      const vuelven = Math.max(0, Math.round(st.nuestrosPresos || 0));
+      const ejPaz = { ...(st.ejercito || {}) };
+      if (vuelven) ejPaz.infanteria = (ejPaz.infanteria || 0) + vuelven;
+      if (vuelven || (st.presos || 0) > 0)
+        txt += ` Se abren las prisiones de los dos lados: vuelven ${vuelven} unidades de las nuestras`
+          + ` y se van ${Math.max(0, Math.round(st.presos || 0))} de las suyas.`;
       return { ...st, guerra: null, vecinos: vec, provincias: provNuevas,
         poblacion: poblacionTotal(provNuevas) || pob, tributos: trib, stats, facciones: fac,
+        presos: 0, nuestrosPresos: 0, ejercito: ejPaz,
         edu: { ...st.edu, oro },
         cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "mundo", texto: txt }] };
     });
@@ -20973,6 +21182,9 @@ export default function PaxMundi() {
         espias: espiasFin,
         // Y los engaños en pie, que caducan solos.
         enganos: camp.enganos,
+        // Los que se entregaron y los que quedaron allá, y la fama que va
+        // quedando de lo que se hace con unos y otros.
+        presos: camp.presos, nuestrosPresos: camp.nuestrosPresos, trato: camp.trato,
         soberano: sobNuevo,
         generales: generalesVivos,
         gobierno: { ...s.gobierno, miembros: miembrosVivos },
@@ -24441,6 +24653,105 @@ export default function PaxMundi() {
                   );
                 })()}
 
+                {/* ── los que se entregaron ──
+                    Aparece cuando hay algo que decir: alguien preso de algún
+                    lado, o una fama que ya no es la de cualquiera. Sin nada de
+                    eso es un bloque vacío, que es ruido; con la fama manchada
+                    hay que poder verla aunque las prisiones estén limpias,
+                    porque es lo que va a decidir la próxima guerra. */}
+                {(() => {
+                  const presos = Math.max(0, Math.round(s.presos || 0));
+                  const nuestros = Math.max(0, Math.round(s.nuestrosPresos || 0));
+                  const fama = nombreDelTrato(s);
+                  if (!presos && !nuestros && fama.valor > 0.98) return null;
+                  const pan = panDeLosPresos(s);
+                  const colorFama = fama.valor > 0.85 ? C.ink : fama.valor > 0.55 ? C.brass : C.red;
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⛓ LOS QUE SE ENTREGARON
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: colorFama }}>
+                          fama {fama.n}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        {capitalizar(fama.dice)}. Y eso decide cuánta gente se entrega y cuánto
+                        aguanta el otro antes de firmar.
+                      </div>
+                      {[["En tus manos", `${presos} unidades`, presos ? C.ink : C.muted],
+                        ["Comen al día", `${pan.toFixed(1)} de pan`, pan > 0 ? C.brass : C.muted],
+                        ["De los tuyos allá", `${nuestros} unidades`, nuestros ? C.red : C.muted]].map(([a3, b3, col]) => (
+                        <div key={a3} style={{ display: "flex", justifyContent: "space-between",
+                          fontSize: 12, color: C.muted, marginTop: 3 }}>
+                          <span>{a3}</span><span style={{ color: col, fontFamily: mono }}>{b3}</span>
+                        </div>
+                      ))}
+                      {presos > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                          {DESTINOS_PRESO.map((d) => {
+                            const puede = destinoDisponible(d, s);
+                            const r = puede ? resolverPresos(s, d.id) : null;
+                            return (
+                              <button key={d.id} disabled={!r || pensando}
+                                onClick={() => setState((st) => {
+                                  const q = resolverPresos(st, d.id);
+                                  if (!q) return st;
+                                  const ej = { ...(st.ejercito || {}) };
+                                  if (q.vuelven) ej.infanteria = (ej.infanteria || 0) + q.vuelven;
+                                  // Lo que se hace con los prisioneros no se
+                                  // sabe solo en la corte del que los tenía:
+                                  // se sabe en todas. Al enemigo le pega
+                                  // entero y al resto la mitad, que es lo que
+                                  // pasa cuando algo se cuenta de segunda mano.
+                                  const enGuerra = (st.guerra || {}).vecino;
+                                  const vec = (st.vecinos || []).map((v) => (q.rel
+                                    ? { ...v, relacion: acotar((v.relacion || 0)
+                                        + (v.nombre === enGuerra ? q.rel : q.rel / 2), -100, 100) } : v));
+                                  return { ...st, presos: q.presos, nuestrosPresos: q.nuestrosPresos,
+                                    trato: q.trato, ejercito: ej, vecinos: vec,
+                                    edu: { ...st.edu, oro: st.edu.oro + q.oro },
+                                    stats: { ...st.stats,
+                                      prestigio: acotar((st.stats.prestigio || 0) + q.prestigio, 0, 100),
+                                      estabilidad: acotar((st.stats.estabilidad || 0) + q.estabilidad, 0, 100) },
+                                    cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                      texto: `${d.ico} ${capitalizar(d.n)}: ${q.cuantos} unidades. ${capitalizar(d.dice)}.`
+                                        + (q.oro ? ` Entran ⚜${q.oro}.` : "")
+                                        + (q.vuelven ? ` Vuelven ${q.vuelven} de los nuestros a las filas.` : "") }] };
+                                })}
+                                style={{ textAlign: "left", padding: "7px 9px", borderRadius: 6,
+                                  cursor: r && !pensando ? "pointer" : "default", background: "transparent",
+                                  border: `1px solid ${d.id === "cuchillo" ? `${C.red}55` : C.line}`,
+                                  opacity: r ? 1 : 0.45 }}>
+                                <div style={{ fontSize: 12.5, color: d.id === "cuchillo" ? C.red : C.ink }}>
+                                  {d.ico} {capitalizar(d.n)}
+                                  <span style={{ float: "right", fontFamily: mono, fontSize: 10.5,
+                                    color: (r && r.oro) ? C.gold : C.muted }}>
+                                    {!puede ? `no antes de ${d.desde}`
+                                      : !r ? "no hay a quién canjear"
+                                      : (r.oro ? `⚜${r.oro} · ` : "") + `${r.cuantos} unidades`}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                  {capitalizar(d.dice)}.
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {nuestros > 0 && presos <= 0 && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          Sin nadie de ellos en tus manos no hay nada que ofrecer: los tuyos se
+                          quedan allá hasta que se firme la paz o hasta que tomes a alguien.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* ── cómo está organizado ──
                     Lo que cambió en dos mil años no es cuántos hombres podía
                     levantar un país sino cuántos podía mover a la vez. Va antes
@@ -24721,6 +25032,16 @@ export default function PaxMundi() {
                               ? `Ya está: ${o.logro}. Cada día de más cuesta estabilidad y no compra nada.`
                               : `Todavía no: hace falta llevar el frente a ${o.pide} y va por ${Math.round(g.frente)}.`}
                           </div>
+                          {/* Y por qué aguantan más de lo que deberían. Sin
+                              esto, un reino con la fama arruinada veía al
+                              vecino pelear hasta el último hombre y no tenía
+                              cómo saber que era culpa suya. */}
+                          {famaDelTrato(s) < 0.98 && (
+                            <div style={{ fontSize: 11.5, color: C.red, marginTop: 4, lineHeight: 1.5 }}>
+                              Y pelean contra un reino de fama {nombreDelTrato(s).n}:
+                              {" "}{nombreDelTrato(s).dice}, así que rendirse no les parece una salida.
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: 10, fontFamily: mono }}>
                             {[["ganas de seguir, tuyas", nuestras, nuestras > 40 ? C.gold : C.red],
                               ["las suyas", suyas, suyas > 40 ? C.muted : C.green]].map(([t2, v2, col]) => (
