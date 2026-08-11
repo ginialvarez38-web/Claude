@@ -9647,7 +9647,8 @@ function velocidadHueste(h, prov, s) {
   // Y el bulto. Una columna más grande de lo que su época sabe organizar tarda
   // un día en pasar por donde la cabeza pasó en una hora: es la razón por la
   // que se inventó dividir un ejército, mucho antes que ninguna otra.
-  return base * (0.75 + via.soc * 0.75) * (t.com || 1) * estorboEnLaMarcha(desbordeDe(h, s));
+  return base * (0.75 + via.soc * 0.75) * (t.com || 1)
+    * estorboEnLaMarcha(desbordeDe(h, s)) * dctr(s, "marcha");
 }
 
 // ═══ EL TEMPLE: LO QUE LE ENSEÑARON Y LO QUE VIVIÓ ════════════════════════
@@ -9831,8 +9832,11 @@ function organizacionDe(s) {
 const DESBORDE_TOPE = 3;
 function desbordeDe(h, s) {
   const org = organizacionDe(s);
+  // Hay doctrinas que aguantan más gentío junta que otras: una leva en masa
+  // convive con columnas que a un ejército de gabinete lo paralizarían.
+  const bulto = org.bulto * dctr(s, "bulto");
   const n = unidadesTotales((h && h.ramas) || {});
-  return n <= org.bulto ? 0 : Math.min(DESBORDE_TOPE, (n - org.bulto) / org.bulto);
+  return n <= bulto ? 0 : Math.min(DESBORDE_TOPE, (n - bulto) / bulto);
 }
 // Y lo que eso cuesta. Son tres cosas distintas y la peor no es la del combate:
 // una hueste demasiado grande pelea algo peor, pero marcha la mitad y come casi
@@ -9845,6 +9849,70 @@ function desbordeDe(h, s) {
 const estorboEnElCampo = (d) => 1 / (1 + d * 0.08);
 const estorboEnLaMarcha = (d) => 1 / (1 + d * 0.50);
 const estorboEnElPan = (d) => 1 + d * 0.40;
+
+// ═══ LA DOCTRINA: CÓMO SE PELEA ══════════════════════════════════════════
+//
+// Hasta acá el ejército tenía piezas —come, se adiestra, se organiza, se
+// entera, se arma— y ninguna manera de decir para qué las usa. Todos los
+// reinos peleaban igual y solo se distinguían por cuánto tenían de cada cosa.
+//
+// Una doctrina no es un bono: es una forma de pelear, y una forma de pelear es
+// siempre un intercambio. El que decide que la guerra se gana tomando plazas
+// no busca batalla y por eso pelea peor en campo abierto; el que la juega toda
+// en un día pierde mucha más gente el día que la juega mal; el que vive del
+// país que cruza marcha el doble y deja atrás su intendencia. Ninguna es
+// mejor: cada una es mejor CONTRA algo y peor contra otra cosa, y por eso
+// elegir significa algo.
+//
+// Cada una toca las mismas piezas que ya existen —el campo, el sitio, la
+// marcha, el pan, los pertrechos, el bulto, el mando, la vista, la sangre y el
+// empuje del frente— y nada más. No hay reglas nuevas: hay pesos distintos
+// sobre las que ya están, que es lo que una doctrina es de verdad.
+const DOCTRINAS = [
+  { id: "plazas", n: "la guerra de plazas",
+    dice: "no se busca batalla: se toman los castillos y se arrasa el campo. Quien tiene las plazas tiene la tierra",
+    cuesta: "y por eso a campo abierto pelea peor que nadie",
+    campo: 0.86, sitio: 1.38, marcha: 0.92, pan: 0.95, sangre: 0.85, frente: 0.92 },
+  { id: "choque", n: "la batalla decisiva", req: "organizacion.militar_org.disciplina_formacion",
+    dice: "todo se juega en un día y en un campo: se busca al otro ejército y se lo deshace",
+    cuesta: "y el día que sale mal se pierde mucha más gente",
+    campo: 1.32, sitio: 0.78, marcha: 1.08, sangre: 1.28 },
+  { id: "posiciones", n: "la guerra de posiciones", req: "organizacion.logistica.deposito_avanzado",
+    dice: "no se arriesga nada: se maniobra, se cortan los caminos y se toma lo que el otro no puede sostener",
+    cuesta: "y se avanza despacio, porque nunca se fuerza nada",
+    campo: 0.84, sitio: 1.26, marcha: 0.84, pan: 0.74, pertrechos: 0.86, sangre: 0.68, frente: 0.88 },
+  { id: "nacion", n: "la nación en armas", req: "organizacion.militar_org.conscripcion",
+    dice: "se marcha rápido, se vive del país que se cruza y se acepta la sangría: hay más hombres detrás",
+    cuesta: "y hay más hombres detrás porque hacen falta",
+    campo: 1.14, marcha: 1.38, pan: 0.68, bulto: 1.30, sangre: 1.38, frente: 1.12 },
+  { id: "material", n: "la guerra de material", req: "ingenierias.militar.explosivo_alto",
+    dice: "una línea no se rompe con hombres, se rompe con toneladas: se avanza poco y se gasta todo",
+    cuesta: "y se gasta de verdad: casi el doble de pertrechos por cabeza",
+    campo: 1.26, sitio: 1.32, marcha: 0.76, pertrechos: 2.05, sangre: 0.72, frente: 1.06 },
+  { id: "movimiento", n: "la guerra de movimiento", req: "ingenierias.termicas.motor_combustion",
+    dice: "se concentra, se rompe por un punto y se explota hacia atrás antes de que el otro reaccione",
+    cuesta: "y todo depende de que el abasto siga el paso, que casi nunca lo sigue",
+    campo: 1.16, marcha: 1.48, mando: 2, ojo: 1.28, pan: 1.18, pertrechos: 1.40,
+    sangre: 0.92, frente: 1.22 },
+];
+const DOCTRINA_IDX = Object.fromEntries(DOCTRINAS.map((x) => [x.id, x]));
+const DOCTRINA_LLANA = { id: "plazas", campo: 1, sitio: 1, marcha: 1, pan: 1, pertrechos: 1,
+  bulto: 1, mando: 0, ojo: 1, sangre: 1, frente: 1 };
+function doctrinaDisponible(d, ciencia) {
+  const x = typeof d === "string" ? DOCTRINA_IDX[d] : d;
+  if (!x) return false;
+  return !x.req || new Set((ciencia || {}).sabidos || []).has(x.req);
+}
+// La que el reino sigue hoy. Si eligió una que su siglo todavía no sabe, no
+// sigue ninguna: se pelea como se peleó siempre.
+function doctrinaDe(s) {
+  const x = DOCTRINA_IDX[(s && s.doctrina) || "plazas"] || DOCTRINA_IDX.plazas;
+  const d = doctrinaDisponible(x, s && s.ciencia) ? x : DOCTRINA_IDX.plazas;
+  return { ...DOCTRINA_LLANA, ...d };
+}
+// Y un atajo, porque se pregunta desde diez sitios distintos y siempre por un
+// solo peso.
+const dctr = (s, k) => { const v = doctrinaDe(s)[k]; return v == null ? (k === "mando" ? 0 : 1) : v; };
 
 // ——— quién la manda ———
 //
@@ -9875,7 +9943,8 @@ function manoDelGeneral(h, s) {
   if (!g) return SIN_JEFE;
   const org = organizacionDe(s);
   const cuantas = huestesDe(g, s).length;
-  const estira = cuantas > org.mando ? 1 + (cuantas - org.mando) * 0.42 : 1;
+  const cabe = org.mando + dctr(s, "mando");
+  const estira = cuantas > cabe ? 1 + (cuantas - cabe) * 0.42 : 1;
   const edad = ((s && s.anio) || 0) - (g.nacio || 0);
   const merma = edad > 62 ? 0.88 : 1;              // los viejos ya no cabalgan
   // El suelo es no tener jefe. Un general estirado deja de servir de mucho,
@@ -10132,7 +10201,9 @@ function pulsoDeAsalto(h, p, s, certeza) {
   const zapa = zapaDeHueste(h, s);
   // La brecha no suma tropa: quita muro. Y si esto es lo que se le va a
   // enseñar a quien manda, no es el muro que hay: es el que le contaron.
-  const bruto = d.total * (1 - zapa.v);
+  // La doctrina divide el muro: la que vive de tomar plazas tiene ingenieros,
+  // minas y paciencia; la que busca batalla no sabe hacer un asedio.
+  const bruto = (d.total * (1 - zapa.v)) / Math.max(0.2, dctr(s, "sitio"));
   const defensa = Math.max(1, certeza != null && certeza < 1
     ? estimaDe(bruto, certeza, (p && p.id) || "plaza") : bruto);
   // Al que asalta un muro se le pide bastante más que empatar.
@@ -10592,7 +10663,7 @@ function alcanceDeVista(h, s) {
   for (const [id, v] of Object.entries(VER_SABER)) if (sab.has(id)) m += v;
   // Y la tropa que sabe lo que hace explora; la que no, se pierde. Un
   // reconocimiento es la cosa más difícil que se le puede pedir a un bisoño.
-  return base * (1 + m) * (0.72 + 0.5 * templeDe(h));
+  return base * (1 + m) * (0.72 + 0.5 * templeDe(h)) * dctr(s, "ojo");
 }
 function velocidadDelAviso(s) {
   const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
@@ -11203,7 +11274,10 @@ function gastoDeHueste(h, s) {
   // dar de comer a una columna que tarda tres días en pasar, y el forraje del
   // camino se lo comieron los de adelante.
   merma *= estorboEnElPan(desbordeDe(h, s));
-  return { pan: pan * merma, pertrechos: per * merma };
+  // Y la doctrina, que en esto es donde más se nota: una que vive del país que
+  // cruza come la mitad, y una que rompe líneas a cañonazos gasta el doble.
+  return { pan: pan * merma * dctr(s, "pan"),
+           pertrechos: per * merma * dctr(s, "pertrechos") };
 }
 
 // Lo que una comarca puede sacar de sí y mandar hacia afuera. El camino es lo
@@ -11535,8 +11609,11 @@ function pasoDelFrente(t, s, huestes, dt, desorden) {
     const levanta = t.nat[i] !== t.due[i] && t.nat[i] >= 0
       ? (defensasDelTeatro(t, s).plaza.get(t.prov[i]) || 0) * FUERZA_PLAZA * RESISTENCIA_OCUPADA : 0;
     // Una plaza defiende bien y ataca poco: la guarnición no sale a campaña.
+    // El empuje del que ataca lleva su doctrina: la de material muerde más
+    // suelo por día y la de posiciones, menos, que es lo que hicieron las dos.
+    const emp = dctr(s, "frente");
     const ata = levanta + (mio ? t.hueSuyo[i] * fS + t.plaSuyo[i] * 0.25
-                               : t.hueMio[i] * fM + t.plaMio[i] * 0.25);
+                               : (t.hueMio[i] * fM + t.plaMio[i] * 0.25) * emp);
     // al cercado se le acaba todo: al final se rinde aunque nadie lo asalte
     //
     // Y cada palmo se defiende un poco distinto: un vado, un desfiladero, un
@@ -11849,6 +11926,13 @@ function pesoEnCampo(h, prov, s) {
     f += c;
     partes.push({ n: "los cañones pesan menos sin muro enfrente", v: Math.round(c) });
   }
+  // Y cómo pelea este reino. Es lo último que se aplica porque es lo que
+  // envuelve a todo lo demás: los mismos hombres, otra manera de usarlos.
+  const dc = dctr(s, "campo");
+  if (Math.abs(dc - 1) > 0.01) {
+    partes.push({ n: `${doctrinaDe(s).n}`, v: Math.round(f * (dc - 1)) });
+    f *= dc;
+  }
   return { total: Math.max(1, f), partes };
 }
 
@@ -11905,10 +11989,16 @@ function batallar(a, b, prov, s, rnd) {
   // orden, recoge a los suyos y no deja media hueste tirada por el camino, que
   // es donde de verdad se pierde un ejército derrotado. Acá está la mitad de
   // lo que vale un veterano.
+  // Y lo que la doctrina cuesta en gente. Acá está el precio de buscar la
+  // batalla decisiva y el ahorro de no buscarla nunca, que es de lo que se
+  // trata: los dos bandos pelean con su propia doctrina, y en el juego el
+  // vecino pelea con la suya —que se supone la de su siglo— y el reino con la
+  // que eligió.
   const menos = (h) => {
     const l = Array.isArray(h) ? h : [h];
     const t = l.reduce((x, q2) => x + templeDe(q2), 0) / Math.max(1, l.length);
-    return 1 - 0.32 * t;
+    const propia = l.some((q2) => !q2.de) ? dctr(s, "sangre") : 1;
+    return (1 - 0.32 * t) * propia;
   };
   return { ganaA, prob: q.prob, pulso: q,
            bajasA: (ganaA ? delGana : delPierde) * menos(a),
@@ -12230,7 +12320,9 @@ function correrCampana(s, dias, rnd) {
     const b = vivas[j];
     const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
     // quiénes llegan a ese campo bajo el mismo mando
-    const cuantasJuntan = Math.max(1, organizacionDe(s).mando);
+    // Y lo que la doctrina agrega: hacer converger es lo que una doctrina de
+    // movimiento enseña, y es literalmente para lo que se inventó.
+    const cuantasJuntan = Math.max(1, organizacionDe(s).mando + dctr(s, "mando"));
     const junta = (h) => {
       const l = vivas.filter((q) => q && !caidas.has(q.id) && !pelearon.has(q.id)
         && (q.id === h.id || (mismoMando(q, h)
@@ -19548,6 +19640,8 @@ export default function PaxMundi() {
         deposito: 0,
         // Ni una red montada en ninguna parte: eso se paga.
         espias: {}, enganos: [],
+        // Se pelea como se peleó siempre hasta que alguien decida otra cosa.
+        doctrina: "plazas",
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -24280,6 +24374,69 @@ export default function PaxMundi() {
                           hay hulla: los hornos dejaron de depender del bosque
                         </div>
                       )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── cómo se pelea ──
+                    Una doctrina no es un bono: es un intercambio. Cada una
+                    dice qué gana y qué pierde en la misma línea, porque si no
+                    se ve el precio no hay decisión que tomar. */}
+                {(() => {
+                  const dc = doctrinaDe(s);
+                  const pesos = [["campo", "en campo abierto"], ["sitio", "tomando plazas"],
+                    ["marcha", "de marcha"], ["pan", "de pan"], ["pertrechos", "de pertrechos"],
+                    ["sangre", "de bajas propias"], ["frente", "de empuje"], ["ojo", "de vista"],
+                    ["bulto", "de bulto"]];
+                  const comoVa = (d) => pesos.filter(([k]) => Math.abs((d[k] == null ? 1 : d[k]) - 1) > 0.02)
+                    .map(([k, n]) => `${n} ×${(d[k] == null ? 1 : d[k]).toFixed(2)}`).join(" · ")
+                    + ((d.mando || 0) ? ` · +${d.mando} de mando` : "");
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⚑ CÓMO SE PELEA
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: C.gold }}>{dc.n}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        Ninguna es mejor: cada una es mejor contra algo y peor contra otra cosa.
+                        Cambiar de doctrina cuesta instrucción —la tropa tiene que volver a aprender—,
+                        así que no se cambia todos los años.
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                        {DOCTRINAS.map((d) => {
+                          const puede = doctrinaDisponible(d, s.ciencia);
+                          const act = dc.id === d.id;
+                          return (
+                            <button key={d.id} disabled={!puede || pensando || act}
+                              onClick={() => setState((st) => ({ ...st, doctrina: d.id,
+                                instruccion: Math.round((st.instruccion ?? INSTRUCCION_BASE) * 0.7),
+                                cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                  texto: `⚑ El ejército pasa a ${d.n}: ${d.dice}, ${d.cuesta}. `
+                                    + `La tropa tiene que volver a aprender su oficio y la instrucción `
+                                    + `cae a ${Math.round((st.instruccion ?? INSTRUCCION_BASE) * 0.7)}.` }] }))}
+                              style={{ textAlign: "left", padding: "7px 9px", borderRadius: 6,
+                                cursor: puede && !act ? "pointer" : "default",
+                                background: act ? `${C.gold}18` : "transparent",
+                                border: `1px solid ${act ? C.gold : C.line}`, opacity: puede ? 1 : 0.45 }}>
+                              <div style={{ fontSize: 12.5, color: act ? C.gold : C.ink }}>
+                                {act ? "▪ " : "▫ "}{capitalizar(d.n)}
+                              </div>
+                              <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                {puede ? `${capitalizar(d.dice)}, ${d.cuesta}.`
+                                  : `hace falta saber «${MED_IDX[d.req]?.nombre || d.req}»`}
+                              </div>
+                              {puede && (
+                                <div style={{ fontSize: 9.5, fontFamily: mono, color: C.brass, marginTop: 3 }}>
+                                  {comoVa(d)}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })()}

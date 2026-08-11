@@ -535,6 +535,40 @@ fue a buscar, al reino se le van las ganas de golpe —«ya ganamos, ¿qué hace
 acá?»— y cada turno de más cuesta estabilidad y humor. El parte de guerra dice
 las dos cosas: para qué se pelea y cuántas ganas le quedan a cada lado.
 
+## Cómo se pelea
+
+El ejército tenía piezas —come, se adiestra, se organiza, se entera, se arma— y
+ninguna manera de decir para qué las usa. Todos los reinos peleaban igual y
+solo se distinguían por cuánto tenían de cada cosa.
+
+Una **doctrina** no es un bono: es una forma de pelear, y una forma de pelear
+es siempre un intercambio. Hay seis, y cada una toca las piezas que ya existen
+—el campo, el sitio, la marcha, el pan, los pertrechos, el bulto, el mando, la
+vista, la sangre y el empuje del frente— y ninguna nueva:
+
+- **La guerra de plazas.** Se toman los castillos y se arrasa el campo; para
+  ella un muro vale la mitad que para cualquier otra. Y por eso a campo abierto
+  pelea peor que nadie.
+- **La batalla decisiva.** Se busca al otro ejército y se lo deshace: la mejor
+  en campo abierto, la peor delante de una plaza, y el día que sale mal deja el
+  doble de gente en el suelo.
+- **La guerra de posiciones.** No se arriesga nada: come un cuarto menos, pierde
+  la mitad de gente y avanza despacísimo.
+- **La nación en armas.** Marcha el doble, come un tercio menos porque vive del
+  país que cruza, y lo paga en sangre: hay más hombres detrás porque hacen falta.
+- **La guerra de material.** Gasta el doble de pertrechos por cabeza y es
+  literalmente su método; a cambio rompe muros y líneas, y avanza más despacio
+  que nadie.
+- **La guerra de movimiento.** Concentra dos cuerpos más de los que su época
+  permite, ve más lejos y marcha un cincuenta por ciento más rápido — y todo
+  depende de que el abasto siga el paso, que casi nunca lo sigue.
+
+Ninguna es mejor: cada una es mejor **contra** algo. Se ganan con el siglo y no
+por decreto —decretar guerra de movimiento en 1200 no hace nada—, la ficha
+enseña los pesos de cada una antes de elegir, y **cambiar cuesta**: la tropa
+tiene que volver a aprender su oficio y la instrucción cae un treinta por
+ciento, así que no se cambia todos los años.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
