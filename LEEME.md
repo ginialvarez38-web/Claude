@@ -786,6 +786,59 @@ cada hueste — porque eso es un parte y no un mapa.
 La operación se cae sola cuando se cumple, y se cae también si el general se
 muere: sin él, las huestes se quedan donde están esperando órdenes.
 
+## Convertir el país
+
+Una guerra larga no se paga con el tesoro. Se paga convirtiendo el país, y
+todos los estados que pelearon una lo descubrieron tarde y del mismo modo: las
+fábricas dejan de hacer arados y hacen espoletas, la gente que hacía una cosa
+hace otra, y el estado se mete a decidir qué se produce, cosa que en tiempos
+normales no hace nadie.
+
+Hay cinco escalones y cada uno pide su siglo:
+
+- **Economía de paz.** El país hace lo que hacía. En una guerra larga eso rinde
+  exactamente nada.
+- **Impuesto de guerra.** Lo único que se podía hacer en 1200, y por eso se
+  hizo siempre. Es el único escalón que deja **más** plata de la que quita.
+- **Arsenales del rey.** Llegan con el ejército permanente y no antes: sin
+  tropa propia todo el año no hay para quién fabricar todo el año.
+- **Requisa de la industria.** No se puede requisar una industria que no
+  existe: esto es de la era de la fábrica.
+- **Economía dirigida.** El estado decide qué se produce, quién lo produce y
+  quién lo come. Pide una industria que se pueda planificar.
+
+**Y convertir lleva años.** Es lo único importante de todo el bloque. Hay dos
+números: lo que se mandó hacer y lo que de verdad está pasando, y el segundo se
+arrastra detrás del primero. El día que se firma la orden no ha cambiado nada.
+Llegar desde una economía de paz hasta la dirigida lleva unos nueve años, y una
+economía a medio convertir rinde a medias. Por eso **gana las guerras largas y
+arruina las cortas**: al año de haberla mandado, la cadena de guerra rinde un
+tercio más; a los seis, el triple.
+
+**Cañones o manteca, y no las dos cosas.** Lo que sube la producción de guerra
+baja la civil en la misma medida — no hay magia, hay gente y hierro que estaban
+haciendo otra cosa. Con la conversión hecha la cadena rinde cuatro veces y el
+ingreso del reino cae a poco más de la mitad. Lo que **no** cambia es el cuello
+de botella: movilizar no abre minas nuevas, pone a trabajar de noche lo que ya
+había. Lo angosto no se ensancha gritando.
+
+**La gente lo aguanta en guerra y no lo aguanta en paz.** La misma requisa que
+en tiempo de paz sería un escándalo, en guerra es lo que hay que hacer. Los que
+más se quejan no son los que hacen la cola del pan sino los que tenían las
+fábricas: a unos les tocan la ración y a otros la propiedad. El único contento
+es el ejército, que por primera vez tiene todo lo que pidió.
+
+**Y desmovilizar es su propia crisis.** El año que sigue a una guerra es peor
+que el último año de la guerra: hay talleres sin encargos y hombres que hacían
+espoletas y no saben hacer otra cosa. Desarmar va al doble de rápido que armar
+—cerrar una fábrica es más fácil que abrirla— pero aun así lleva años, con la
+producción civil por debajo de lo normal todo ese tiempo. 1919 y 1921 fueron
+eso, y nadie los esperaba.
+
+Cómo se paga sigue donde estaba: el tesoro, la deuda con sus banqueros y su
+tasa, y envilecer la moneda con su memoria. La economía de guerra no es una
+manera de pagar; es una manera de producir.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

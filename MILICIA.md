@@ -36,6 +36,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 20 | Guerra aérea | Una sexta rama que no marcha con nadie: opera sobre el teatro entero. El cuello de botella son las tripulaciones, no los aparatos. Hay que ganarle el cielo a su aviación antes de poder hacer nada más, y ganarlo es destruírsela: lo roto queda roto. Cuatro misiones —cazar, cortar el abasto, apoyar al ejército con radio, bombardear su país— y la antiaérea, que sale de la artillería y del radar. Bombardear ciudades les baja poco la producción y les SUBE las ganas de pelear. |
 | 21 | Guerra naval | El agua es agua: un ejército no la cruza caminando, hacen falta barcos y un mar que no sea del otro. Sin puerto no hay armada, y sin costa no se puede bloquear a nadie ni ser bloqueado. La flota en ser hace la curva cóncava: cuatro veces más barcos no dan cuatro veces más mar. Cuatro misiones —escuadra, bloqueo, corso, convoy— y el bloqueo, que se siente en la aduana antes que en el frente y que, al revés que bombardear ciudades, SÍ le rompe la voluntad al otro. |
 | 24-25 | Operaciones delegadas | Se le encarga a un general una intención —limpiar, tomar, sostener, hostigar, desembarcar— y él da las órdenes. Una directiva llega hasta donde llega el correo del siglo: ciento y pico de kilómetros en 1200, un continente con telégrafo. Más allá el hombre cumple lo que entendió, y ahí los rasgos de los generales dejan de ser un adorno: paso, sangre, muros y cuánto se salen de lo pedido. Lo que vuelve es un parte con fecha, no el mapa en vivo. |
+| 38 | Economía de guerra | Cinco escalones de conversión, cada uno con su siglo: derrama, arsenales del rey, requisa, economía dirigida. Convertir lleva años —hay dos números, lo que se mandó y lo que está pasando— y por eso gana las guerras largas y arruina las cortas. Lo que sube la cadena de guerra baja la producción civil en la misma medida, y el cuello de botella no se mueve. Desmovilizar es su propia crisis. |
 
 ## Lo que está a medias
 
@@ -47,7 +48,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 ## Lo que no existe
 
 Reparaciones (§17), modo táctico (§27), armas estratégicas y nucleares
-(§36-37), economía de guerra (§38).
+(§36-37).
 
 ## El orden
 
@@ -90,8 +91,8 @@ antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
 el espionaje con su desinformación, la doctrina, los prisioneros, el aire, el
-mar y las operaciones delegadas; lo que queda son dos piezas sueltas que ya no
-se apoyan una en la otra: la economía de guerra y las armas estratégicas.
+mar, las operaciones delegadas y la economía de guerra. Queda una sola pieza:
+las armas estratégicas.
 
 ## Lo que no se va a hacer
 

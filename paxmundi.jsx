@@ -9519,15 +9519,22 @@ function capacidadEconomica(ciencia) {
   return { fiscal, renta, fuentes };
 }
 // Ingreso anual del estado: lo que puede cobrar sobre su riqueza, más lo que su saber genera.
-function ingresoAnualDe(stats, gobierno, ciencia, poblacion, vecinos, factorias, ejercito, provincias) {
+function ingresoAnualDe(stats, gobierno, ciencia, poblacion, vecinos, factorias, ejercito, provincias, s) {
   const cap = capacidadEconomica(ciencia);
   const base = riquezaGravable(stats, poblacion ?? 4000) + bonoGobierno(gobierno);
-  const ext = comercioExterior(vecinos, ciencia, stats, factorias, ejercito).total;
+  const ext = comercioExterior(vecinos, ciencia, stats, factorias, ejercito, s).total;
   // Dos cosas que antes no entraban en la cuenta: que la gente viva en ciudad
   // —lo urbano se grava y lo rural se esconde— y que las provincias estén
   // enlazadas, porque sin camino no hay comercio interior que gravar.
   const red = provincias ? bonoRed(provincias) * bonoUrbano(provincias) * bonoConsumo(provincias) : 1;
-  return Math.round((base * cap.fiscal + cap.renta) * red + ext);
+  // Y lo que la economía de guerra le quita y le da. Le quita producción civil
+  // —que es de donde sale casi todo lo que se grava— y le da lo que el estado
+  // saca de más cuando está en pie de guerra: derramas, requisas y un aparato
+  // que cobra donde antes no llegaba. Lo primero pesa más que lo segundo, y
+  // esa es la cuenta que hace que movilizar no sea gratis ni de lejos.
+  const civil = s ? rindeCivil(s) : 1;
+  const extra = s ? pesoMovilizacion(s).oro : 0;
+  return Math.round(((base * cap.fiscal + cap.renta) * red + ext) * civil * (1 + extra));
 }
 
 // ═══ EL EJÉRCITO ════════════════════════════════════════════
@@ -10683,6 +10690,148 @@ function velocidadEnLaMar(s) {
   let m = 0;
   for (const [id, v] of Object.entries(ARMADA_SABER)) if (sab.has(id)) m += v;
   return PASO_MAR * (0.55 + m * 0.5);
+}
+
+// ═══ LA ECONOMÍA DE GUERRA: CONVERTIR EL PAÍS ════════════════════════════
+//
+// Una guerra larga no se paga con el tesoro. Se paga convirtiendo el país, y
+// todos los estados que pelearon una lo descubrieron tarde y del mismo modo:
+// las fábricas dejan de hacer arados y hacen espoletas, la gente que hacía una
+// cosa hace otra, y el estado se mete a decidir qué se produce, cosa que en
+// tiempos normales no hace nadie.
+//
+// Las tres cosas que este bloque pone y por qué:
+//
+//   · CONVERTIR LLEVA AÑOS. Es lo único importante. Una economía de guerra no
+//     es un interruptor: es una obra que tarda entre dos y cinco años en
+//     rendir, y por eso gana las guerras largas y arruina las cortas. Un
+//     estado que se moviliza a fondo para una guerra que termina en seis meses
+//     destrozó su economía para nada, y eso pasó más de una vez.
+//   · CAÑONES O MANTECA, y no las dos cosas. Lo que sube la cadena de guerra
+//     baja la producción civil en la misma medida: no hay magia, hay gente y
+//     hierro que estaban haciendo otra cosa.
+//   · Y DESMOVILIZAR TAMBIÉN CUESTA. Cuando la guerra termina hay fábricas sin
+//     encargos y soldados sin oficio, y el año siguiente es peor que el
+//     último de la guerra. 1919 y 1921 fueron desastres económicos y nadie los
+//     esperaba.
+//
+// Lo que NO va acá es cómo se paga, porque eso ya está en el juego desde
+// siempre: el tesoro, la deuda con sus banqueros y su tasa, y envilecer la
+// moneda con su memoria. La economía de guerra no es una manera de pagar: es
+// una manera de producir.
+const MOVILIZACION = [
+  { id: "paz", n: "economía de paz", ico: "☘", cadena: 1, civil: 1, oro: 0, humor: 0, tarda: 0,
+    dice: "el país hace lo que hacía",
+    cuesta: "nada, y en una guerra larga eso es lo que rinde: nada" },
+  { id: "impuesto", n: "impuesto de guerra", ico: "⚖", cadena: 1.15, civil: 0.97, oro: 0.22,
+    humor: 8, tarda: 0.4,
+    dice: "una derrama extraordinaria y las maestranzas trabajando de noche",
+    cuesta: "lo que cuesta siempre cobrar de más: que se note" },
+  { id: "arsenales", n: "arsenales del rey", ico: "⚒", cadena: 1.7, civil: 0.90, oro: 0.14,
+    humor: 15, tarda: 1.6, req: "organizacion.militar_org.ejercito_permanente",
+    falta: "los arsenales del estado llegaron con el ejército permanente y no antes: sin tropa propia "
+      + "todo el año, no hay para quién fabricar todo el año",
+    dice: "talleres del estado que no dependen de que un particular quiera",
+    cuesta: "gente y hierro que estaban haciendo otra cosa" },
+  { id: "requisa", n: "requisa de la industria", ico: "⛭", cadena: 2.6, civil: 0.76, oro: 0.10,
+    humor: 26, tarda: 2.6, req: "ingenierias.produccion.fabrica",
+    falta: "no se puede requisar una industria que no existe",
+    dice: "se le dice a cada fábrica qué hace y a qué precio",
+    cuesta: "el comercio se resiente entero y los que tenían las fábricas no lo olvidan" },
+  { id: "dirigida", n: "economía dirigida", ico: "◼", cadena: 4.0, civil: 0.58, oro: 0.06,
+    humor: 42, tarda: 4.2, req: "ingenierias.produccion.par_produccion_masa",
+    falta: "dirigir una economía entera pide una industria que se pueda planificar",
+    dice: "el estado decide qué se produce, quién lo produce y quién lo come",
+    cuesta: "todo lo demás, y hay racionamiento en las ciudades" },
+];
+const MOVIL_IDX = Object.fromEntries(MOVILIZACION.map((x) => [x.id, x]));
+function movilizacionDisponible(m, s) {
+  const x = typeof m === "string" ? MOVIL_IDX[m] : m;
+  if (!x) return false;
+  return !x.req || new Set(((s && s.ciencia) || {}).sabidos || []).has(x.req);
+}
+// Lo que el reino mandó hacer. Si mandó algo que su siglo no sabe hacer, no
+// hace nada: se queda en la economía de paz, que es lo que había.
+function planDeMovilizacion(s) {
+  const x = MOVIL_IDX[(s && s.movilizacion) || "paz"] || MOVIL_IDX.paz;
+  return movilizacionDisponible(x, s) ? x : MOVIL_IDX.paz;
+}
+const escalonDe = (m) => MOVILIZACION.findIndex((x) => x.id === m.id);
+// Y lo que de verdad está pasando en el país, que no es lo mismo. Acá está
+// todo el sistema: convertir una economía lleva años y el número se arrastra
+// detrás de la decisión. Subir cuesta lo que dice cada escalón; bajar es más
+// rápido —desarmar siempre lo es— pero deja el desorden de la vuelta.
+function movilizacionEfectiva(s) {
+  const v = s && s.movilEfec != null ? s.movilEfec : 0;
+  return acotar(v, 0, MOVILIZACION.length - 1);
+}
+function movilizarTrasElTiempo(s, dias) {
+  const meta = escalonDe(planDeMovilizacion(s));
+  const hoy = movilizacionEfectiva(s);
+  const anos = Math.max(0, dias || 0) / 365;
+  if (Math.abs(meta - hoy) < 0.001) return meta;
+  // Se recorre escalón por escalón y cada uno cuesta lo suyo. Hacerlo de una
+  // sola cuenta con el precio del primer escalón dejaba que un país saltara de
+  // la economía de paz a media requisa en un año, que es justo lo contrario de
+  // lo que este bloque quiere decir.
+  let v = hoy, quedan = anos;
+  if (meta > hoy) {
+    while (quedan > 1e-9 && v < meta - 1e-9) {
+      const sig = Math.min(meta, Math.floor(v + 1e-9) + 1);
+      const tarda = Math.max(0.2, MOVILIZACION[Math.min(MOVILIZACION.length - 1,
+        Math.ceil(v + 1e-9))].tarda);
+      const cuesta = (sig - v) * tarda;
+      if (cuesta <= quedan) { quedan -= cuesta; v = sig; } else { v += quedan / tarda; quedan = 0; }
+    }
+    return Math.min(meta, v);
+  }
+  // Desarmar va al doble de rápido, que es lo que pasa: cerrar es fácil.
+  while (quedan > 1e-9 && v > meta + 1e-9) {
+    const sig = Math.max(meta, Math.ceil(v - 1e-9) - 1);
+    const tarda = Math.max(0.2, MOVILIZACION[Math.max(0, Math.ceil(v - 1e-9))].tarda) / 2;
+    const cuesta = (v - sig) * tarda;
+    if (cuesta <= quedan) { quedan -= cuesta; v = sig; } else { v -= quedan / tarda; quedan = 0; }
+  }
+  return Math.max(meta, v);
+}
+// Los pesos de hoy, interpolados entre los dos escalones que hay alrededor:
+// una economía a medio convertir rinde a medias, que es lo que se ve siempre.
+function pesoMovilizacion(s) {
+  const v = movilizacionEfectiva(s);
+  const a = MOVILIZACION[Math.floor(v)], b = MOVILIZACION[Math.min(MOVILIZACION.length - 1, Math.ceil(v))];
+  const t = v - Math.floor(v);
+  const mez = (k) => a[k] + (b[k] - a[k]) * t;
+  return { nivel: v, cadena: mez("cadena"), civil: mez("civil"), oro: mez("oro"),
+           humor: mez("humor"), n: t < 0.5 ? a.n : b.n,
+           // A medio camino no se ha llegado a ninguna parte, y hay que decirlo.
+           mudando: t > 0.02 && t < 0.98 };
+}
+// Y si lo que está pasando es una desmovilización, que tiene su propio precio.
+// El año que sigue a una guerra es peor que el último año de la guerra: hay
+// fábricas sin encargos y hombres sin oficio, y nadie lo espera nunca.
+function desmovilizando(s) {
+  return movilizacionEfectiva(s) - escalonDe(planDeMovilizacion(s)) > 0.05;
+}
+// Lo que la conversión le hace a la producción civil, que es de donde sale
+// todo lo que el estado grava. El bajón de la vuelta va acá y no en otro sitio
+// porque es exactamente eso: producción que ya no tiene para quién.
+function rindeCivil(s) {
+  const p = pesoMovilizacion(s);
+  return p.civil * (desmovilizando(s) ? 0.88 : 1);
+}
+// Y lo que la conversión le hace a la gente. No es una sola cifra: los que
+// pagan la derrama, los que ven su fábrica requisada y los que hacen la cola
+// del pan no son los mismos y no se enojan por lo mismo.
+function humorDeLaGuerra(s) {
+  const p = pesoMovilizacion(s);
+  const enGuerra = !!(s && s.guerra);
+  // En guerra se aguanta bastante más: la misma requisa que en paz sería un
+  // escándalo, en guerra es lo que hay que hacer. Y por eso desmovilizar tarde
+  // sale caro: lo que se toleraba deja de tolerarse el día que se firma.
+  const paciencia = enGuerra ? 0.45 : 1;
+  return { pueblo: -p.humor * 0.9 * paciencia, mercaderes: -p.humor * 1.15 * paciencia,
+           nobleza: -p.humor * 0.5 * paciencia, ejercito: p.humor * 0.35,
+           estabilidad: -p.humor * 0.09 * paciencia };
 }
 
 // ═══ LA OPERACIÓN DELEGADA: DECIR QUÉ Y NO CÓMO ══════════════════════════
@@ -12480,7 +12629,13 @@ function cadenaDeGuerra(s) {
   // Lo que pasa por el más angosto, y nada más. No se promedia: una cadena no
   // rinde el promedio de sus eslabones.
   const metal = Math.min(mina, fundicion);
-  const pertrechos = Math.min(metal, maestranza);
+  // Y lo que la economía de guerra le agrega. Va sobre el resultado y no sobre
+  // un eslabón: movilizar no abre minas nuevas, pone a trabajar de noche todo
+  // lo que ya había y le quita a lo civil lo que le hace falta. Por eso el
+  // cuello de botella sigue siendo el mismo —lo angosto no se ensancha
+  // gritando— y lo que cambia es cuánto pasa por él.
+  const mov = pesoMovilizacion(s);
+  const pertrechos = Math.min(metal, maestranza) * mov.cadena;
   const partes = [
     { id: "mina", n: "la mina", v: mina, dice: hulla > 0 && mina < fundicion
         ? "hay con qué fundir y no qué fundir" : "lo que sale de la tierra" },
@@ -12490,7 +12645,8 @@ function cadenaDeGuerra(s) {
       dice: "quien convierte el metal en armas" },
   ];
   const cuello = partes.slice().sort((a, b) => a.v - b.v)[0];
-  return { mina, fundicion, maestranza, metal, pertrechos, hulla, partes, cuello };
+  return { mina, fundicion, maestranza, metal, pertrechos, hulla, partes, cuello,
+           movilizacion: mov };
 }
 
 // Cuánto puede sacar el reino de sus depósitos por día sin vaciarlos de golpe.
@@ -15576,7 +15732,7 @@ function turnPrompt(state, accion, dias) {
       facciones: (() => {
         const ctx = { cap: capacidadEconomica(state.ciencia),
           comercio: comercioExterior(state.vecinos, state.ciencia, state.stats, state.factorias, state.ejercito, state).total,
-          ingreso: ingresoAnualDe(state.stats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias),
+          ingreso: ingresoAnualDe(state.stats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias, state),
           pob: state.poblacion || 4000, techo: demografiaDe(state.ciencia).techo };
         return estadoFacciones(state, ctx).map((f) =>
           `${f.n}: ${f.satisf < 25 ? "hostil" : f.satisf < 45 ? "descontento" : f.satisf < 70 ? "conforme" : "leal"}` +
@@ -18154,7 +18310,7 @@ function motorLocal(s, accion, dias, semilla) {
   const provs = s.provincias || [];
   const pob = poblacionTotal(provs) || s.poblacion || 1;
   const techo = demografiaDe(s.ciencia).techo || 1;
-  const ingreso = Math.max(8, ingresoAnualDe(s.stats, s.gobierno, s.ciencia, pob, s.vecinos, s.factorias, s.ejercito, provs));
+  const ingreso = Math.max(8, ingresoAnualDe(s.stats, s.gobierno, s.ciencia, pob, s.vecinos, s.factorias, s.ejercito, provs, s));
   const vecs = s.vecinos || [];
   const sumaFert = provs.reduce((acc, x) => acc + fertProv(x), 0) || 1;
   const techoTotal = demografiaDe(s.ciencia).techo;
@@ -19908,7 +20064,7 @@ const TAREAS = [
       const falta = Math.ceil(caja.piso - (s.edu.oro || 0));
       if (falta <= 0) return null;
       const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
-        s.factorias, s.ejercito, s.provincias);
+        s.factorias, s.ejercito, s.provincias, s);
       const cr = capacidadCredito(s.ciencia, s.stats, ing, s.anio, s.creditoVetado, s.devaluaciones);
       if (!cr.habilitado) return null;
       const m = Math.min(falta, Math.max(0, cr.tope - (s.deuda || 0)));
@@ -19971,7 +20127,7 @@ const TAREAS = [
       const total = unidadesTotales(ej);
       if (total <= 1 || s.guerra) return null;        // ni el último cuerpo ni en guerra
       const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
-        s.factorias, s.ejercito, s.provincias);
+        s.factorias, s.ejercito, s.provincias, s);
       const mant = mantenimientoEjercito(ej, s);
       const lim = limiteFuerzas(s.stats, s.ciencia, s.poblacion);
       if (mant <= ing * 0.45 && total <= lim) return null;
@@ -20029,7 +20185,7 @@ const TAREAS = [
       // el sostén de lo que ya hay no puede comerse la renta: fundar de más es
       // la forma más rápida de arruinar un reino con buenas intenciones
       const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion, s.vecinos,
-        s.factorias, s.ejercito, s.provincias);
+        s.factorias, s.ejercito, s.provincias, s);
       if (mantenimientoTotal(edu) + mantenimientoEjercito(s.ejercito, s) > ing * 0.6) return null;
       const ob = objetivoDe("sedes", caja.objetivo);
       const pueden = INSTITUCIONES.filter((i) => i.costo <= caja.cupo
@@ -20867,6 +21023,9 @@ export default function PaxMundi() {
         // Sin nada delegado: al principio se manda hueste por hueste, que es
         // lo que se puede hacer cuando el reino cabe en un mapa.
         operaciones: [],
+        // Y el país haciendo lo que hacía. Convertirlo lleva años y por eso
+        // hay dos números: lo que se mandó y lo que de verdad está pasando.
+        movilizacion: "paz", movilEfec: 0,
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -20899,7 +21058,7 @@ export default function PaxMundi() {
 
   function devaluar() {
     setState((st) => {
-      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
+      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias, st);
       const d = capacidadDevaluar(st.ciencia, st.devaluaciones, ing);
       if (!d.habilitado) return st;
       const deudaLicuada = Math.round((st.deuda || 0) * d.licua);
@@ -21081,7 +21240,7 @@ export default function PaxMundi() {
       const term = terminosDisponibles(g, st).find((x) => x.id === termino);
       const deMas = term && !term.dentro ? term.extra : 0;
       const obj = objetivoDeGuerra(g);
-      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
+      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias, st);
       if (termino === "tributo") {
         trib.push({ hacia: g.vecino, monto: Math.round(ing * 0.13), quedan: 10 });
         stats.prestigio = clamp(stats.prestigio + 6);
@@ -21159,7 +21318,7 @@ export default function PaxMundi() {
 
   function pedirPrestado(monto) {
     setState((st) => {
-      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias);
+      const ing = ingresoAnualDe(st.stats, st.gobierno, st.ciencia, st.poblacion, st.vecinos, st.factorias, st.ejercito, st.provincias, st);
       const cr = capacidadCredito(st.ciencia, st.stats, ing, st.anio, st.creditoVetado, st.devaluaciones);
       if (!cr.habilitado) return st;
       const cupo = Math.max(0, cr.tope - (st.deuda || 0));
@@ -21534,7 +21693,7 @@ export default function PaxMundi() {
       const ctxFac = {
         cap: capacidadEconomica(state.ciencia),
         comercio: comercioExterior(vecinosNuevos, state.ciencia, nuevosStats, state.factorias, state.ejercito, state).total,
-        ingreso: ingresoAnualDe(nuevosStats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias),
+        ingreso: ingresoAnualDe(nuevosStats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias, state),
         pob: state.poblacion || 4000,
         techo: demografiaDe(state.ciencia).techo,
       };
@@ -21688,9 +21847,40 @@ export default function PaxMundi() {
       reservaNueva = Math.max(0, reservaNueva * Math.pow(0.97, esc));
       let pobNueva = Math.max(150, poblacionTotal(provs));
 
+      // ═══ LA CONVERSIÓN DEL PAÍS ═══
+      // Va antes del presupuesto porque decide de cuánto se está hablando: lo
+      // que la economía rinde este año depende de en qué punto de la obra está,
+      // y la obra tarda años. Se calcula el nivel al final del tramo y con ese
+      // se hacen todas las cuentas del turno.
+      const movilAntes = movilizacionEfectiva(state);
+      const movilFin = movilizarTrasElTiempo(state, lapso);
+      const estadoMov = { ...state, movilEfec: movilFin };
+      const movHoy = pesoMovilizacion(estadoMov);
+      const planMov = planDeMovilizacion(estadoMov);
+      const entradasMov = [];
+      // Cuando la obra termina —y solo entonces— se cuenta. Un aviso por año
+      // de conversión sería ruido; el que importa es el día que rinde.
+      if (Math.abs(movilFin - escalonDe(planMov)) < 0.03 && Math.abs(movilAntes - escalonDe(planMov)) >= 0.03)
+        entradasMov.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+          texto: movilFin > movilAntes
+            ? `⚒ La conversión está hecha: el país ya trabaja en ${planMov.n}. La cadena de guerra `
+              + `rinde ${movHoy.cadena.toFixed(1)} veces lo que rendía y lo civil, `
+              + `${Math.round(movHoy.civil * 100)} de cada cien. Tardó lo que tenía que tardar.`
+            : `⚒ Se desmonta lo último de la economía de guerra. Quedan talleres sin encargos y `
+              + `hombres que hacían espoletas y no saben hacer otra cosa: ese es el problema del `
+              + `año que viene y no de este. Nadie lo espera nunca y siempre pasa.` });
+      // Y lo que la conversión le hace a la gente. En guerra se aguanta; en paz
+      // la misma requisa es un escándalo, y por eso desmovilizar tarde sale caro.
+      if (movHoy.nivel > 0.05) {
+        const humorG = humorDeLaGuerra(estadoMov);
+        for (const [k, v] of Object.entries(humorG))
+          if (k !== "estabilidad")
+            facNueva[k] = Math.max(0, Math.min(100, (facNueva[k] ?? 50) + v * esc * 0.35));
+        nuevosStats.estabilidad = clamp(nuevosStats.estabilidad + humorG.estabilidad * esc * 0.35);
+      }
       // ═══ PRESUPUESTO: se cobra el mantenimiento y se reparte lo que sobra ═══
       const P = state.presupuesto || PRESUPUESTO_INICIAL;
-      const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito, provs);
+      const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito, provs, estadoMov);
       // Y las redes de espías, que se pagan todos los años como cualquier otra
       // cosa que hay que sostener. Una red sin presupuesto no es una red.
       const mantAnual = mantenimientoTotal(state.edu) + mantenimientoEjercito(state.ejercito, state)
@@ -22286,6 +22476,10 @@ export default function PaxMundi() {
         pilotos: camp.aire ? camp.aire.pilotos : (state.pilotos || 0),
         // Y lo que sigue delegado, que se cae solo al cumplirse.
         operaciones: camp.operaciones || [],
+        // En qué punto está la conversión del país. Es un número que se
+        // arrastra detrás de la decisión y tarda años en alcanzarla.
+        movilEfec: movilFin,
+
         guerra: guerraNueva,
         bajasRecientes: Math.round(bajasNuevas + bajasGuerra),
         tributos: tributosNuevos,
@@ -22299,7 +22493,7 @@ export default function PaxMundi() {
         ciencia: { ...cienciaNueva, pi: s.ciencia.pi + gananciaPI + piExtra },
         edu: { ...s.edu, oro: Math.max(0, s.edu.oro + gananciaOro + oroReembolso + oroTributo - (guerraNueva ? poderMilitar(nuevosStats, cienciaPrevia, pobNueva, P, state.ejercito).total * 0.55 * esc : 0)), sedes: sedesFin, sabios: sabiosVivos },
         proyectos: proyectosNuevos,
-        cronica: [...s.cronica, ...entradas, ...entradasProy, ...entradasInv, ...entradasCiencia, ...entradasEco, ...entradasPob, ...entradasFac, ...entradasVec, ...entradasVida, ...entradasGuerra],
+        cronica: [...s.cronica, ...entradas, ...entradasProy, ...entradasInv, ...entradasCiencia, ...entradasEco, ...entradasMov, ...entradasPob, ...entradasFac, ...entradasVec, ...entradasVida, ...entradasGuerra],
       // Los secretarios despachan al final, con el turno ya resuelto: hacen
       // sobre el reino que quedó, no sobre el que había al empezar.
       }, r.efectos, rndEfectos), dado(semillaTurno + "|sec")).estado);
@@ -22557,7 +22751,7 @@ export default function PaxMundi() {
   const capEco = capacidadEconomica(s.ciencia);
   const rentaHab = rentaPorHabitante(s.stats, s.ciencia);
   const comExt = comercioExterior(s.vecinos, s.ciencia, s.stats, s.factorias, s.ejercito, s);
-  const oroBruto = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, poblacionUtil(s.provincias) || s.poblacion, s.vecinos, s.factorias, s.ejercito, s.provincias);
+  const oroBruto = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, poblacionUtil(s.provincias) || s.poblacion, s.vecinos, s.factorias, s.ejercito, s.provincias, s);
   const credHoy = capacidadCredito(s.ciencia, s.stats, oroBruto, s.anio, s.creditoVetado, s.devaluaciones);
   const servicioDeuda = (s.deuda || 0) * (credHoy.habilitado ? credHoy.tasa : TASA_BASE);
   const netoPres = oroBruto - mantT - servicioDeuda;
@@ -25748,6 +25942,104 @@ export default function PaxMundi() {
                   );
                 })()}
 
+                {/* ── la conversión del país ──
+                    Está siempre, porque el impuesto de guerra existió siempre
+                    y decidir no cobrarlo también es una decisión. */}
+                {(() => {
+                  const plan = planDeMovilizacion(s);
+                  const hoy = pesoMovilizacion(s);
+                  const meta = MOVILIZACION.indexOf(plan);
+                  const yendo = Math.abs(hoy.nivel - meta) > 0.03;
+                  const bajando = desmovilizando(s);
+                  const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion,
+                    s.vecinos, s.factorias, s.ejercito, s.provincias, s);
+                  const enPaz = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion,
+                    s.vecinos, s.factorias, s.ejercito, s.provincias,
+                    { ...s, movilEfec: 0, movilizacion: "paz" });
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⚒ LA CONVERSIÓN DEL PAÍS
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12,
+                          color: bajando ? C.red : yendo ? C.brass : C.gold }}>
+                          {hoy.nivel < 0.03 ? "en paz" : hoy.n}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        Una guerra larga no se paga con el tesoro: se paga convirtiendo el país. Y
+                        convertirlo lleva años, así que gana las guerras largas y arruina las cortas.
+                      </div>
+                      {[["La cadena de guerra rinde", `×${hoy.cadena.toFixed(2)}`,
+                          hoy.cadena > 1.05 ? C.green : C.muted],
+                        ["Lo civil queda en", `${Math.round(hoy.civil * 100)}%`,
+                          hoy.civil < 0.95 ? C.red : C.muted],
+                        ["Ingreso del reino", `⚜${Math.round(ing)} de ⚜${Math.round(enPaz)} en paz`,
+                          ing < enPaz ? C.red : ing > enPaz ? C.green : C.muted]].map(([a2, b2, c2]) => (
+                        <div key={a2} style={{ display: "flex", justifyContent: "space-between",
+                          gap: 10, fontSize: 12, color: C.muted, marginTop: 3 }}>
+                          <span>{a2}</span>
+                          <span style={{ color: c2, fontFamily: mono, textAlign: "right" }}>{b2}</span>
+                        </div>
+                      ))}
+                      {yendo && !bajando && (
+                        <div style={{ fontSize: 11, color: C.brass, marginTop: 6, lineHeight: 1.45 }}>
+                          La obra está a medio hacer: se mandó {plan.n} y el país va por
+                          {" "}{hoy.n.toLowerCase()}. Una economía a medio convertir rinde a medias, y
+                          eso no se apura pagando.
+                        </div>
+                      )}
+                      {bajando && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          Se está desarmando, y el año que sigue a una guerra es peor que el último
+                          año de la guerra: talleres sin encargos y hombres que hacían espoletas y no
+                          saben hacer otra cosa. Nadie lo espera nunca.
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                        {MOVILIZACION.map((m) => {
+                          const puede = movilizacionDisponible(m, s);
+                          const act = plan.id === m.id;
+                          const i = MOVILIZACION.indexOf(m);
+                          return (
+                            <button key={m.id} disabled={!puede || pensando || act}
+                              onClick={() => setState((st) => ({ ...st, movilizacion: m.id,
+                                cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                  texto: `${m.ico} El reino pasa a ${m.n}: ${m.dice}. Cuesta ${m.cuesta}.`
+                                    + (m.tarda > 0.5
+                                      ? ` No es un interruptor: la conversión tarda unos ${Math.round(m.tarda)} años en rendir.`
+                                      : "") }] }))}
+                              style={{ textAlign: "left", padding: "7px 9px", borderRadius: 6,
+                                cursor: puede && !act ? "pointer" : "default",
+                                background: act ? `${C.gold}18` : "transparent",
+                                border: `1px solid ${act ? C.gold : C.line}`, opacity: puede ? 1 : 0.45 }}>
+                              <div style={{ fontSize: 12.5, color: act ? C.gold : C.ink }}>
+                                {m.ico} {capitalizar(m.n)}
+                                <span style={{ float: "right", fontFamily: mono, fontSize: 10,
+                                  color: C.muted }}>
+                                  {m.tarda > 0 ? `tarda ${m.tarda} años` : "ya está"}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                {puede ? `${capitalizar(m.dice)}. Cuesta ${m.cuesta}.`
+                                  : `hace falta saber «${MED_IDX[m.req]?.nombre || m.req}»: ${m.falta}`}
+                              </div>
+                              {puede && i > 0 && (
+                                <div style={{ fontSize: 9.5, fontFamily: mono, color: C.brass, marginTop: 3 }}>
+                                  guerra ×{m.cadena.toFixed(2)} · civil ×{m.civil.toFixed(2)} ·
+                                  {" "}fisco +{Math.round(m.oro * 100)}% · humor −{m.humor}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── lo que se delega ──
                     Solo aparece cuando hay a quién delegárselo: sin generales
                     no hay nada que decir, y el reino manda hueste por hueste
@@ -26599,7 +26891,7 @@ export default function PaxMundi() {
                   {(() => {
                     const red = redDeEspias(s, v.nombre);
                     const ing = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, s.poblacion,
-                      s.vecinos, s.factorias, s.ejercito, s.provincias);
+                      s.vecinos, s.factorias, s.ejercito, s.provincias, s);
                     const cuesta = Math.round(Math.max(0, ing) * ESPIA_ORO);
                     const techo = techoDeEspias(s);
                     if (red) return (
