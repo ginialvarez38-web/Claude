@@ -10384,6 +10384,302 @@ function aireTrasElTiempo(s, dias) {
       ? `No vuelven ${d.aviones} aparatos y las tripulaciones bajan a ${Math.round(pilotos)}.` : null };
 }
 
+// ═══ EL MAR: LO QUE SE GANA SIN DAR UNA BATALLA ═══════════════════════════
+//
+// El aire no toma tierra; el mar tampoco, y además casi nunca pelea. La
+// historia naval que se cuenta es la de Salamina, Lepanto y Trafalgar, y la
+// historia naval que decidió las guerras es la de los años en que no pasó
+// nada: la escuadra del otro en el puerto sin animarse a salir, el bloqueo
+// apretando un año tras otro, y los convoyes llegando. Mahan tenía razón en
+// eso aunque se equivocara en casi todo lo demás.
+//
+// Lo que este sistema pone, y por qué:
+//
+//   · TIERRA Y MAR SON COSAS DISTINTAS. Hasta ahora un ejército cruzaba el
+//     Canal caminando, que es el agujero más grande que quedaba en el mapa.
+//     Ahora el agua es agua: se cruza embarcado o no se cruza, y no se
+//     desembarca en una costa que no se domina. Overlord esperó a tenerla.
+//   · EL BLOQUEO. Lo más decisivo que hizo una armada, y no se parece en nada
+//     a una batalla: aprieta la economía del otro hasta que su gobierno no
+//     puede sostener la guerra. Y acá está el contraste con el bombardeo del
+//     país, que está unas líneas más arriba en este mismo archivo: bombardear
+//     ciudades endurece la voluntad y bloquear puertos la rompe. Las dos cosas
+//     se midieron y dieron distinto, y no es una paradoja: una bomba es un
+//     ataque que se puede odiar, y el hambre de tres inviernos es una cuenta
+//     que hace todo el mundo en su casa.
+//   · LA FLOTA EN SER. Una escuadra que no sale del puerto sigue obligando al
+//     otro a tener la suya enfrente. Por eso la superioridad aplastante no se
+//     convierte en dominio aplastante: la curva es cóncava a propósito, y de
+//     ahí sale que Tirpitz consiguiera algo real sin ganar nunca nada.
+//   · EL CORSO. La guerra al comercio es lo que hace el que no puede ganar el
+//     mar, y es la única cosa de este bloque que funciona sin dominarlo.
+//     Duele muchísimo y no ganó una guerra nunca: Francia lo intentó dos
+//     siglos contra Inglaterra y Alemania dos veces contra todos.
+//   · Y LA GEOGRAFÍA MANDA. Un reino sin costa no juega a esto: no tiene
+//     armada, no puede bloquear y —esto se olvida siempre— tampoco lo pueden
+//     bloquear. Y el que solo tiene salida a un mar cerrado la tiene prestada,
+//     porque el que se sienta en el estrecho le cierra la puerta.
+
+// ——— tierra o mar ———
+// La pregunta que el juego nunca se hizo, y sin la cual nada de esto existe.
+// Se resuelve con las cajas de las provincias del mundo metidas en una
+// rejilla, y el resultado se guarda: un punto se pregunta muchas veces.
+const REJA_MAR = 4;               // grados de lado de cada casilla del índice
+let _rejaTierra = null;
+function rejillaTierra() {
+  if (_rejaTierra) return _rejaTierra;
+  const m = new Map();
+  for (let i = 0; i < PROV_MUNDO.length; i++) {
+    const g = geomProvincia(i);
+    if (!g) continue;
+    for (let cx = Math.floor(g.x0 / REJA_MAR); cx <= Math.floor(g.x1 / REJA_MAR); cx++)
+      for (let cy = Math.floor(g.y0 / REJA_MAR); cy <= Math.floor(g.y1 / REJA_MAR); cy++) {
+        const k = cx + "," + cy;
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(g);
+      }
+  }
+  _rejaTierra = m;
+  return m;
+}
+const _esMar = new Map();
+function enElMar(x, y) {
+  if (x == null || y == null) return false;
+  const k = Math.round(x * 6) + "," + Math.round(y * 6);
+  const v = _esMar.get(k);
+  if (v !== undefined) return v;
+  let mar = true;
+  for (const g of rejillaTierra().get(Math.floor(x / REJA_MAR) + "," + Math.floor(y / REJA_MAR)) || []) {
+    if (x < g.x0 || x > g.x1 || y < g.y0 || y > g.y1) continue;
+    for (const sub of puntosTrazo(g.d)) if (dentroDe(sub, x, y)) { mar = false; break; }
+    if (!mar) break;
+  }
+  if (_esMar.size > 40000) _esMar.clear();
+  _esMar.set(k, mar);
+  return mar;
+}
+
+// Si un tramo recto entre dos puntos toca agua en alguna parte. Se sondea a
+// medio grado —unos cincuenta kilómetros—, que es más fino que cualquier mar
+// que un ejército pueda cruzar sin darse cuenta.
+function mojaElTramo(x0, y0, x1, y1) {
+  const pasos = Math.max(2, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.5));
+  for (let i = 1; i <= pasos; i++) {
+    const t = i / pasos;
+    if (enElMar(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return true;
+  }
+  return false;
+}
+
+// ——— lo que el reino tiene de mar ———
+// Sin costa no hay nada de esto, y eso incluye no poder ser bloqueado, que es
+// la mitad de por qué a algunos países les convino no tenerla.
+// Se pregunta desde el abasto, que recorre todas las comarcas: sin guardarlo
+// la cuenta se hacía una vez por comarca y por vez, que es una vez de más al
+// cuadrado. Va por objeto de estado, que es lo que dura un turno.
+const _costaDe = new WeakMap();
+function costaDelReino(s) {
+  if (s && typeof s === "object") {
+    const v = _costaDe.get(s);
+    if (v) return v;
+    const r = costaDelReinoCruda(s);
+    _costaDe.set(s, r);
+    return r;
+  }
+  return costaDelReinoCruda(s);
+}
+function costaDelReinoCruda(s) {
+  const provs = ((s && s.provincias) || []).filter((p) => p.costera && !p.ocupada);
+  if (!provs.length) return { puertos: 0, cerrado: false, mares: [] };
+  const mares = [];
+  let cerrados = 0;
+  for (const p of provs) {
+    // `marDeProvincia` da el mar por su nombre y con lo que le importa al
+    // clima; lo que hace falta acá es el mar como objeto, que es el que sabe
+    // si está cerrado.
+    const q = marDeProvincia(p);
+    const m = q ? marDe(q.mar) : null;
+    if (!m) continue;
+    if (!mares.some((z) => z.n === m.n)) mares.push(m);
+    if (m.cerrado) cerrados++;
+  }
+  return { puertos: provs.length, mares,
+    // Un reino cuya única salida es un mar cerrado tiene la puerta en manos
+    // ajenas: el que se sienta en el estrecho decide si sale o no sale.
+    cerrado: mares.length > 0 && mares.every((m) => m.cerrado),
+    parteCerrada: provs.length ? cerrados / provs.length : 0 };
+}
+// Lo que hace buena a una armada. La lista es la de los saltos que de verdad
+// cambiaron lo que una escuadra podía hacer, y no la de los que se ven bonitos.
+const ARMADA_SABER = {
+  "ingenierias.naval.timon_popa": 0.15,
+  "tierra_espacio.navegacion.brujula_marina": 0.15,
+  "ingenierias.naval.trazado_casco": 0.25,
+  "tierra_espacio.navegacion.travesia_oceanica_larga": 0.25,
+  "ingenierias.naval.casco_calculado": 0.20,
+  "tierra_espacio.navegacion.cronometro_marino": 0.20,
+  "ingenierias.naval.dique_seco": 0.15,
+  "ingenierias.naval.casco_hierro": 0.35,
+  "ingenierias.naval.buque_vapor": 0.45,
+  "ingenierias.militar.blindaje": 0.30,
+  "ingenierias.militar.canon_estriado": 0.25,
+  "ingenierias.telecom.radio": 0.25,
+  "ingenierias.militar.radar": 0.30,
+};
+function armadaDelReino(s) {
+  const costa = costaDelReino(s);
+  const unidades = ((s && s.ejercito) || {}).marina || 0;
+  // Sin un puerto no hay escuadra por mucho oro que se ponga. Es la regla más
+  // dura de todo el bloque y es la que más se olvida.
+  if (costa.puertos <= 0) return { unidades, calidad: 0, fuerza: 0, costa, sinPuerto: unidades > 0 };
+  const calidad = 1 + sumaSaberAire(ARMADA_SABER, s);
+  // Y una escuadra necesita de dónde salir: pocos puertos, poca escuadra que
+  // se pueda sostener en la mar. No es el número de barcos, es el astillero.
+  const base = Math.min(1, 0.45 + costa.puertos * 0.18);
+  return { unidades, calidad, costa, sinPuerto: false,
+           fuerza: unidades * calidad * base };
+}
+function armadaDelVecino(s) {
+  const g = s && s.guerra;
+  if (!g) return { fuerza: 0 };
+  const v = ((s && s.vecinos) || []).find((q) => q.nombre === g.vecino) || { poder: 12 };
+  // Lo que un país de su tamaño tenía a flote. La parte del poder que va al
+  // mar es alta y bastante pareja en todos los siglos: una armada siempre fue
+  // la partida más cara de un presupuesto, desde las trirremes.
+  const roto = acotar(g.marRoto || 0, 0, 0.85);
+  return { fuerza: poderVecino(v, s.anio) * 0.28 * (1 - roto), roto };
+}
+// La flota en ser. Acá está la única idea que hace que el mar no sea el aire:
+// una escuadra que no sale del puerto sigue obligando al otro a tener la suya
+// enfrente, así que el que tiene cuatro veces más barcos no tiene cuatro veces
+// más mar. La curva es cóncava a propósito y de ahí sale todo: el bloqueo
+// nunca es total mientras el otro tenga algo a flote, y por eso a Tirpitz le
+// salió la cuenta sin ganar una sola batalla.
+const enSer = (f) => (f > 0 ? Math.pow(f, 0.72) : 0);
+function dominioDelMar(s) {
+  const mio = armadaDelReino(s);
+  const suyo = armadaDelVecino(s);
+  // Sin un puerto el reino está fuera de esto por completo, y eso incluye no
+  // poder ser bloqueado: es la mitad de por qué a algunos países les convino
+  // no tener costa. A nadie se le ocurrió nunca bloquear Suiza.
+  if (mio.costa.puertos <= 0) return null;
+  if (mio.fuerza <= 0 && suyo.fuerza <= 0) return null;
+  const m = misionDelMar(s);
+  // Lo que cada uno pone en la línea. El corso no disputa el mar: se esconde
+  // en él, que es justamente su gracia y su límite.
+  let mia = enSer(mio.fuerza * m.mar);
+  const suya = enSer(suyo.fuerza * 0.7);
+  // Y el estrecho. Al que solo sale a un mar cerrado le vale menos lo que
+  // tiene, porque no elige cuándo usarlo.
+  if (mio.costa.cerrado) mia *= 0.6;
+  const total = mia + suya;
+  const dominio = total <= 0 ? 0 : acotar((mia - suya) / total, -1, 1);
+  const quien = dominio > 0.30 ? "mio" : dominio < -0.30 ? "suyo" : "nadie";
+  return { mio: mio.fuerza, suyo: suyo.fuerza, mia, suya, dominio, quien,
+    puertos: mio.costa.puertos, cerrado: mio.costa.cerrado, unidades: mio.unidades,
+    roto: suyo.roto || 0,
+    dice: quien === "mio" ? "el mar es tuyo: sus puertos están cerrados y los tuyos abiertos"
+        : quien === "suyo" ? "el mar es suyo: tu comercio no sale y tus costas están a su merced"
+        : "mar disputado: los dos navegan mirando por encima del hombro" };
+}
+const mar = (s) => { const d = dominioDelMar(s); return d ? d.dominio : 0; };
+
+// Qué hace la armada. Cuatro cosas, y son las cuatro que hizo siempre.
+const MISIONES_MAR = [
+  { id: "escuadra", n: "sostener la escuadra", ico: "⚓", mar: 1,
+    dice: "estar, que en la mar es casi todo",
+    cuesta: "no se ve un solo resultado, y es lo que hace posible el resto" },
+  // Bloquear casi no cuesta dominio, y esto no es generosidad: la escuadra
+  // que bloquea es la escuadra de línea. El Canal lo cerraba la misma flota
+  // que habría dado la batalla, y tenerla frente a Brest era lo que impedía
+  // que el otro saliera. Bloqueo y dominio del mar fueron la misma faena.
+  { id: "bloqueo", n: "bloquear sus puertos", ico: "⛔", mar: 0.92, bloquea: 1,
+    dice: "cerrarle el comercio y esperar. Un año, dos, los que hagan falta",
+    cuesta: "no mata a nadie en el momento y le rompe el país por dentro" },
+  { id: "corso", n: "guerra al comercio", ico: "⚑", mar: 0.15, corso: 1,
+    dice: "cazar mercantes sueltos sin presentar batalla a nadie",
+    cuesta: "es lo único que funciona sin dominar el mar, y no ganó una guerra nunca" },
+  { id: "convoy", n: "escoltar lo propio", ico: "⛴", mar: 0.55, convoy: 1,
+    req: "organizacion.logistica.organizacion_campana",
+    falta: "sin quien organice la travesía no hay convoy, hay barcos que salen juntos",
+    dice: "juntar los mercantes y llevarlos escoltados",
+    cuesta: "no le quita nada al otro y es lo que salvó a más de un país" },
+];
+const MISION_MAR_IDX = Object.fromEntries(MISIONES_MAR.map((x) => [x.id, x]));
+function misionMarDisponible(m, s) {
+  const x = typeof m === "string" ? MISION_MAR_IDX[m] : m;
+  if (!x) return false;
+  if (costaDelReino(s).puertos <= 0) return false;
+  return !x.req || new Set(((s && s.ciencia) || {}).sabidos || []).has(x.req);
+}
+function misionDelMar(s) {
+  const x = MISION_MAR_IDX[(s && s.misionMar) || "escuadra"] || MISION_MAR_IDX.escuadra;
+  return misionMarDisponible(x, s) ? x : MISION_MAR_IDX.escuadra;
+}
+
+// El bloqueo que se impone y el que se sufre. Son dos cuentas distintas
+// porque el corso rompe la simetría: se le puede hacer daño al comercio del
+// otro sin dominar nada, y por eso el débil siempre eligió eso.
+function bloqueoImpuesto(s) {
+  if (!(s && s.guerra)) return 0;
+  const d = dominioDelMar(s);
+  if (!d || d.unidades <= 0) return 0;   // sin un barco no se le hace nada a nadie
+  const m = misionDelMar(s);
+  // El bloqueo de verdad necesita el mar. Nunca es total: mientras el otro
+  // tenga algo a flote y una costa larga, algo entra.
+  const cerco = m.bloquea && d.dominio > 0 ? d.dominio * 0.90 : 0;
+  // Y el corso, que no lo necesita. Duele y tiene techo bajo: nunca fue
+  // suficiente, ni con doscientos submarinos.
+  const caza = m.corso ? acotar(0.14 + (d.dominio + 1) * 0.13, 0, 0.34) : 0;
+  return acotar(cerco + caza, 0, 0.8);
+}
+// Y lo que a uno le hacen. El vecino no elige misión: hace lo que puede, que
+// es bloquear si domina y corsear si no.
+function bloqueoSufrido(s) {
+  if (!(s && s.guerra)) return 0;
+  const d = dominioDelMar(s);
+  if (!d) return 0;
+  const m = misionDelMar(s);
+  const suyo = -d.dominio;
+  const cerco = suyo > 0 ? suyo * 0.90 : 0;
+  // Y el corso que le hacen a uno, que no se apaga nunca del todo pero se
+  // apaga bastante cuando el mar es propio: un crucero suelto en un mar
+  // vigilado dura una campaña y no vuelve.
+  const caza = 0.16 * acotar(1 - d.dominio, 0.15, 1.6);
+  // El convoy es la respuesta y funciona: no impide el bloqueo pero le quita
+  // casi todo al corso, que es exactamente lo que pasó las dos veces.
+  const escolta = m.convoy ? 0.25 : 1;
+  return acotar(cerco + caza * escolta, 0, 0.8);
+}
+// Cruzar el agua. Un ejército embarca si hay con qué llevarlo y si el mar da
+// para intentarlo: no se desembarca donde manda el otro, y esa regla la
+// respetaron todos los que sabían lo que hacían.
+const LLEVA_UN_BARCO = 4;         // unidades de tropa por barco de guerra
+// Las tres condiciones van en este orden porque es el orden en que se
+// descubren: primero si hay de dónde salir, después si hay en qué, y recién
+// entonces si el mar deja. Preguntarlo al revés hacía que un reino sin barcos
+// se enterara de que le faltaba un puerto que tenía.
+function puedeEmbarcar(h, s) {
+  const costa = costaDelReino(s);
+  if (costa.puertos <= 0) return { puede: false, cabe: 0, porque: "no hay puerto de donde salir" };
+  const cuantos = unidadesTotales((h && h.ramas) || {});
+  const cabe = (((s && s.ejercito) || {}).marina || 0) * LLEVA_UN_BARCO;
+  if (cabe < cuantos)
+    return { puede: false, cabe,
+             porque: `no hay con qué llevarla: caben ${Math.floor(cabe)} unidades y son ${cuantos}` };
+  const d = dominioDelMar(s);
+  if (d && d.dominio <= -0.15)
+    return { puede: false, cabe, porque: "el mar es suyo: una travesía así se hunde antes de llegar" };
+  return { puede: true, cabe };
+}
+const PASO_MAR = 110;             // lo que hace una travesía al día, en km
+function velocidadEnLaMar(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let m = 0;
+  for (const [id, v] of Object.entries(ARMADA_SABER)) if (sab.has(id)) m += v;
+  return PASO_MAR * (0.55 + m * 0.5);
+}
+
 // ——— quién la manda ———
 //
 // Hasta acá los generales eran una lista con nombres y un bono global: el mejor
@@ -11775,7 +12071,12 @@ function capacidadLogistica(p, s) {
   const t = TERRENOS[p.terreno] || TERRENOS.llanura;
   const via = acotar(Math.round(p.via || 0), 0, 3);
   const gente = Math.pow(Math.max(1, p.poblacion || 0), 0.42);
-  return gente * (0.55 + via * 0.42) * t.com * (p.costera ? 1.22 : 1)
+  // Una comarca con puerto mueve más que una de tierra adentro, y por eso
+  // mismo es la que pierde cuando hay alguien fuera de la bahía. El cabotaje
+  // fue la mitad del transporte de casi todos los países con costa hasta el
+  // ferrocarril, y cerrarlo dolía más que cortar un camino.
+  const puerto = p.costera ? 1.22 - 0.5 * bloqueoSufrido(s) : 1;
+  return gente * (0.55 + via * 0.42) * t.com * puerto
     * (p.ocupada ? 0.35 : 1);
 }
 
@@ -12342,16 +12643,39 @@ function avanzarHueste(h, dias, provs, s) {
   const total = h.largo || leguas({ x: h.x, y: h.y }, d) || 1;
   // Por dónde va: la provincia bajo sus pies manda el terreno y el camino.
   const bajo = provinciaMasCerca(provs, h.x, h.y);
-  const v = velocidadHueste(h, bajo, s);
+  // Y si lo que hay bajo sus pies es agua. Hasta acá un ejército cruzaba el
+  // Canal caminando; ahora el agua es agua. Una hueste que ya está embarcada
+  // sigue navegando pase lo que pase —no se la puede dejar a mitad del
+  // océano—, y una que está en tierra tiene que poder embarcar para entrar.
+  const navegando = enElMar(h.x, h.y);
+  const v = navegando ? velocidadEnLaMar(s) : velocidadHueste(h, bajo, s);
   if (v <= 0) return h;
   const anda = v * Math.max(0, dias);
   const falta = leguas({ x: h.x, y: h.y }, d);
-  if (anda >= falta) {
-    // Llegó. La orden que traía se activa acá, no antes.
-    return { ...h, x: d.x, y: d.y, recorrido: total, llegada: true };
+  const llega = anda >= falta;
+  const k = llega ? 1 : anda / falta;
+  const nx = llega ? d.x : h.x + (d.x - h.x) * k;
+  const ny = llega ? d.y : h.y + (d.y - h.y) * k;
+  // El paso que se va a dar: si en algún punto del tramo hay agua, la columna
+  // se embarca, y para eso hay que tener con qué llevarla y un mar que no sea
+  // del otro. No se desembarca donde manda el enemigo, y esa regla la
+  // respetaron todos los que sabían lo que hacían: Overlord esperó a tenerlo.
+  //
+  // Se mira el tramo entero y no solo dónde termina, porque un paso de un mes
+  // salta un canal de treinta kilómetros sin pisarlo: el Támesis no se cruza
+  // por no haberse detenido en el medio. Y se mira también el tramo que llega:
+  // con turnos de un año el paso se come la travesía entera de una vez, y sin
+  // esto un ejército aparecía al otro lado del océano sin haberse mojado.
+  if (!navegando && mojaElTramo(h.x, h.y, nx, ny)) {
+    const emb = puedeEmbarcar(h, s);
+    if (!emb.puede)
+      return { ...h, orden: null, destino: null, objetivo: null, cola: [], largo: 0,
+               recorrido: 0, llegada: false, enMar: false, varada: emb.porque };
   }
-  const k = anda / falta;
-  return { ...h, x: h.x + (d.x - h.x) * k, y: h.y + (d.y - h.y) * k,
+  // Llegó. La orden que traía se activa acá, no antes.
+  if (llega) return { ...h, x: d.x, y: d.y, recorrido: total, llegada: true,
+                      enMar: enElMar(d.x, d.y), varada: null };
+  return { ...h, x: nx, y: ny, enMar: enElMar(nx, ny), varada: null,
            recorrido: (h.recorrido || 0) + anda, largo: total, llegada: false };
 }
 
@@ -12535,7 +12859,11 @@ function levantarEnemigas(s, rnd) {
   // Y lo que el bombardeo le sacó de encima. Poco, y con techo: la producción
   // alemana subió hasta bien entrado 1944 bajo las bombas. Lo que el bombardeo
   // de verdad consiguió fue obligarlos a defenderse, no dejarlos sin fábricas.
-  const rota = 1 - (s.guerra.bombardeado || 0) * 0.28;
+  // Y lo que el bloqueo le va sacando, que es bastante más: no le rompe las
+  // fábricas, le quita con qué alimentarlas. Un país sin importaciones deja
+  // de poner divisiones nuevas en el campo mucho antes de quedarse sin gente.
+  const rota = (1 - (s.guerra.bombardeado || 0) * 0.28)
+             * (1 - (s.guerra.bloqueado || 0) * 0.42);
   const poder = Math.max(2, Math.round(poderVecino(v || { poder: 12 }, s.anio) * rota / 9));
   // De dónde sale: del borde del reino más lejos de tu corte, que es por donde
   // uno entra cuando no quiere que lo vean venir.
@@ -12731,7 +13059,13 @@ function correrCampana(s, dias, rnd) {
         h = { ...h, orden: "marchar", destino: { x: presa.x, y: presa.y },
               largo: dm, recorrido: 0 };
     }
+    const antesVarada = h.varada;
     h = avanzarHueste(h, dias, provs, s);
+    // Y si se quedó mirando el agua. Hay que decirlo: una orden que no se
+    // cumple sin explicación es lo peor que puede hacer un juego, y esta es
+    // nueva —hasta ahora los ejércitos cruzaban el mar caminando—.
+    if (h.varada && h.varada !== antesVarada && !h.de)
+      hechos.push(`${h.nombre} llega a la costa y ahí se queda: ${h.varada}.`);
     // La plaza puede ser una comarca del reino o tierra ajena. La segunda no
     // está en la lista —es del vecino— y viaja con la propia hueste; sin este
     // respaldo, cercar y asaltar fuera de casa no hacían absolutamente nada.
@@ -13277,6 +13611,14 @@ function voluntadDelVecino(g, s) {
   // las ganas de pelear, se las endurece. El que quería que se rindieran
   // consiguió que trabajaran los domingos.
   v += (g.bombardeado || 0) * 22;
+  // Y lo que le hizo el bloqueo, que va justo al revés y es el contraste más
+  // instructivo de todo el sistema militar. Bombardearle las ciudades le
+  // endurece la voluntad; cerrarle los puertos se la rompe. Las dos cosas se
+  // midieron y dieron distinto, y no es una paradoja: una bomba es un ataque
+  // que se puede odiar, y el hambre del tercer invierno es una cuenta que hace
+  // todo el mundo en su casa. El bloqueo aliado contribuyó al derrumbe alemán
+  // de 1918 mucho más que cualquier ofensiva de ese año.
+  v -= (g.bloqueado || 0) * 34;
   return Math.round(acotar(v, 0, 100));
 }
 // Y cuánto le queda al propio. Acá está la pieza que hace que una guerra
@@ -13805,9 +14147,14 @@ const COMERCIO_SABER = {
   "organizacion.comercio.distribucion_masiva":            3,
   "ingenierias.transporte.contenedor":                    4,
 };
-function comercioExterior(vecinos, ciencia, stats, factorias, ejercito) {
+function comercioExterior(vecinos, ciencia, stats, factorias, ejercito, s) {
   // cada escuadra de guerra hace las rutas más seguras
   const escolta = 1 + Math.min(0.35, ((ejercito || {}).marina || 0) * 0.09);
+  // Y lo que hay fuera de la bahía. Es acá donde un bloqueo se siente primero
+  // y donde más se siente: no en el frente, en la aduana. Un país al que no le
+  // entra ni le sale nada por mar deja de pagar la guerra mucho antes de
+  // quedarse sin soldados.
+  const cerrado = 1 - bloqueoSufrido(s);
   const sab = new Set(ciencia?.sabidos || []);
   let alcance = 0;
   const medios = [];
@@ -13821,7 +14168,7 @@ function comercioExterior(vecinos, ciencia, stats, factorias, ejercito) {
     const afin = Math.max(0, Math.min(1, (v.relacion + 60) / 120));
     const mult = v.estado === "aliado" ? 1.4 : v.estado === "tension" ? 0.45 : 1;
     const flujo = alcance * (v.poder / 10) * afin * mult * (0.5 + stats.diplomacia / 130)
-                  * (conFactoria ? 1.45 : 1) * 0.85 * escolta;
+                  * (conFactoria ? 1.45 : 1) * 0.85 * escolta * cerrado;
     return { ...v, flujo, conFactoria,
       motivo: v.estado === "tension" ? "tensión: el trato se resiente"
             : conFactoria ? "factoría propia" : null };
@@ -14947,14 +15294,14 @@ function turnPrompt(state, accion, dias) {
         const tp = techoProvincia(p, state.provincias, state.ciencia);
         return `${p.nombre}${p.capital ? " (capital)" : ""}: ${t.n.toLowerCase()}${p.rio ? ", con río" : ""}${p.costera ? ", costera" : ""}, ${fmtPob(p.poblacion)}, ${Math.round((p.poblacion / Math.max(1, tp)) * 100)}% de lo que su tierra alimenta`;
       }),
-      comercioExterior: Math.round(comercioExterior(state.vecinos, state.ciencia, state.stats, state.factorias, state.ejercito).total),
+      comercioExterior: Math.round(comercioExterior(state.vecinos, state.ciencia, state.stats, state.factorias, state.ejercito, state).total),
       factoriasComerciales: state.factorias || [],
       guerra: state.guerra ? `contra ${state.guerra.vecino}, se combate en ${((state.provincias || []).find((p) => p.id === state.guerra.provincia) || {}).nombre || "la frontera"}${(state.provincias || []).some((p) => p.ocupada) ? `, con ${(state.provincias || []).filter((p) => p.ocupada).map((p) => p.nombre).join(" y ")} bajo ocupación` : ""}, desde hace ${state.anio - state.guerra.desde} años, frente ${Math.round(state.guerra.frente)} de 100 (positivo = ganás), tu aguante ${Math.round(100 - state.guerra.agotaProp)}%, el suyo ${Math.round(100 - state.guerra.agotaEnem)}%` : "en paz",
       tributos: (state.tributos || []).map((t) => t.monto > 0 ? `${t.hacia} nos paga` : `pagamos a ${t.hacia}`),
       dilemaResueltoRecientemente: (state.cronica || []).slice(-4).filter((e) => e.texto && e.texto.startsWith("⚑ ")).map((e) => e.texto),
       facciones: (() => {
         const ctx = { cap: capacidadEconomica(state.ciencia),
-          comercio: comercioExterior(state.vecinos, state.ciencia, state.stats, state.factorias, state.ejercito).total,
+          comercio: comercioExterior(state.vecinos, state.ciencia, state.stats, state.factorias, state.ejercito, state).total,
           ingreso: ingresoAnualDe(state.stats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias),
           pob: state.poblacion || 4000, techo: demografiaDe(state.ciencia).techo };
         return estadoFacciones(state, ctx).map((f) =>
@@ -20240,6 +20587,9 @@ export default function PaxMundi() {
         // siglo hasta el veinte. La misión por defecto es la única que
         // siempre hay que hacer primero.
         pilotos: 0, mision: "cielo",
+        // Y la armada, que empieza haciendo lo único que una armada hace
+        // siempre: estar. En la mar eso ya es casi todo.
+        misionMar: "escuadra",
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -20906,7 +21256,7 @@ export default function PaxMundi() {
       // El humor se mueve despacio hacia su objetivo; el descontento pesa sobre el orden.
       const ctxFac = {
         cap: capacidadEconomica(state.ciencia),
-        comercio: comercioExterior(vecinosNuevos, state.ciencia, nuevosStats, state.factorias, state.ejercito).total,
+        comercio: comercioExterior(vecinosNuevos, state.ciencia, nuevosStats, state.factorias, state.ejercito, state).total,
         ingreso: ingresoAnualDe(nuevosStats, state.gobierno, state.ciencia, state.poblacion, state.vecinos, state.factorias, state.ejercito, state.provincias),
         pob: state.poblacion || 4000,
         techo: demografiaDe(state.ciencia).techo,
@@ -21464,6 +21814,28 @@ export default function PaxMundi() {
                 + `de allá no se habla de rendirse: se habla de aguantar. Un país bombardeado no se `
                 + `quiebra, se endurece —eso lo aprendieron ellos con nosotros y nosotros con ellos—.` });
           }
+          // ——— y lo que pasa en el mar ———
+          //
+          // El mar no da resultados el día que se gana: los da al año
+          // siguiente y al otro. Un bloqueo es una cuenta que se va sumando
+          // mientras las escuadras siguen ahí afuera, y se deshace en cuanto
+          // se levantan: los puertos vuelven a abrirse en una semana.
+          const estadoM = { ...state, guerra: guerraNueva,
+            anio: anioNuevo, vecinos: vecinosNuevos, provincias: provs };
+          const marHoy = mar(estadoM);
+          guerraNueva.marRoto = acotar((guerraNueva.marRoto || 0)
+            + (marHoy > 0 ? marHoy * 0.22 : marHoy * 0.40) * esc, 0, 0.85);
+          const aprieta = bloqueoImpuesto(estadoM);
+          const bl = guerraNueva.bloqueado || 0;
+          guerraNueva.bloqueado = acotar(bl + (aprieta - bl) * Math.min(1, 0.35 * esc), 0, 1);
+          if (guerraNueva.bloqueado > 0.35 && !guerraNueva.avisoBloqueo) {
+            guerraNueva.avisoBloqueo = true;
+            entradasGuerra.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+              texto: `⛔ Hace meses que a ${enemigo.nombre} no le entra nada por mar. No hubo `
+                + `batalla ni la va a haber: hay barcos ahí afuera y eso basta. En sus ciudades `
+                + `se raciona el pan, y a diferencia de las bombas, esto sí les quita las ganas `
+                + `de seguir —el hambre del tercer invierno es una cuenta que hace todo el mundo—.` });
+          }
           // ——— y ahora, para qué se peleaba ———
           //
           // El enemigo no pelea hasta el último hombre: pelea hasta que le
@@ -21905,7 +22277,7 @@ export default function PaxMundi() {
   const mantT = mantenimientoTotal(s.edu);
   const capEco = capacidadEconomica(s.ciencia);
   const rentaHab = rentaPorHabitante(s.stats, s.ciencia);
-  const comExt = comercioExterior(s.vecinos, s.ciencia, s.stats, s.factorias, s.ejercito);
+  const comExt = comercioExterior(s.vecinos, s.ciencia, s.stats, s.factorias, s.ejercito, s);
   const oroBruto = ingresoAnualDe(s.stats, s.gobierno, s.ciencia, poblacionUtil(s.provincias) || s.poblacion, s.vecinos, s.factorias, s.ejercito, s.provincias);
   const credHoy = capacidadCredito(s.ciencia, s.stats, oroBruto, s.anio, s.creditoVetado, s.devaluaciones);
   const servicioDeuda = (s.deuda || 0) * (credHoy.habilitado ? credHoy.tasa : TASA_BASE);
@@ -24258,7 +24630,7 @@ export default function PaxMundi() {
                   ─ comercio con el mundo
                 </div>
                 {(() => {
-                  const ce = comercioExterior(s.vecinos, s.ciencia, s.stats, s.factorias, s.ejercito);
+                  const ce = comercioExterior(s.vecinos, s.ciencia, s.stats, s.factorias, s.ejercito, s);
                   return (
                     <div style={{ marginBottom: 9, padding: "9px 11px", borderRadius: 8,
                       background: C.panel2, border: `1px solid ${C.blue}44` }}>
@@ -25093,6 +25465,113 @@ export default function PaxMundi() {
                           );
                         })}
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── el mar ──
+                    Solo existe si el reino tiene por dónde salir. Un reino sin
+                    costa no juega a esto, y tampoco lo pueden bloquear: la
+                    mitad de por qué a algunos les convino no tenerla. */}
+                {(() => {
+                  const costa = costaDelReino(s);
+                  const d = dominioDelMar(s);
+                  const arm = armadaDelReino(s);
+                  const mm = misionDelMar(s);
+                  if (costa.puertos <= 0 && !arm.sinPuerto) return null;
+                  const sufre = bloqueoSufrido(s);
+                  const impone = bloqueoImpuesto(s);
+                  const col = !d || !s.guerra ? C.muted : d.quien === "mio" ? C.green
+                            : d.quien === "suyo" ? C.red : C.brass;
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⚓ EL MAR
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: col }}>
+                          {!d || !s.guerra ? "sin nadie enfrente" : d.quien === "mio" ? "es tuyo"
+                            : d.quien === "suyo" ? "es suyo" : "disputado"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        Casi nada de lo que decide una armada se decide peleando. Lo que gana el mar
+                        es estar en él: los puertos del otro cerrados, los propios abiertos, y un
+                        ejército que puede aparecer donde no puede caminar.
+                      </div>
+                      {arm.sinPuerto ? (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          Hay {arm.unidades} escuadras pagadas y ni un puerto de dónde salgan. Sin
+                          costa no hay armada por mucho oro que se ponga.
+                        </div>
+                      ) : (
+                        <>
+                          {[["Escuadras", `${arm.unidades}`, arm.unidades ? C.ink : C.red],
+                            ["Puertos", `${costa.puertos}`, C.ink],
+                            ["Sus mares", costa.mares.map((x) => x.n).slice(0, 3).join(", ") || "—",
+                              costa.cerrado ? C.brass : C.ink],
+                            ...(s.guerra ? [
+                              ["Lo que le cerrás", `${Math.round(impone * 100)}%`, impone > 0.2 ? C.green : C.muted],
+                              ["Lo que te cierran", `${Math.round(sufre * 100)}%`, sufre > 0.2 ? C.red : C.muted]] : [])
+                          ].map(([x, y, c]) => (
+                            <div key={x} style={{ display: "flex", justifyContent: "space-between",
+                              gap: 10, fontSize: 12, color: C.muted, marginTop: 3 }}>
+                              <span>{x}</span>
+                              <span style={{ color: c, fontFamily: mono, textAlign: "right" }}>{y}</span>
+                            </div>
+                          ))}
+                          {costa.cerrado && (
+                            <div style={{ fontSize: 11, color: C.brass, marginTop: 6, lineHeight: 1.45 }}>
+                              Toda tu costa da a un mar cerrado. La salida no es tuya: el que se sienta
+                              en el estrecho decide si tu escuadra sale, y por eso vale menos de lo que
+                              cuesta.
+                            </div>
+                          )}
+                          {d && s.guerra && (
+                            <div style={{ fontSize: 11, color: col, marginTop: 6, lineHeight: 1.45 }}>
+                              {capitalizar(d.dice)}.
+                              {d.roto > 0.05 && ` De su escuadra queda el ${Math.round((1 - d.roto) * 100)} `
+                                + `por ciento, y lo que se hunde en la mar no se repone en una guerra.`}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
+                            Con la escuadra que hay se pueden llevar por mar {Math.floor(arm.unidades * LLEVA_UN_BARCO)}
+                            {" "}unidades de tropa, y solo si el mar no es del otro: no se desembarca donde manda el enemigo.
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                            {MISIONES_MAR.map((x) => {
+                              const puede = misionMarDisponible(x, s);
+                              const act = mm.id === x.id;
+                              return (
+                                <button key={x.id} disabled={!puede || pensando || act}
+                                  onClick={() => setState((st) => ({ ...st, misionMar: x.id,
+                                    cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                      texto: `${x.ico} La armada pasa a ${x.n}: ${x.dice}. Y ${x.cuesta}.` }] }))}
+                                  style={{ textAlign: "left", padding: "7px 9px", borderRadius: 6,
+                                    cursor: puede && !act ? "pointer" : "default",
+                                    background: act ? `${C.gold}18` : "transparent",
+                                    border: `1px solid ${act ? C.gold : C.line}`, opacity: puede ? 1 : 0.45 }}>
+                                  <div style={{ fontSize: 12.5, color: act ? C.gold : C.ink }}>
+                                    {x.ico} {capitalizar(x.n)}
+                                  </div>
+                                  <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                                    {puede ? `${capitalizar(x.dice)}. Y ${x.cuesta}.`
+                                      : `hace falta saber «${MED_IDX[x.req]?.nombre || x.req}»: ${x.falta}`}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {(s.guerra || {}).bloqueado > 0.2 && (
+                            <div style={{ fontSize: 11, color: C.green, marginTop: 7, lineHeight: 1.45 }}>
+                              El bloqueo lleva tiempo apretando y se nota: les cuesta poner tropa nueva
+                              en el campo y se les están acabando las ganas. Al revés que bombardearles
+                              las ciudades, esto sí las rompe.
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   );
                 })()}

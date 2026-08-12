@@ -34,6 +34,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 22-23 | Niebla e inteligencia | Redes de espías que se montan, se pagan, mejoran con los años y se descubren: dan partes de todo el país del otro donde no hay tropa, con poco detalle. Y desinformación: señuelos que mueven su ejército a un campo vacío y velos que esconden el propio, pagados quemando la red y sin manera de saber desde casa si cuajaron. Del enemigo hay partes con fecha, no huestes. Se ve lo que se pisa y lo que alcanza la vista, que la estiran la caballería, el catalejo, el globo y el radar; y enterarse es otra cosa, que la acelera el telégrafo. El mapa pinta lo que el reino cree, y una comarca puede caer sin que nadie se entere. |
 | 30 | Prisioneros | Una parte de las bajas del vencido se rinde en vez de morir: más cuanto más despareja fue la derrota, menos cuanto más veterana la tropa, y casi todos en una bolsa. Comen de la misma despensa que el ejército. Cinco destinos —rescate, palabra, trabajo, canje desde 1650, cuchillo— y una fama que decide cuánta gente se te entrega y cuánto aguanta el otro antes de firmar. |
 | 20 | Guerra aérea | Una sexta rama que no marcha con nadie: opera sobre el teatro entero. El cuello de botella son las tripulaciones, no los aparatos. Hay que ganarle el cielo a su aviación antes de poder hacer nada más, y ganarlo es destruírsela: lo roto queda roto. Cuatro misiones —cazar, cortar el abasto, apoyar al ejército con radio, bombardear su país— y la antiaérea, que sale de la artillería y del radar. Bombardear ciudades les baja poco la producción y les SUBE las ganas de pelear. |
+| 21 | Guerra naval | El agua es agua: un ejército no la cruza caminando, hacen falta barcos y un mar que no sea del otro. Sin puerto no hay armada, y sin costa no se puede bloquear a nadie ni ser bloqueado. La flota en ser hace la curva cóncava: cuatro veces más barcos no dan cuatro veces más mar. Cuatro misiones —escuadra, bloqueo, corso, convoy— y el bloqueo, que se siente en la aduana antes que en el frente y que, al revés que bombardear ciudades, SÍ le rompe la voluntad al otro. |
 
 ## Lo que está a medias
 
@@ -44,9 +45,8 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 ## Lo que no existe
 
-Reparaciones (§17), guerra naval como sistema (§21), operaciones con objetivos
-delegados (§24-25), modo táctico (§27), armas estratégicas y nucleares
-(§36-37), economía de guerra (§38).
+Reparaciones (§17), operaciones con objetivos delegados (§24-25), modo táctico
+(§27), armas estratégicas y nucleares (§36-37), economía de guerra (§38).
 
 ## El orden
 
@@ -88,8 +88,8 @@ limita lo que se puede firmar, y salirse de eso tiene un precio puesto de
 antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
-el espionaje con su desinformación, la doctrina, los prisioneros y el aire; lo
-que queda son piezas sueltas que ya no se apoyan unas en otras: mar,
+el espionaje con su desinformación, la doctrina, los prisioneros, el aire y el
+mar; lo que queda son piezas sueltas que ya no se apoyan unas en otras:
 operaciones delegadas, economía de guerra y armas estratégicas, en ese orden
 por lo que cuestan.
 

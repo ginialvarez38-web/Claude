@@ -686,6 +686,60 @@ triple y pierde tripulaciones más rápido de lo que la escuela las hace. Ahí
 está la espiral: se muere el que sabe, entra el que no sabe, y el que no sabe
 se muere antes.
 
+## Lo que se gana sin dar una batalla
+
+La historia naval que se cuenta es la de Salamina, Lepanto y Trafalgar. La que
+decidió las guerras es la de los años en que no pasó nada: la escuadra del otro
+en el puerto sin animarse a salir, el bloqueo apretando un año tras otro, y los
+convoyes llegando.
+
+**Lo primero: el agua es agua.** Hasta ahora un ejército cruzaba el Canal
+caminando. Ahora se cruza embarcado o no se cruza. Hacen falta barcos —cada uno
+lleva cuatro unidades de tropa— y hace falta que el mar no sea del otro: **no se
+desembarca donde manda el enemigo**, y Overlord esperó a tenerlo. Un ejército
+mandado al otro lado del agua sin con qué cruzarla llega a la orilla, se queda
+ahí y lo dice. Por mar se va mucho más rápido que por tierra, y esa es la mitad
+de lo que hizo grandes a los imperios marítimos.
+
+**Sin puerto no hay armada** por mucho oro que se ponga, y con dos puertos se
+sostiene menos escuadra que con veinte: no es el número de barcos, es el
+astillero. Un reino sin costa está fuera de todo esto — incluido, y esto se
+olvida siempre, **no poder ser bloqueado**.
+
+**La flota en ser.** Una escuadra que no sale del puerto sigue obligando al otro
+a tener la suya enfrente. Por eso cuatro veces más barcos no dan cuatro veces
+más mar: la curva es cóncava a propósito, el dominio absoluto casi no existió
+nunca, y de ahí sale que Tirpitz consiguiera algo real sin ganar una batalla.
+
+Cuatro cosas puede hacer una armada:
+
+- **Sostener la escuadra.** Estar, que en la mar es casi todo.
+- **Bloquear sus puertos.** Lo más decisivo que hizo una armada, y no se parece
+  a una batalla: se le cierra el comercio y se espera un año, dos, los que
+  hagan falta. Casi no cuesta dominio del mar, y no es generosidad — la
+  escuadra que bloquea *es* la escuadra de línea, y tenerla frente a Brest era
+  justamente lo que impedía que el otro saliera.
+- **Guerra al comercio.** Lo único que funciona **sin** dominar el mar, y por
+  eso fue siempre la estrategia del que no podía ganarlo. Se paga cediendo la
+  superficie, tiene techo bajo, y no ganó una guerra nunca: Francia lo intentó
+  dos siglos contra Inglaterra y Alemania dos veces contra todos.
+- **Escoltar lo propio.** No le quita nada al otro y es lo que salvó a más de un
+  país. Necesita quien organice la travesía; sin eso no hay convoy, hay barcos
+  que salen juntos.
+
+El bloqueo **se siente en la aduana antes que en el frente**: el comercio
+exterior se desploma, el cabotaje de las comarcas con puerto se corta, y al otro
+lado le cuesta cada vez más poner tropa nueva en el campo. Y aprieta despacio —
+es una cuenta que se suma, no un golpe—, mientras su escuadra se va gastando y
+lo hundido no vuelve a salir.
+
+**Y acá está el contraste que hace que valga la pena tener los dos sistemas:**
+bombardearle las ciudades al otro le **endurece** la voluntad y cerrarle los
+puertos se la **rompe**. Las dos cosas se midieron y dieron distinto, y no es
+una paradoja: una bomba es un ataque que se puede odiar, y el hambre del tercer
+invierno es una cuenta que hace todo el mundo en su casa. El bloqueo aliado
+contribuyó al derrumbe alemán de 1918 más que ninguna ofensiva de ese año.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
