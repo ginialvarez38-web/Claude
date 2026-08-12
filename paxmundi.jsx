@@ -10692,6 +10692,181 @@ function velocidadEnLaMar(s) {
   return PASO_MAR * (0.55 + m * 0.5);
 }
 
+// ═══ LA BOMBA: EL ARMA QUE SIRVE PARA NO USARSE ══════════════════════════
+//
+// Todo lo demás en este juego es una cantidad: más infantería pelea más, más
+// barcos cierran más puertos, más aviones cortan más puentes. La bomba no es
+// una cantidad, y modelarla como «un cañón muy grande» sería el error más
+// caro que se puede cometer acá. La bomba cambia para qué sirve una guerra.
+//
+// Las cuatro cosas que este bloque pone, y las cuatro son incómodas:
+//
+//   · TENERLA ES UNA OBRA INDUSTRIAL, NO UN DESCUBRIMIENTO. La física se sabía
+//     en varios países a la vez desde 1938. Lo que separó a los que la tuvieron
+//     de los que no fue separar isótopos a escala industrial, que es un
+//     problema de electricidad y de años. El Proyecto Manhattan fue la obra
+//     más grande jamás emprendida y su cuello de botella no fue Los Álamos:
+//     fueron Oak Ridge y Hanford.
+//   · LA PRIMERA NO SIRVE PARA NADA. Hiroshima y Nagasaki fueron dos bombas y
+//     no había una tercera. Un puñado de cabezas es un instrumento de terror,
+//     no una estrategia.
+//   · LO QUE DISUADE NO ES TENERLA SINO SOBREVIVIR. La cuenta que hace el otro
+//     no es «cuántas tiene» sino «cuántas le quedarían después de que yo pegue
+//     primero». Por eso el submarino cambió más las cosas que la bomba de
+//     hidrógeno, y por eso el momento más peligroso no es cuando los dos la
+//     tienen: es cuando uno la tiene y el otro no, o cuando los dos la tienen
+//     y ninguno aguantaría el primer golpe. Eso último tiene nombre —
+//     inestabilidad de crisis— y es lo que casi pasa en 1962.
+//   · Y USARLA CUESTA EL MUNDO. No por una regla moral metida a la fuerza:
+//     porque el resto de las cortes toma nota para siempre, y porque al que la
+//     tiró no se le vuelve a creer nada.
+const BOMBA_OBRA = 100;           // el trabajo que cuesta la primera, en unidades propias
+// Lo que hace falta saber para siquiera empezar. La física primero, y después
+// lo que de verdad cuesta: electricidad a escala industrial para separar.
+const ATOMO_SABER = {
+  "fisica.nuclear.fision": 0.55,
+  "fisica.nuclear.equivalencia_masa_energia": 0.10,
+  "quimica.atomica.isotopo": 0.15,
+  "ingenierias.electrica.red_distribucion": 0.25,
+  "ingenierias.hidraulica.hidroelectrica": 0.20,
+  "ingenierias.produccion.fabrica": 0.15,
+  "ingenierias.produccion.par_produccion_masa": 0.20,
+  "fisica.cuantica.resonancia_magnetica_nuclear": 0.15,
+};
+function puedeElAtomo(s) {
+  return new Set(((s && s.ciencia) || {}).sabidos || []).has("fisica.nuclear.fision");
+}
+// Cuánto adelanta la obra en un año. Sale de tres cosas y ninguna es la
+// física: el oro que se le echa encima, la industria que hay para separar, y
+// el hecho de que un país movilizado puede dedicarle lo que un país en paz no.
+function esfuerzoAtomico(s) {
+  if (!puedeElAtomo(s)) return 0;
+  const sab = sumaSaberAire(ATOMO_SABER, s);
+  const mov = pesoMovilizacion(s);
+  const cadena = cadenaDeGuerra(s).pertrechos;
+  // La industria pesa con rendimiento decreciente: hace falta una base
+  // enorme, y a partir de ahí lo que manda es el empeño.
+  return sab * Math.pow(Math.max(0, cadena), 0.42) * (0.5 + mov.nivel * 0.4)
+    * ((s && s.atomoEmpeno) ? 1 : 0);
+}
+function atomoTrasElTiempo(s, dias) {
+  const a = (s && s.atomo) || { avance: 0, cabezas: 0 };
+  if (!puedeElAtomo(s)) return a;
+  const anos = Math.max(0, dias || 0) / 365;
+  const avance = Math.min(BOMBA_OBRA * 3, (a.avance || 0) + esfuerzoAtomico(s) * anos);
+  // Terminada la obra, las cabezas salen de a poco: la fábrica de bombas es
+  // la misma que la obra, y sigue separando material toda la guerra.
+  const cabezas = avance >= BOMBA_OBRA
+    ? (a.cabezas || 0) + Math.max(0, (avance - BOMBA_OBRA)) / BOMBA_OBRA * 3 * anos
+      + (a.cabezas ? 0 : 1)
+    : 0;
+  return { ...a, avance, cabezas: Math.max(0, cabezas) };
+}
+const tieneLaBomba = (s) => ((s && s.atomo) || {}).avance >= BOMBA_OBRA;
+const cabezasDe = (s) => Math.floor(((s && s.atomo) || {}).cabezas || 0);
+
+// Con qué se lleva. Un arma que no se puede entregar es una curiosidad de
+// laboratorio, y lo que cada vector cambia de verdad no es el alcance sino
+// cuánto sobrevive de la fuerza propia al primer golpe del otro.
+const VECTORES = [
+  { id: "bombardero", n: "el bombardero", ico: "✈", vive: 0.15,
+    req: "ingenierias.aeronautica.cabina_presurizada",
+    dice: "una escuadrilla que tarda horas en despegar y está en un campo que el otro tiene marcado" },
+  { id: "misil", n: "el misil", ico: "➶", vive: 0.35,
+    req: "ingenierias.aeronautica.cohete_liquido",
+    dice: "minutos en vez de horas, pero sigue estando donde el otro sabe" },
+  { id: "submarino", n: "el submarino", ico: "⚓", vive: 0.80,
+    req: "ingenierias.aeronautica.vehiculo_orbital",
+    dice: "nadie sabe dónde está, y por eso es lo que de verdad cambió las cosas" },
+];
+// El mejor que el reino sepa hacer. No se acumulan: se usa el mejor que haya,
+// que es lo que hicieron todos.
+function vectorDe(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  let mejor = null;
+  for (const v of VECTORES) if (sab.has(v.req)) mejor = v;
+  return mejor;
+}
+// Lo que sobreviviría a que el otro pegue primero. Es el número que importa y
+// casi ningún juego lo tiene: la disuasión no sale de cuántas hay sino de
+// cuántas quedarían.
+function sobreviveElGolpe(s) {
+  const v = vectorDe(s);
+  if (!v || !tieneLaBomba(s)) return 0;
+  // Y las que tenga: una fuerza chica se pierde entera aunque esté escondida,
+  // porque el otro puede permitirse buscarla toda.
+  const n = cabezasDe(s);
+  return v.vive * acotar(n / (n + 6), 0, 1);
+}
+// La disuasión: si el otro cree que le va a llegar algo aunque pegue primero.
+// De cero a uno, y lo que la construye es sobrevivir, no tener.
+function disuasionDe(s) {
+  const quedan = sobreviveElGolpe(s) * cabezasDe(s);
+  return acotar(quedan / (quedan + 4), 0, 1);
+}
+// Y lo que tiene el vecino, que llega tarde y llega igual. El secreto de la
+// bomba no fue nunca cómo se hace: fue que se puede hacer, y eso se supo el
+// día de la primera. A partir de ahí es cuestión de años y de empeño.
+function atomoDelVecino(s) {
+  const desde = (s && s.atomoMundo) || 0;      // el año en que el mundo se enteró
+  if (!desde || !s || !s.anio) return { tiene: false, disuasion: 0 };
+  const anos = s.anio - desde;
+  if (anos < 5) return { tiene: false, disuasion: 0, anos };
+  // Tarda unos años en tenerla y otros tantos en poder sobrevivir a un golpe.
+  return { tiene: true, anos, disuasion: acotar((anos - 5) / 22, 0, 0.85) };
+}
+// El momento más peligroso, que no es el que la gente cree. Con los dos lados
+// capaces de sobrevivir, nadie empieza nada. Con uno solo armado, hay
+// tentación. Y con los dos armados y ninguno capaz de aguantar el primer
+// golpe, hay que pegar primero o perderlo todo, que es la peor de las tres.
+// Quién la tiene decide de qué casilla se habla; quién sobreviviría decide lo
+// peligrosa que es. Mezclar las dos cosas hacía que un reino con ocho cabezas
+// en la mano leyera «la tiene él y vos no».
+function riesgoNuclear(s) {
+  const mia = disuasionDe(s), suya = atomoDelVecino(s).disuasion;
+  const yo = tieneLaBomba(s) && cabezasDe(s) > 0 && !!vectorDe(s);
+  const el = atomoDelVecino(s).tiene;
+  if (!yo && !el) return { nivel: 0, quien: "nadie", mia, suya,
+    dice: "nadie tiene nada que temer de esto" };
+  if (yo && el) {
+    // Los dos armados. Lo que decide todo es si los dos aguantarían el primer
+    // golpe: si los dos aguantan, nadie lo da; si uno no aguanta, hay que
+    // darlo antes de que lo den. Esa es la peor casilla del tablero y es la
+    // que casi se juega en 1962, no la otra.
+    const ambas = Math.min(mia, suya);
+    if (ambas > 0.45) return { nivel: 0.12, quien: "los dos", mia, suya,
+      dice: "los dos aguantarían el primer golpe, así que ninguno lo va a dar: "
+        + "acá la guerra deja de ser un instrumento" };
+    return { nivel: 0.95, quien: "los dos", mia, suya,
+      dice: "los dos la tienen y alguno no aguantaría el primer golpe: hay que pegar primero o "
+        + "perderlo todo. Esta es la casilla peligrosa del tablero y no la otra" };
+  }
+  // Uno solo armado: hay tentación mientras dure la ventaja, y la ventaja no
+  // dura, porque el secreto ya está contado.
+  return { nivel: yo ? 0.55 : 0.45, quien: yo ? "mio" : "suyo", mia, suya,
+    dice: yo
+      ? "la tenés vos y él no: la tentación de usarla mientras dure la ventaja es el peligro, "
+        + "y la ventaja no dura"
+      : "la tiene él y vos no, y eso se nota en cada cosa que se firma" };
+}
+// Y lo que pasa si se usa. No hay número que haga esto barato, y no porque
+// alguien lo prohíba: porque el resto de las cortes toma nota para siempre.
+function usarLaBomba(s) {
+  if (!tieneLaBomba(s) || cabezasDe(s) < 1 || !vectorDe(s)) return null;
+  const n = cabezasDe(s);
+  return {
+    // Lo que le hace al otro: le rompe la voluntad y el poder de golpe, que es
+    // lo único que la bomba hace mejor que todo lo demás junto.
+    voluntad: -Math.round(acotar(28 + n * 5, 28, 70)),
+    poder: acotar(0.18 + n * 0.05, 0.18, 0.6),
+    // Y lo que se paga. La fama del trato de prisioneros va a cero: al que
+    // hizo esto no se le vuelve a creer nada sobre cómo trata a nadie.
+    trato: 0, prestigio: -18, estabilidad: -12, rel: -55,
+    cabezas: n - 1,
+    dice: "un arma que no distingue a nadie, y el mundo entero mirando",
+  };
+}
+
 // ═══ LA ECONOMÍA DE GUERRA: CONVERTIR EL PAÍS ════════════════════════════
 //
 // Una guerra larga no se paga con el tesoro. Se paga convirtiendo el país, y
@@ -14049,6 +14224,14 @@ function voluntadDelVecino(g, s) {
   // todo el mundo en su casa. El bloqueo aliado contribuyó al derrumbe alemán
   // de 1918 mucho más que cualquier ofensiva de ese año.
   v -= (g.bloqueado || 0) * 34;
+  // Y la bomba, que no se parece a nada de lo anterior. Un vecino que sabe que
+  // vos podés destruirlo y que él no puede impedirlo no pelea: no porque le
+  // falten hombres sino porque la guerra dejó de servirle para algo. Y si él
+  // también la tiene y también sobreviviría, se anulan: eso es la disuasión
+  // mutua, y lo que hace no es ganar guerras sino que no las haya.
+  const mia = disuasionDe(s);
+  const suya = atomoDelVecino(s).disuasion;
+  v -= acotar(mia - suya, 0, 1) * 55;
   return Math.round(acotar(v, 0, 100));
 }
 // Y cuánto le queda al propio. Acá está la pieza que hace que una guerra
@@ -21026,6 +21209,9 @@ export default function PaxMundi() {
         // Y el país haciendo lo que hacía. Convertirlo lleva años y por eso
         // hay dos números: lo que se mandó y lo que de verdad está pasando.
         movilizacion: "paz", movilEfec: 0,
+        // Y sin obra atómica: no está empezada, y el mundo todavía no sabe
+        // que la cosa se puede hacer, que es el verdadero secreto.
+        atomo: { avance: 0, cabezas: 0 }, atomoEmpeno: false, atomoMundo: null,
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -21878,6 +22064,21 @@ export default function PaxMundi() {
             facNueva[k] = Math.max(0, Math.min(100, (facNueva[k] ?? 50) + v * esc * 0.35));
         nuevosStats.estabilidad = clamp(nuevosStats.estabilidad + humorG.estabilidad * esc * 0.35);
       }
+      // ═══ LA OBRA ATÓMICA ═══
+      // Adelanta sola mientras se le eche encima el país: no es un saber que
+      // se descubre un día, es una obra que se termina un día.
+      const atomoAntes = tieneLaBomba(state);
+      const atomoFin = atomoTrasElTiempo(estadoMov, lapso);
+      let atomoMundoFin = state.atomoMundo || null;
+      if (!atomoAntes && atomoFin.avance >= BOMBA_OBRA) {
+        // Y el día que se termina, el mundo se entera de lo único que
+        // importaba: que se puede hacer. A partir de ahí es cuestión de años.
+        atomoMundoFin = anioNuevo;
+        entradasMov.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+          texto: `☢ La obra está terminada. En un desierto, una mañana, se prueba lo que se hizo, `
+            + `y a partir de esa mañana el resto del mundo sabe lo único que hacía falta saber: `
+            + `que se puede hacer. Lo demás son años y empeño, y todos los tienen.` });
+      }
       // ═══ PRESUPUESTO: se cobra el mantenimiento y se reparte lo que sobra ═══
       const P = state.presupuesto || PRESUPUESTO_INICIAL;
       const ingresoAnual = ingresoAnualDe(nuevosStats, state.gobierno, cienciaPrevia, poblacionUtil(provs), state.vecinos, state.factorias, state.ejercito, provs, estadoMov);
@@ -22479,6 +22680,9 @@ export default function PaxMundi() {
         // En qué punto está la conversión del país. Es un número que se
         // arrastra detrás de la decisión y tarda años en alcanzarla.
         movilEfec: movilFin,
+        // Y la obra atómica, con el año en que el mundo se enteró de que la
+        // cosa era posible: eso no se puede volver a guardar.
+        atomo: atomoFin, atomoMundo: atomoMundoFin,
 
         guerra: guerraNueva,
         bajasRecientes: Math.round(bajasNuevas + bajasGuerra),
@@ -25938,6 +26142,138 @@ export default function PaxMundi() {
                           );
                         })}
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── la bomba ──
+                    Solo existe cuando alguien sabe de fisión. Antes de 1938 no
+                    hay nada de esto y el bloque no está. */}
+                {puedeElAtomo(s) && (() => {
+                  const a = s.atomo || { avance: 0, cabezas: 0 };
+                  const hecha = tieneLaBomba(s);
+                  const n = cabezasDe(s);
+                  const vec = vectorDe(s);
+                  const dis = disuasionDe(s);
+                  const suya = atomoDelVecino(s);
+                  const r = riesgoNuclear(s);
+                  const anual = esfuerzoAtomico({ ...s, atomoEmpeno: true });
+                  const faltan = anual > 0 ? Math.ceil((BOMBA_OBRA - a.avance) / anual) : null;
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${hecha ? C.red + "66" : C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ☢ LA OBRA ATÓMICA
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: hecha ? C.red : C.muted }}>
+                          {hecha ? `${n} ${n === 1 ? "cabeza" : "cabezas"}`
+                            : s.atomoEmpeno ? `${Math.round(a.avance)} de ${BOMBA_OBRA}` : "sin empezar"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        La física se sabe en varios países a la vez. Lo que separa a los que la tienen
+                        de los que no es separar isótopos a escala industrial, que es un problema de
+                        electricidad y de años — no de laboratorio.
+                      </div>
+                      {!hecha && (
+                        <>
+                          <div style={{ display: "flex", justifyContent: "space-between",
+                            fontSize: 12, color: C.muted, marginTop: 5 }}>
+                            <span>La obra adelanta al año</span>
+                            <span style={{ fontFamily: mono, color: anual > 8 ? C.ink : C.brass }}>
+                              {anual.toFixed(1)}{faltan != null && faltan < 99 ? ` · faltan ${faltan} años` : ""}
+                            </span>
+                          </div>
+                          <button onClick={() => setState((st) => ({ ...st, atomoEmpeno: !st.atomoEmpeno,
+                            cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                              texto: st.atomoEmpeno
+                                ? "☢ Se levanta la obra atómica. Lo construido se queda ahí, oxidándose."
+                                : "☢ Se ordena la obra atómica: una ciudad entera que no figura en "
+                                  + "ningún mapa, consumiendo más electricidad que tres provincias. "
+                                  + "Nadie que trabaje ahí sabrá para qué es." }] }))}
+                            disabled={pensando}
+                            style={{ width: "100%", marginTop: 7, padding: "6px 9px", borderRadius: 6,
+                              cursor: "pointer", background: s.atomoEmpeno ? `${C.red}18` : "transparent",
+                              border: `1px solid ${s.atomoEmpeno ? C.red : C.line}`,
+                              color: s.atomoEmpeno ? C.red : C.ink, fontFamily: mono, fontSize: 11 }}>
+                            {s.atomoEmpeno ? "✕ levantar la obra" : "☢ ordenar la obra"}
+                          </button>
+                          {s.atomoEmpeno && anual < 4 && (
+                            <div style={{ fontSize: 11, color: C.brass, marginTop: 6, lineHeight: 1.45 }}>
+                              A este ritmo no se termina nunca. Hace falta industria y hace falta un país
+                              movilizado: la obra más grande de la historia no se hizo con lo que sobraba.
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {hecha && (
+                        <>
+                          {[["Con qué se lleva", vec ? vec.n : "con nada todavía", vec ? C.ink : C.red],
+                            ["Sobrevive al primer golpe", `${Math.round(sobreviveElGolpe(s) * 100)}%`,
+                              sobreviveElGolpe(s) > 0.4 ? C.green : C.red],
+                            ["Disuasión", `${Math.round(dis * 100)}%`, dis > 0.5 ? C.green : C.brass],
+                            ["La tiene el otro", suya.tiene ? `sí, hace ${suya.anos} años` : "todavía no",
+                              suya.tiene ? C.red : C.muted]].map(([x, y, c]) => (
+                            <div key={x} style={{ display: "flex", justifyContent: "space-between",
+                              gap: 10, fontSize: 12, color: C.muted, marginTop: 3 }}>
+                              <span>{x}</span>
+                              <span style={{ color: c, fontFamily: mono, textAlign: "right" }}>{y}</span>
+                            </div>
+                          ))}
+                          {!vec && (
+                            <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                              Hay cabezas y no hay con qué llevarlas. Un arma que no se puede entregar
+                              es una curiosidad de laboratorio.
+                            </div>
+                          )}
+                          {vec && (
+                            <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
+                              {capitalizar(vec.dice)}. Lo que disuade no es tenerla: es que al otro no
+                              le salga la cuenta de pegar primero.
+                            </div>
+                          )}
+                          <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45,
+                            color: r.nivel > 0.6 ? C.red : r.nivel > 0.25 ? C.brass : C.green }}>
+                            {capitalizar(r.dice)}.
+                          </div>
+                          {s.guerra && usarLaBomba(s) && (
+                            <button onClick={() => setState((st) => {
+                              const u = usarLaBomba(st);
+                              if (!u) return st;
+                              return { ...st,
+                                atomo: { ...(st.atomo || {}), cabezas: u.cabezas },
+                                trato: u.trato,
+                                stats: { ...st.stats,
+                                  prestigio: acotar((st.stats.prestigio || 0) + u.prestigio, 0, 100),
+                                  estabilidad: acotar((st.stats.estabilidad || 0) + u.estabilidad, 0, 100) },
+                                vecinos: (st.vecinos || []).map((v) => ({ ...v,
+                                  relacion: acotar((v.relacion || 0) + u.rel, -100, 100) })),
+                                guerra: { ...st.guerra, atomizado: (st.guerra.atomizado || 0) + 1 },
+                                cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "mundo",
+                                  texto: `☢ Se usa la bomba sobre ${st.guerra.vecino}. En un instante `
+                                    + `deja de existir una ciudad con toda la gente que había dentro. `
+                                    + `La guerra se acaba y empieza otra cosa: desde hoy, cada corte del `
+                                    + `mundo hace sus cuentas contando con esto, y al que la tiró no se `
+                                    + `le vuelve a creer nada.` }] };
+                            })} disabled={pensando}
+                              style={{ width: "100%", marginTop: 8, padding: "7px 9px", borderRadius: 6,
+                                cursor: "pointer", background: `${C.red}18`,
+                                border: `1px solid ${C.red}`, color: C.red, fontFamily: mono, fontSize: 11 }}>
+                              ☢ usarla contra {s.guerra.vecino}
+                              <span style={{ float: "right", color: C.muted }}>
+                                relaciones −55 · prestigio −18
+                              </span>
+                            </button>
+                          )}
+                          {(s.guerra || {}).atomizado > 0 && (
+                            <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                              Ya se usó {(s.guerra || {}).atomizado === 1 ? "una vez" : `${s.guerra.atomizado} veces`}
+                              {" "}en esta guerra. No hay número de veces que lo vuelva barato.
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   );
                 })()}

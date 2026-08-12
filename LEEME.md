@@ -839,6 +839,58 @@ Cómo se paga sigue donde estaba: el tesoro, la deuda con sus banqueros y su
 tasa, y envilecer la moneda con su memoria. La economía de guerra no es una
 manera de pagar; es una manera de producir.
 
+## El arma que sirve para no usarse
+
+Todo lo demás en este juego es una cantidad: más infantería pelea más, más
+barcos cierran más puertos, más aviones cortan más puentes. La bomba no es una
+cantidad. Modelarla como un cañón muy grande sería el error más caro que se
+puede cometer acá, porque lo que la bomba cambia es **para qué sirve una
+guerra**.
+
+**Tenerla es una obra industrial, no un descubrimiento.** La física se sabía en
+varios países a la vez desde 1938. Lo que separó a los que la tuvieron de los
+que no fue separar isótopos a escala industrial — un problema de electricidad y
+de años. El cuello de botella no fue Los Álamos: fueron Oak Ridge y Hanford. En
+el juego hay que **ordenar la obra**, y avanza con la industria y con el país
+movilizado detrás: a pleno tarda unos tres años, y sin industria ni
+movilización tarda más de una guerra entera.
+
+**La primera no sirve para nada.** Hiroshima y Nagasaki fueron dos bombas y no
+había una tercera. Una sola cabeza disuade casi cero; veinte, tres cuartos.
+
+**Y lo que disuade no es tenerla: es sobrevivir al primer golpe.** La cuenta
+que hace el otro no es cuántas tenés sino cuántas te quedarían después de que
+él pegue primero. Con las mismas ocho cabezas sobrevive el 9% en un campo de
+aviación y el 46% en el mar — por eso el submarino cambió más las cosas que
+ninguna cabeza.
+
+**El momento peligroso no es el que suena razonable.** Hay cuatro casillas:
+
+- Nadie la tiene: no hay nada que temer.
+- La tiene uno solo: peligro medio, y es la tentación de usarla mientras dure
+  la ventaja — que no dura, porque el secreto ya está contado.
+- **La tienen los dos y alguno no aguantaría el primer golpe: la peor casilla
+  del tablero.** Hay que pegar primero o perderlo todo. Eso tiene nombre —
+  inestabilidad de crisis— y es lo que casi se juega en 1962.
+- La tienen los dos y los dos aguantarían: **la más segura de todas.** Ninguno
+  lo va a dar, y ahí la guerra deja de ser un instrumento.
+
+**La disuasión no gana guerras: hace que no las haya.** A un vecino que sabe
+que podés destruirlo y que no puede impedirlo se le acaban las ganas de pelear
+— no porque le falten hombres, porque la guerra dejó de servirle. Pero si él
+también la tiene y también sobreviviría, se anulan y la guerra vuelve a
+decidirse como siempre. La bomba no toma un palmo de tierra.
+
+**Y el secreto nunca fue cómo, fue que se podía.** El día que se prueba la
+primera, el resto del mundo aprende lo único que hacía falta saber. A partir de
+ahí es cuestión de años y de empeño, y todos los tienen.
+
+**Usarla cuesta el mundo.** Le rompe al otro la voluntad y el poder de golpe —
+es lo único que la bomba hace mejor que todo lo demás junto— y a cambio hunde
+las relaciones con **todas** las cortes, el prestigio, la estabilidad de casa,
+y manda a cero la fama de cómo tratás a los que se rinden: al que hizo esto no
+se le vuelve a creer nada sobre cómo trata a nadie. Y se gasta la que se tiró.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

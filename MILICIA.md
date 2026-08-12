@@ -37,6 +37,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 21 | Guerra naval | El agua es agua: un ejército no la cruza caminando, hacen falta barcos y un mar que no sea del otro. Sin puerto no hay armada, y sin costa no se puede bloquear a nadie ni ser bloqueado. La flota en ser hace la curva cóncava: cuatro veces más barcos no dan cuatro veces más mar. Cuatro misiones —escuadra, bloqueo, corso, convoy— y el bloqueo, que se siente en la aduana antes que en el frente y que, al revés que bombardear ciudades, SÍ le rompe la voluntad al otro. |
 | 24-25 | Operaciones delegadas | Se le encarga a un general una intención —limpiar, tomar, sostener, hostigar, desembarcar— y él da las órdenes. Una directiva llega hasta donde llega el correo del siglo: ciento y pico de kilómetros en 1200, un continente con telégrafo. Más allá el hombre cumple lo que entendió, y ahí los rasgos de los generales dejan de ser un adorno: paso, sangre, muros y cuánto se salen de lo pedido. Lo que vuelve es un parte con fecha, no el mapa en vivo. |
 | 38 | Economía de guerra | Cinco escalones de conversión, cada uno con su siglo: derrama, arsenales del rey, requisa, economía dirigida. Convertir lleva años —hay dos números, lo que se mandó y lo que está pasando— y por eso gana las guerras largas y arruina las cortas. Lo que sube la cadena de guerra baja la producción civil en la misma medida, y el cuello de botella no se mueve. Desmovilizar es su propia crisis. |
+| 36-37 | Armas estratégicas | Tenerla es una obra industrial de años, no un descubrimiento: el cuello de botella es la electricidad. La primera no sirve para nada, y lo que disuade no es tenerla sino sobrevivir al primer golpe —el submarino cambió más que ninguna cabeza—. La casilla peligrosa es la de los dos armados y ninguno seguro, no la de los dos seguros. La disuasión no gana guerras: hace que no las haya. Y usarla hunde las relaciones con todas las cortes y la fama del trato. |
 
 ## Lo que está a medias
 
@@ -47,8 +48,8 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 ## Lo que no existe
 
-Reparaciones (§17), modo táctico (§27), armas estratégicas y nucleares
-(§36-37).
+Reparaciones (§17) y modo táctico (§27), que está en «lo que no se va a hacer»
+más abajo y por buenas razones.
 
 ## El orden
 
@@ -91,8 +92,10 @@ antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
 el espionaje con su desinformación, la doctrina, los prisioneros, el aire, el
-mar, las operaciones delegadas y la economía de guerra. Queda una sola pieza:
-las armas estratégicas.
+mar, las operaciones delegadas, la economía de guerra y las armas estratégicas.
+Con eso el mapa de este documento está recorrido entero: lo que queda son las
+dos piezas de «lo que está a medias» —el combustible como recurso aparte y las
+consecuencias sociales de una guerra larga— y nada más.
 
 ## Lo que no se va a hacer
 
