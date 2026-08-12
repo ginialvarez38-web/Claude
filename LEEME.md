@@ -891,6 +891,53 @@ las relaciones con **todas** las cortes, el prestigio, la estabilidad de casa,
 y manda a cero la fama de cómo tratás a los que se rinden: al que hizo esto no
 se le vuelve a creer nada sobre cómo trata a nadie. Y se gasta la que se tiró.
 
+## Lo que no se fabrica con empeño
+
+El pan sale de cualquier campo. Los pertrechos salen de una cadena que se puede
+ensanchar con años y con dinero. El combustible no sale de ninguna de las dos
+cosas: **o está debajo de tu tierra o no está**, y esa asimetría es lo único
+que hay que entender de este bloque. Es el primer recurso de la historia
+militar que no se resuelve con empeño.
+
+Y reorganizó la estrategia del mundo, no la logística de una campaña: Alemania
+fue al Cáucaso por petróleo y se quedó sin él antes de llegar; Japón atacó
+Pearl Harbor porque le habían cerrado el grifo; la flota italiana pasó la
+guerra en el puerto con los barcos intactos; Rommel paró en El Alamein porque
+los petroleros no llegaron.
+
+**No existe hasta que uno se motoriza.** Un ejército de 1200 no pide una gota,
+y en 1890 hay motores y casi nada anda a motor. Motorizarse tampoco es solo
+saber hacerlo: hay que poder pagarlo, así que lo decide también la economía de
+guerra — y nunca llega al total, porque ni el ejército más rico de 1945 lo
+estuvo y la Wehrmacht de 1941 iba en su mayor parte a caballo.
+
+**Sale de tres sitios y solo uno es seguro.** De tu propia tierra, si tuviste
+suerte con la geología; comprado afuera, que es de lo que vivieron casi todos y
+es exactamente lo que corta una escuadra enemiga; o hecho de carbón con un
+catalizador sólido, que es química de 1909, el proceso más caro que existe, y
+se usó igual porque la alternativa era parar. La ficha dice de cuál de los tres
+depende el país, que es lo frágil que es la cosa.
+
+**El intercambio es el más limpio de todo el sistema militar.** Una columna
+motorizada con el tanque lleno hace más del doble que una de caballos — y con
+el tanque vacío hace **menos** que ella, porque al caballo lo alimenta el pasto
+del camino y al camión no lo alimenta nada. Un camión sin gasóleo no es un
+camión lento: es un peso muerto que hay que empujar. Eso es Alemania en 1945.
+
+**Y cuando falta no se reparte a prorrata.** Primero vuela el que vuela y
+navega el que navega, porque un avión a media ración no vuela a media altura:
+no vuela. La Luftwaffe de 1945 tenía más aparatos que nunca. Lo que sobra es lo
+que mueve a la tropa.
+
+Una escuadra sin gasóleo, en cambio, **sigue siendo una flota en ser**: amarrada
+obliga igual al otro a tener la suya enfrente, y la italiana ató a media
+Mediterranean Fleet sin salir del puerto. Lo que el tanque vacío impide no es
+existir: es salir.
+
+Y es la única de las tres cosas que un ejército consume que **no perdona la
+organización**: saber de logística ahorra pan y pertrechos como ahorró siempre,
+y no ahorra ni una gota de combustible. Un motor quema lo que quema.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

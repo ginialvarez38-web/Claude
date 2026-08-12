@@ -9667,6 +9667,22 @@ function velocidadHueste(h, prov, s) {
   // Y el bulto. Una columna más grande de lo que su época sabe organizar tarda
   // un día en pasar por donde la cabeza pasó en una hora: es la razón por la
   // que se inventó dividir un ejército, mucho antes que ninguna otra.
+  // Y si tiene con qué andar. Acá está el intercambio más limpio de todo el
+  // sistema militar: un ejército motorizado va mucho más rápido con
+  // combustible y más lento que uno de caballos sin él, porque al caballo lo
+  // alimenta el pasto del camino y al camión no lo alimenta nada. Un camión
+  // sin gasóleo no es un camión lento: es un peso muerto que hay que empujar,
+  // y por eso la penalización llega a ser peor que no haberse motorizado.
+  const mot = motorizacionDe(s);
+  let motor = 1;
+  if (mot > 0.02 && !(h && h.de)) {
+    const rac = h && h.combustible != null ? h.combustible : 1;
+    // El castigo pesa más que el premio, y a propósito: con el tanque lleno
+    // se anda casi el doble, y con el tanque vacío se anda menos que un
+    // ejército de caballos, porque al caballo lo alimenta el pasto y al
+    // camión hay que empujarlo. Eso es Alemania en 1945.
+    motor = 1 + mot * (rac >= 0.98 ? 0.85 : -1.15 * (1 - rac));
+  }
   // Y bajo qué cielo se marcha. Es el efecto más constante que tuvo la
   // aviación sobre un ejército y el que menos se cuenta: no lo destruye, le
   // prohíbe moverse de día. Las divisiones alemanas que fueron a Normandía
@@ -9680,7 +9696,7 @@ function velocidadHueste(h, prov, s) {
   const of = oficioDe(generalDe(h, s));
   return base * (0.75 + via.soc * 0.75) * (t.com || 1)
     * estorboEnLaMarcha(desbordeDe(h, s)) * dctr(s, "marcha")
-    * acotar(1 + aire * 0.22, 0.72, 1.10) * of.paso;
+    * acotar(1 + aire * 0.22, 0.72, 1.10) * of.paso * acotar(motor, 0.35, 1.9);
 }
 
 // ═══ EL TEMPLE: LO QUE LE ENSEÑARON Y LO QUE VIVIÓ ════════════════════════
@@ -10190,8 +10206,12 @@ function aireDelReino(s) {
   const pilotos = templeDePilotos(s);
   // Un avión sin tripulación no es media fuerza aérea: es chatarra cara. Por
   // eso las tripulaciones multiplican fuerte y no suman.
-  return { unidades, calidad, pilotos,
-           fuerza: unidades * calidad * (0.25 + 1.15 * pilotos) };
+  // Y si hay con qué volar. Es el detalle que más define el final de una
+  // guerra aérea: la Luftwaffe de 1945 tenía más aparatos que nunca y no tenía
+  // gasolina, y un avión sin combustible no vuela poco, no vuela.
+  const nafta = racionDeCombustible(s).aparato;
+  return { unidades, calidad, pilotos, nafta,
+           fuerza: unidades * calidad * (0.25 + 1.15 * pilotos) * (0.12 + 0.88 * nafta) };
 }
 // Y lo que pone el otro. Del vecino no se lleva inventario —nunca se llevó—:
 // lo que hay es lo que un país de su tamaño tenía en ese año. Antes de 1914
@@ -10548,6 +10568,13 @@ function armadaDelReino(s) {
   // Y una escuadra necesita de dónde salir: pocos puertos, poca escuadra que
   // se pueda sostener en la mar. No es el número de barcos, es el astillero.
   const base = Math.min(1, 0.45 + costa.puertos * 0.18);
+  // Acá NO entra el combustible, y no es un olvido: una escuadra amarrada
+  // sigue siendo una flota en ser y sigue obligando al otro a tener la suya
+  // enfrente —la italiana pasó la guerra sin gasóleo y ató a la Mediterranean
+  // Fleet igual—. Lo que el tanque vacío impide no es existir: es salir. Por
+  // eso el combustible pega en lo que la armada hace y no en lo que pesa, y
+  // además así esta cuenta no depende de sí misma: sin esto, la nafta de la
+  // flota dependía del bloqueo y el bloqueo de la flota, en círculo.
   return { unidades, calidad, costa, sinPuerto: false,
            fuerza: unidades * calidad * base };
 }
@@ -10639,10 +10666,13 @@ function bloqueoImpuesto(s) {
   const m = misionDelMar(s);
   // El bloqueo de verdad necesita el mar. Nunca es total: mientras el otro
   // tenga algo a flote y una costa larga, algo entra.
-  const cerco = m.bloquea && d.dominio > 0 ? d.dominio * 0.90 : 0;
+  // Y con qué tanque se sale. Bloquear es estar meses en la mar, y eso lo
+  // paga el combustible: sin él la escuadra sigue existiendo y no sale.
+  const nafta = 0.2 + 0.8 * racionDeCombustible(s).aparato;
+  const cerco = m.bloquea && d.dominio > 0 ? d.dominio * 0.90 * nafta : 0;
   // Y el corso, que no lo necesita. Duele y tiene techo bajo: nunca fue
   // suficiente, ni con doscientos submarinos.
-  const caza = m.corso ? acotar(0.14 + (d.dominio + 1) * 0.13, 0, 0.34) : 0;
+  const caza = m.corso ? acotar(0.14 + (d.dominio + 1) * 0.13, 0, 0.34) * nafta : 0;
   return acotar(cerco + caza, 0, 0.8);
 }
 // Y lo que a uno le hacen. El vecino no elige misión: hace lo que puede, que
@@ -10690,6 +10720,161 @@ function velocidadEnLaMar(s) {
   let m = 0;
   for (const [id, v] of Object.entries(ARMADA_SABER)) if (sab.has(id)) m += v;
   return PASO_MAR * (0.55 + m * 0.5);
+}
+
+// ═══ EL COMBUSTIBLE: LO QUE NO SE FABRICA CON EMPEÑO ═════════════════════
+//
+// El pan sale de cualquier campo. Los pertrechos salen de una cadena que se
+// puede ensanchar con años y con dinero. El combustible no sale de ninguna de
+// las dos cosas: **o está debajo de tu tierra o no está**, y esa asimetría es
+// lo único que hay que entender de este bloque. Es el primer recurso de la
+// historia militar que no se puede resolver con empeño.
+//
+// Y reorganizó la estrategia del mundo, no la logística de una campaña:
+// Alemania fue al Cáucaso por petróleo y se quedó sin él antes de llegar;
+// Japón atacó Pearl Harbor porque le habían cerrado el grifo; la flota
+// italiana pasó la guerra en el puerto sin combustible que gastar; y Rommel
+// paró en El Alamein porque los petroleros no llegaron. Ninguna de esas cuatro
+// es una historia de abastecimiento: son historias de geografía.
+//
+// El intercambio que pone acá es el más limpio de todo el sistema militar: un
+// ejército motorizado va mucho más rápido con combustible y **más lento que
+// uno de caballos sin él**, porque al caballo lo alimenta el pasto del camino
+// y al camión no lo alimenta nada. Eso es Alemania en 1945 y es lo que hay que
+// poder ver en el mapa.
+const COMBUSTIBLE_DESDE = 1890;   // cuando un ejército empieza a depender de esto
+// Lo que motoriza a un ejército. No es una decisión que se toma: es lo que el
+// siglo le hace a uno, y por eso sale de lo que se sabe y no de un botón.
+const MOTOR_SABER = {
+  "ingenierias.termicas.motor_combustion": 0.40,
+  "ingenierias.transporte.automovil": 0.25,
+  "ingenierias.termicas.motor_eficiente": 0.30,
+  "ingenierias.produccion.par_produccion_masa": 0.35,
+  "ingenierias.militar.blindaje": 0.25,
+  "ingenierias.aeronautica.aeroplano": 0.20,
+  "ingenierias.naval.buque_vapor": 0.15,
+};
+// Cuánto del ejército anda a motor. Los saberes lo permiten y la economía de
+// guerra lo paga: la Wehrmacht de 1941 iba en su mayor parte a caballo y el
+// ejército americano no, y la diferencia no fue lo que sabían.
+function motorizacionDe(s) {
+  const m = sumaSaberAire(MOTOR_SABER, s);
+  if (m <= 0) return 0;
+  const mov = pesoMovilizacion(s);
+  // Con techo bien por debajo de uno: ni el ejército más rico de 1945 andaba
+  // entero a motor. La Wehrmacht de 1941 iba en su mayor parte a caballo y el
+  // americano, que fue el más motorizado de todos, tampoco llegó al total.
+  return acotar(m * 0.30 * (0.5 + mov.nivel * 0.13), 0, 0.9);
+}
+// ——— de dónde sale ———
+// Primero lo que hay bajo la tierra propia, que es lo único barato.
+function petroleoDelReino(s) {
+  const provs = (s && s.provincias) || [];
+  let v = 0;
+  for (const p of provs) {
+    if (p.ocupada) continue;
+    for (const y of yacimientosVisibles(p, (s && s.anio) || 0)) {
+      if (y.id !== "petroleo" || reservaActual(s, p, y.id) <= 0) continue;
+      v += 1 + acotar(Math.round(p.via || 0), 0, 3) * 0.2;
+    }
+  }
+  // Un yacimiento de verdad da muchísimo: por eso tenerlo o no tenerlo es la
+  // diferencia entre poder motorizarse y no poder, y no un ajuste al margen.
+  return v * 16;
+}
+// Después lo que se compra afuera, que es de lo que vivieron casi todos y es
+// exactamente lo que una escuadra enemiga corta. Acá se junta este bloque con
+// el del mar, y no por elegancia: es lo que le pasó a Japón y a Italia.
+function petroleoImportado(s) {
+  const era = acotar((((s && s.anio) || 0) - COMBUSTIBLE_DESDE) / 60, 0, 1);
+  if (era <= 0 || costaDelReino(s).puertos <= 0) return 0;
+  const base = Math.pow(Math.max(1, (s && s.poblacion) || 1000), 0.34) * era * 2.2;
+  return base * (1 - bloqueoSufrido(s));
+}
+// Y por último hacerlo de carbón, que es lo que hace el que no tiene nada y no
+// puede comprar. Sale carísimo —se come la cadena de guerra que lo produce— y
+// aun así se hizo, porque la alternativa era parar.
+// El carbón se vuelve nafta con un catalizador sólido, y esa química es de
+// 1909: antes no había manera, y por eso nadie lo intentó antes.
+const SINTETICO_SABER = "quimica.estado_solido.catalizador_solido";
+function puedeSintetico(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  return sab.has(SINTETICO_SABER);
+}
+function sinteticoDelReino(s) {
+  if (!puedeSintetico(s) || !(s && s.sintetico)) return 0;
+  // Sale de la hulla y del empeño, y le cuesta a la cadena de guerra un cuarto
+  // de lo que produce. No hay proceso más caro que este y se usó igual.
+  return hullaDelReino(s) * 6.5 * (0.5 + pesoMovilizacion(s).nivel * 0.15);
+}
+function combustibleDelReino(s) {
+  const propio = petroleoDelReino(s);
+  const fuera = petroleoImportado(s);
+  const hecho = sinteticoDelReino(s);
+  const total = propio + fuera + hecho;
+  const partes = [
+    { id: "propio", n: "de tu tierra", v: propio, dice: "lo único barato que hay" },
+    { id: "fuera", n: "comprado afuera", v: fuera, dice: "y por ahí es por donde te lo cortan" },
+    { id: "hecho", n: "hecho de carbón", v: hecho, dice: "el proceso más caro que existe, y se usó igual" },
+  ];
+  return { total, propio, fuera, hecho, partes,
+    // De dónde viene la mayor parte dice lo frágil que es la cosa.
+    depende: total <= 0 ? null : partes.slice().sort((a, b) => b.v - a.v)[0] };
+}
+// Lo que el ejército quiere quemar por día. Un ejército sin motorizar no pide
+// nada, y ahí está el punto: esto no existe hasta que uno se motoriza, y desde
+// que se motoriza no se puede volver atrás.
+const GASTO_MOTOR = { infanteria: 0.45, caballeria: 0.25, artilleria: 1.30,
+                      ingenieros: 0.60, marina: 2.10, aviacion: 5.80 };
+function combustibleDeHueste(h, s) {
+  const mot = motorizacionDe(s);
+  if (mot <= 0) return 0;
+  let v = 0;
+  for (const r of RAMAS_EJERCITO) {
+    const n = ((h && h.ramas) || {})[r.id] || 0;
+    if (n) v += n * (GASTO_MOTOR[r.id] || 0.5);
+  }
+  return v * mot;
+}
+// Y lo que quema todo lo que no marcha: la aviación y la escuadra, que se
+// pagan del mismo barril y son las primeras en quedarse en tierra.
+function combustibleDelAparato(s) {
+  const mot = motorizacionDe(s);
+  if (mot <= 0) return 0;
+  const ej = (s && s.ejercito) || {};
+  return ((ej.aviacion || 0) * GASTO_MOTOR.aviacion
+        + (ej.marina || 0) * GASTO_MOTOR.marina) * mot * 0.35;
+}
+// La cuenta del reino: cuánto hay, cuánto se pide y qué parte llega. Cuando no
+// alcanza no se reparte a prorrata: primero vuela el que vuela y navega el que
+// navega, porque un avión sin nafta no es lento, es un avión que no sale.
+// Se pregunta desde la marcha, desde el cielo y desde el mar, o sea desde
+// todas partes y muchas veces por turno. Va guardado por objeto de estado,
+// que es lo que dura un turno, igual que la costa.
+const _barril = new WeakMap();
+function racionDeCombustible(s) {
+  if (s && typeof s === "object") {
+    const v = _barril.get(s);
+    if (v) return v;
+    const r = racionCruda(s);
+    _barril.set(s, r);
+    return r;
+  }
+  return racionCruda(s);
+}
+function racionCruda(s) {
+  const hay = combustibleDelReino(s).total;
+  const aparato = combustibleDelAparato(s);
+  const tropa = ((s && s.huestes) || []).filter((h) => !h.de)
+    .reduce((a, h) => a + combustibleDeHueste(h, s), 0);
+  const pide = aparato + tropa;
+  if (pide <= 0) return { parte: 1, hay, pide, tropa: 1, aparato: 1 };
+  // Al aparato se le da primero porque es lo que no funciona a medias.
+  const alAparato = Math.min(1, hay / Math.max(0.001, aparato));
+  const sobra = Math.max(0, hay - aparato);
+  const aLaTropa = tropa > 0 ? Math.min(1, sobra / tropa) : 1;
+  return { parte: Math.min(1, hay / pide), hay, pide,
+           tropa: aLaTropa, aparato: alAparato };
 }
 
 // ═══ LA BOMBA: EL ARMA QUE SIRVE PARA NO USARSE ══════════════════════════
@@ -12623,7 +12808,12 @@ function gastoDeHueste(h, s) {
   // Y la doctrina, que en esto es donde más se nota: una que vive del país que
   // cruza come la mitad, y una que rompe líneas a cañonazos gasta el doble.
   return { pan: pan * merma * dctr(s, "pan"),
-           pertrechos: per * merma * dctr(s, "pertrechos") };
+           pertrechos: per * merma * dctr(s, "pertrechos"),
+           // Y el combustible, que no se merma con la logística ni con la
+           // doctrina: un motor quema lo que quema y no hay tren de suministro
+           // que lo convenza de quemar menos. Es la única de las tres que no
+           // depende de lo bien organizado que esté uno.
+           combustible: combustibleDeHueste(h, s) };
 }
 
 // Lo que una comarca puede sacar de sí y mandar hacia afuera. El camino es lo
@@ -12933,22 +13123,34 @@ function abastoDeHueste(h, t, s, despensa) {
   const camino = t && k >= 0 && t.prov[k] >= 0 ? (h.de ? t.abaSuyo : t.abaMio)[k] : 0;
   const porCamino = Math.max(0, Math.min(1, pide > 0 ? camino / pide : 1));
   // y lo que hay en los almacenes del reino de cada cosa
-  const hay = despensa == null ? { pan: g.pan, pertrechos: g.pertrechos }
-            : typeof despensa === "number" ? { pan: despensa, pertrechos: despensa } : despensa;
+  const hay = despensa == null ? { pan: g.pan, pertrechos: g.pertrechos, combustible: g.combustible }
+            : typeof despensa === "number" ? { pan: despensa, pertrechos: despensa, combustible: despensa } : despensa;
   const pan = Math.min(g.pan, Math.max(0, hay.pan || 0)) * porCamino;
   const per = Math.min(g.pertrechos, Math.max(0, hay.pertrechos || 0)) * porCamino;
+  // El combustible viaja por el mismo camino que todo lo demás, pero no entra
+  // en la cuenta de «cuánto le llega»: una hueste sin gasóleo no se deshace
+  // como una sin pan, se queda quieta. Son dos castigos distintos y por eso
+  // son dos números distintos.
+  const cmb = g.combustible > 0
+    ? Math.min(1, (Math.max(0, hay.combustible == null ? g.combustible : hay.combustible)
+        / g.combustible)) * porCamino : 1;
   const llega = pan + per;
   const parte = llega / pide;
   const faltaPan = g.pan > 0 && pan < g.pan * 0.98;
   const faltaPer = g.pertrechos > 0 && per < g.pertrechos * 0.98;
+  const faltaCmb = g.combustible > 0 && cmb < 0.9;
   const porque = porCamino < 0.98
     ? (porCamino <= 0.05 ? "cortado: no llega nada" : "el camino no da para tanto")
     : faltaPan && faltaPer ? "sin pan y sin pertrechos: no hay de dónde sacarlo"
     : faltaPer ? "sin pertrechos: la cadena no da para tanto"
     : faltaPan ? "sin pan: no hay grano que mandar"
+    // Va al final porque es el único que no la deshace: la deja parada, que
+    // en una campaña es otra manera de perderla.
+    : faltaCmb ? "sin combustible: los camiones están parados y no hay de dónde sacarlo"
     : "abastecida";
   return { parte, pide, llega, camino, porque,
-           pan: g.pan > 0 ? pan / g.pan : 1, pertrechos: g.pertrechos > 0 ? per / g.pertrechos : 1 };
+           pan: g.pan > 0 ? pan / g.pan : 1, pertrechos: g.pertrechos > 0 ? per / g.pertrechos : 1,
+           combustible: cmb };
 }
 
 // ——— un paso del frente ———
@@ -13575,14 +13777,19 @@ function correrCampana(s, dias, rnd) {
   // si no alcanza para todas, a todas les llega la misma parte de cada cosa
   const racPan = pidePan > 0 ? Math.min(1, despensa / pidePan) : 1;
   const racPer = pidePer > 0 ? Math.min(1, perDisponible / pidePer) : 1;
+  // Y el combustible, que no se reparte igual que las otras dos cosas: al que
+  // vuela y al que navega se le da primero, porque un avión a media ración no
+  // vuela a media altura, no vuela. Lo que sobre es lo que mueve a la tropa.
+  const barril = racionDeCombustible(s);
   let consumo = panPresos * racPan * dias, gastoPer = 0;
   const conAbasto = enPie.map((h) => {
     const g = gastoDeHueste(h, s);
     const a = abastoDeHueste(h, teatro, s, h.de ? null
-      : { pan: g.pan * racPan, pertrechos: g.pertrechos * racPer });
+      : { pan: g.pan * racPan, pertrechos: g.pertrechos * racPer,
+          combustible: g.combustible * barril.tropa });
     if (!h.de) { consumo += a.pan * g.pan * dias; gastoPer += a.pertrechos * g.pertrechos * dias; }
     return { ...h, abasto: a.parte, porque: a.porque, pide: a.pide,
-             pan: a.pan, pertrechos: a.pertrechos };
+             pan: a.pan, pertrechos: a.pertrechos, combustible: a.combustible };
   });
   // Lo que queda en el depósito: lo que la cadena produjo estos días menos lo
   // que la guerra se llevó. En paz se llena solo; en guerra se vacía, y ahí es
@@ -21212,6 +21419,9 @@ export default function PaxMundi() {
         // Y sin obra atómica: no está empezada, y el mundo todavía no sabe
         // que la cosa se puede hacer, que es el verdadero secreto.
         atomo: { avance: 0, cabezas: 0 }, atomoEmpeno: false, atomoMundo: null,
+        // Y sin plantas de sintético, que es lo que hace el que no tiene
+        // petróleo debajo ni con qué comprarlo.
+        sintetico: false,
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -26142,6 +26352,82 @@ export default function PaxMundi() {
                           );
                         })}
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── el combustible ──
+                    Solo existe cuando el ejército anda a motor. Antes de eso
+                    no hay nada que decir y el bloque no está. */}
+                {motorizacionDe(s) > 0.02 && (() => {
+                  const c = combustibleDelReino(s);
+                  const r = racionDeCombustible(s);
+                  const mot = motorizacionDe(s);
+                  const falta = r.parte < 0.98;
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${falta ? C.red + "55" : C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⛽ EL COMBUSTIBLE
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12,
+                          color: falta ? C.red : C.gold }}>
+                          {Math.round(mot * 100)}% a motor
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        El pan sale de cualquier campo y los pertrechos de una cadena que se ensancha
+                        con años y dinero. Esto no: o está debajo de tu tierra o no está.
+                      </div>
+                      {c.partes.filter((p) => p.v > 0.05).map((p) => (
+                        <div key={p.id} style={{ display: "flex", justifyContent: "space-between",
+                          gap: 10, fontSize: 12, color: C.muted, marginTop: 3 }}>
+                          <span>{capitalizar(p.n)}</span>
+                          <span style={{ fontFamily: mono,
+                            color: p.id === "propio" ? C.green : p.id === "fuera" ? C.brass : C.violet }}>
+                            {p.v.toFixed(0)}
+                          </span>
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", justifyContent: "space-between",
+                        gap: 10, fontSize: 12, color: C.muted, marginTop: 3 }}>
+                        <span>Se pide al día</span>
+                        <span style={{ fontFamily: mono, color: falta ? C.red : C.ink }}>
+                          {r.pide.toFixed(0)} de {r.hay.toFixed(0)}
+                        </span>
+                      </div>
+                      {c.depende && (
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
+                          La mayor parte viene {c.depende.n}: {c.depende.dice}.
+                        </div>
+                      )}
+                      {falta && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          No alcanza. Primero vuela el que vuela y navega el que navega
+                          {" "}({Math.round(r.aparato * 100)}% de lo que piden); a la tropa le queda
+                          {" "}{Math.round(r.tropa * 100)}%. Una columna motorizada sin gasóleo anda menos
+                          que una de caballos: al caballo lo alimenta el pasto y al camión no lo alimenta nada.
+                        </div>
+                      )}
+                      {puedeSintetico(s) && (
+                        <button onClick={() => setState((st) => ({ ...st, sintetico: !st.sintetico,
+                          cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                            texto: st.sintetico
+                              ? "⛽ Se cierran las plantas de combustible sintético. Costaban una fortuna."
+                              : "⛽ Se ordena hacer combustible de carbón. Es el proceso más caro que "
+                                + "existe y se come la industria que lo hace, y aun así es mejor que parar." }] }))}
+                          disabled={pensando}
+                          style={{ width: "100%", marginTop: 8, padding: "6px 9px", borderRadius: 6,
+                            cursor: "pointer", background: s.sintetico ? `${C.violet}18` : "transparent",
+                            border: `1px solid ${s.sintetico ? C.violet : C.line}`,
+                            color: s.sintetico ? C.violet : C.ink, fontFamily: mono, fontSize: 11 }}>
+                          {s.sintetico ? "✕ cerrar las plantas de sintético" : "⛽ hacer combustible de carbón"}
+                          <span style={{ float: "right", color: C.muted }}>
+                            {s.sintetico ? `${c.hecho.toFixed(0)} al día` : "carísimo y mejor que parar"}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   );
                 })()}

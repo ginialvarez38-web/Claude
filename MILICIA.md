@@ -38,12 +38,12 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 24-25 | Operaciones delegadas | Se le encarga a un general una intención —limpiar, tomar, sostener, hostigar, desembarcar— y él da las órdenes. Una directiva llega hasta donde llega el correo del siglo: ciento y pico de kilómetros en 1200, un continente con telégrafo. Más allá el hombre cumple lo que entendió, y ahí los rasgos de los generales dejan de ser un adorno: paso, sangre, muros y cuánto se salen de lo pedido. Lo que vuelve es un parte con fecha, no el mapa en vivo. |
 | 38 | Economía de guerra | Cinco escalones de conversión, cada uno con su siglo: derrama, arsenales del rey, requisa, economía dirigida. Convertir lleva años —hay dos números, lo que se mandó y lo que está pasando— y por eso gana las guerras largas y arruina las cortas. Lo que sube la cadena de guerra baja la producción civil en la misma medida, y el cuello de botella no se mueve. Desmovilizar es su propia crisis. |
 | 36-37 | Armas estratégicas | Tenerla es una obra industrial de años, no un descubrimiento: el cuello de botella es la electricidad. La primera no sirve para nada, y lo que disuade no es tenerla sino sobrevivir al primer golpe —el submarino cambió más que ninguna cabeza—. La casilla peligrosa es la de los dos armados y ninguno seguro, no la de los dos seguros. La disuasión no gana guerras: hace que no las haya. Y usarla hunde las relaciones con todas las cortes y la fama del trato. |
+| 15-16 | Combustible | O está debajo de tu tierra o no está: es el primer recurso que no se resuelve con empeño. No existe hasta que uno se motoriza, y motorizarse lo permiten los saberes y lo paga la economía de guerra. Sale del propio suelo, de comprarlo —y por ahí lo corta una escuadra— o de carbón con catalizadores desde 1909. Motorizado con tanque lleno se anda el doble; con el tanque vacío, menos que a caballo. Cuando falta, vuela primero el que vuela. |
 
 ## Lo que está a medias
 
 | § | Qué falta |
 |---|---|
-| 15-16 | **Combustible como recurso.** La munición ya tiene su cadena y su depósito; el combustible no se lleva aparte —una división motorizada consume pertrechos, no gasóleo—. |
 | 39 | **Consecuencias sociales.** La población ya sufre la leva y las bajas; falta lo que deja una guerra larga —viudas, mutilados, deuda, radicalización—. |
 
 ## Lo que no existe
@@ -92,10 +92,9 @@ antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
 el espionaje con su desinformación, la doctrina, los prisioneros, el aire, el
-mar, las operaciones delegadas, la economía de guerra y las armas estratégicas.
-Con eso el mapa de este documento está recorrido entero: lo que queda son las
-dos piezas de «lo que está a medias» —el combustible como recurso aparte y las
-consecuencias sociales de una guerra larga— y nada más.
+mar, las operaciones delegadas, la economía de guerra, las armas estratégicas y
+el combustible. De «lo que está a medias» queda una sola cosa: las
+consecuencias sociales de una guerra larga.
 
 ## Lo que no se va a hacer
 
