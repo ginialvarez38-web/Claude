@@ -740,6 +740,52 @@ una paradoja: una bomba es un ataque que se puede odiar, y el hambre del tercer
 invierno es una cuenta que hace todo el mundo en su casa. El bloqueo aliado
 contribuyó al derrumbe alemán de 1918 más que ninguna ofensiva de ese año.
 
+## Decir qué y no cómo
+
+El que juega a esto es un jefe de estado, y hasta ahora le hacía a cada hueste
+el trabajo de un capitán: caminá hasta acá, sentate delante de esa plaza,
+asaltala. Ningún rey hizo eso nunca. Lo que se hace desde arriba es dar una
+intención y dejar que el que está ahí resuelva el cómo, porque el que está ahí
+ve el terreno y uno no.
+
+Se le encarga a un general una de cinco cosas — **limpiar la comarca**, **tomar
+la plaza**, **sostener la línea**, **hostigar sin comprometerse** (necesita
+oficiales que sepan retirarse a tiempo) o **desembarcar allá** (necesita costa)
+— y a partir de ahí él da las órdenes. Ninguna de las cinco dice por dónde ir
+ni qué hacer al llegar: eso es exactamente lo que se delega.
+
+**Una directiva llega hasta donde llega el correo de su siglo.** Un rey de 1200
+manda a unos ciento y pico de kilómetros; con un cuerpo de oficiales, algo más;
+con una plana mayor, seiscientos; y con el telégrafo, un continente. Más allá
+de ese alcance el hombre no desobedece — cumple lo que entendió, que es otra
+cosa. Al lado de la corte se obedece un noventa por ciento; a mil kilómetros en
+1500, menos de la mitad; a la misma distancia con un cable, otra vez casi todo.
+No hizo mejores generales, hizo generales más vigilados.
+
+**Y ahí los rasgos de los generales dejan de ser un adorno.** Cada uno marcha a
+su paso, sangra lo suyo, rinde lo suyo delante de un muro y se sale de lo
+pedido lo suyo:
+
+- Un **audaz** marcha casi el doble que un cauteloso, pierde el doble de gente
+  ganando lo mismo, y a la primera ocasión hace bastante más de lo que se le
+  encargó.
+- Un **metódico** no pierde hombres de más y no se sale nunca de la raya.
+- El **ingenioso en el sitio** toma plazas que los otros rodean.
+- Un **cauteloso** llega tarde a todo, no gana nada y no lo destruyen jamás.
+
+Encargale la misma comarca a dos de ellos y salen dos campañas distintas. Y a
+un cauteloso al que le pedís sostener una línea, la sostiene; al audaz se le va
+a buscar al que viene, que no se le pidió y es lo que iba a hacer igual.
+
+**La contrapartida es que delegar es dejar de ver.** Lo que vuelve no es el
+mapa en vivo: es un parte, y tiene la fecha de tu siglo. En 1200 lo que la
+corte lee de su propia campaña tiene doce días; con telégrafo se sabe lo que
+pasa mientras pasa. Y el parte dice con qué cuenta el hombre, no dónde está
+cada hueste — porque eso es un parte y no un mapa.
+
+La operación se cae sola cuando se cumple, y se cae también si el general se
+muere: sin él, las huestes se quedan donde están esperando órdenes.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 

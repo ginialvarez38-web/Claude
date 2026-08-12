@@ -16,7 +16,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 5 | Ejército según la época | Cada rama se abre con su saber: sin artillería no hay cañones. Y el muro que enfrentan cambia con el siglo: cerca, cantería, baluarte. |
 | 6 | Reclutamiento | Leva señorial, mercenarios, ejército permanente, conscripción y leva en masa, cada uno con su época, su cuota, su precio en oro y lo que le quita al campo. |
 | 10 | Moral | Sube al ganar, baja al perder, al sitiar y al ser deshecho; pesa en la fuerza de la hueste. |
-| 11 | Mando | Generales con nombre, con su vara, que mueren y se reemplazan; cada uno con las huestes que lleva encima. |
+| 11 | Mando | Generales con nombre, con su vara y con un carácter que pesa: cada rasgo cambia el paso de la marcha, lo que cuesta en gente, lo que rinde delante de un muro y cuánto se sale de lo que se le pidió. Mueren y se reemplazan. |
 | 18 | Terreno | Once terrenos con su defensa, su comercio y lo que cuesta atravesarlos; el mapa los usa para marchar, para ocupar y para pelear. |
 | 19 | Clima | Lluvia, sequía y bioma por comarca, y desastres que dejan huella años. |
 | 26 | Batallas | Se resuelven en el mapa estratégico. Sin modo táctico y sin hacer falta. |
@@ -35,6 +35,7 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 | 30 | Prisioneros | Una parte de las bajas del vencido se rinde en vez de morir: más cuanto más despareja fue la derrota, menos cuanto más veterana la tropa, y casi todos en una bolsa. Comen de la misma despensa que el ejército. Cinco destinos —rescate, palabra, trabajo, canje desde 1650, cuchillo— y una fama que decide cuánta gente se te entrega y cuánto aguanta el otro antes de firmar. |
 | 20 | Guerra aérea | Una sexta rama que no marcha con nadie: opera sobre el teatro entero. El cuello de botella son las tripulaciones, no los aparatos. Hay que ganarle el cielo a su aviación antes de poder hacer nada más, y ganarlo es destruírsela: lo roto queda roto. Cuatro misiones —cazar, cortar el abasto, apoyar al ejército con radio, bombardear su país— y la antiaérea, que sale de la artillería y del radar. Bombardear ciudades les baja poco la producción y les SUBE las ganas de pelear. |
 | 21 | Guerra naval | El agua es agua: un ejército no la cruza caminando, hacen falta barcos y un mar que no sea del otro. Sin puerto no hay armada, y sin costa no se puede bloquear a nadie ni ser bloqueado. La flota en ser hace la curva cóncava: cuatro veces más barcos no dan cuatro veces más mar. Cuatro misiones —escuadra, bloqueo, corso, convoy— y el bloqueo, que se siente en la aduana antes que en el frente y que, al revés que bombardear ciudades, SÍ le rompe la voluntad al otro. |
+| 24-25 | Operaciones delegadas | Se le encarga a un general una intención —limpiar, tomar, sostener, hostigar, desembarcar— y él da las órdenes. Una directiva llega hasta donde llega el correo del siglo: ciento y pico de kilómetros en 1200, un continente con telégrafo. Más allá el hombre cumple lo que entendió, y ahí los rasgos de los generales dejan de ser un adorno: paso, sangre, muros y cuánto se salen de lo pedido. Lo que vuelve es un parte con fecha, no el mapa en vivo. |
 
 ## Lo que está a medias
 
@@ -45,8 +46,8 @@ cinco niveles sobre un ejército que no come no cambia ninguna partida.
 
 ## Lo que no existe
 
-Reparaciones (§17), operaciones con objetivos delegados (§24-25), modo táctico
-(§27), armas estratégicas y nucleares (§36-37), economía de guerra (§38).
+Reparaciones (§17), modo táctico (§27), armas estratégicas y nucleares
+(§36-37), economía de guerra (§38).
 
 ## El orden
 
@@ -88,10 +89,9 @@ limita lo que se puede firmar, y salirse de eso tiene un precio puesto de
 antemano.
 
 Con esto se cierra el orden de los seis. Después vinieron el umbral del frente,
-el espionaje con su desinformación, la doctrina, los prisioneros, el aire y el
-mar; lo que queda son piezas sueltas que ya no se apoyan unas en otras:
-operaciones delegadas, economía de guerra y armas estratégicas, en ese orden
-por lo que cuestan.
+el espionaje con su desinformación, la doctrina, los prisioneros, el aire, el
+mar y las operaciones delegadas; lo que queda son dos piezas sueltas que ya no
+se apoyan una en la otra: la economía de guerra y las armas estratégicas.
 
 ## Lo que no se va a hacer
 

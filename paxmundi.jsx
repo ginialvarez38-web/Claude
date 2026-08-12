@@ -9666,9 +9666,14 @@ function velocidadHueste(h, prov, s) {
   // tardaron semanas en un viaje de días, y no porque las bombardearan
   // —muchas no vieron una bomba— sino porque solo podían andar de noche.
   const aire = (h && h.de ? -1 : 1) * cielo(s);
+  // Y a qué paso la lleva el que la manda. Un cauteloso llega tarde a todo y
+  // un audaz llega antes de lo que nadie esperaba: eso no es un detalle de
+  // sabor, es la diferencia entre alcanzar al otro y no alcanzarlo, y vale
+  // esté delegada la campaña o no —el hombre es el mismo—.
+  const of = oficioDe(generalDe(h, s));
   return base * (0.75 + via.soc * 0.75) * (t.com || 1)
     * estorboEnLaMarcha(desbordeDe(h, s)) * dctr(s, "marcha")
-    * acotar(1 + aire * 0.22, 0.72, 1.10);
+    * acotar(1 + aire * 0.22, 0.72, 1.10) * of.paso;
 }
 
 // ═══ EL TEMPLE: LO QUE LE ENSEÑARON Y LO QUE VIVIÓ ════════════════════════
@@ -10678,6 +10683,241 @@ function velocidadEnLaMar(s) {
   let m = 0;
   for (const [id, v] of Object.entries(ARMADA_SABER)) if (sab.has(id)) m += v;
   return PASO_MAR * (0.55 + m * 0.5);
+}
+
+// ═══ LA OPERACIÓN DELEGADA: DECIR QUÉ Y NO CÓMO ══════════════════════════
+//
+// El jugador de este juego es un jefe de estado, y hasta acá le hacía a cada
+// hueste el trabajo de un capitán: caminá hasta acá, sentate delante de esa
+// plaza, asaltala. Ningún rey hizo eso nunca y ningún primer ministro tampoco.
+// Lo que se hace desde arriba es dar una intención —«sacame a los suyos de
+// Lombardía»— y dejar que el que está ahí resuelva el cómo, porque el que está
+// ahí ve el terreno y uno no.
+//
+// Eso tiene un nombre y una fecha: es la orden por misión que Moltke escribió
+// como doctrina, y funciona con tres condiciones que este juego ya sabe medir:
+//
+//   · QUE LA ORDEN LLEGUE. Un rey de 1200 no le manda una directiva a un
+//     ejército que está a cuatrocientos kilómetros y espera que se cumpla:
+//     tarda tres semanas en llegar y para entonces el mundo es otro. Eso ya
+//     está montado en la velocidad del aviso, y acá es donde por fin decide algo.
+//   · QUE HAYA QUIEN LA EJECUTE. Hace falta un cuerpo de oficiales que
+//     entienda una intención en vez de una lista de pasos. Esa es la mitad de
+//     lo que un estado mayor es.
+//   · Y QUE EL QUE MANDA SEA ALGUIEN. Acá los rasgos de los generales dejan de
+//     ser un adorno: un audaz al que le delegás Lombardía te toma Lombardía y
+//     sigue de largo, y un cauteloso se planta delante de la primera plaza.
+//     Los dos están cumpliendo la orden como la entendieron.
+//
+// Y la contrapartida, que es lo que la hace una decisión y no un botón de
+// comodidad: delegar es dejar de ver. Lo que vuelve es un parte con fecha, no
+// el mapa en vivo, y la fecha es la de tu siglo.
+
+// Lo que se le puede pedir a un general. Cinco intenciones, que son las cinco
+// que cabe darle a un ejército: destruir lo que tiene enfrente, tomar un
+// sitio, conservar otro, desgastar sin comprometerse, y aparecer donde no se
+// puede llegar caminando.
+const OPERACIONES = [
+  { id: "limpiar", n: "limpiar la comarca", ico: "⚔",
+    dice: "sacarle de encima el ejército que tenga ahí, donde sea que esté",
+    espera: "una batalla, y la busca él", pide: 0 },
+  { id: "tomar", n: "tomar la plaza", ico: "◍", sobre: true,
+    dice: "quedarse con ese sitio, y él decide si lo cerca, lo asalta o lo rodea",
+    espera: "la plaza, tarde o temprano", pide: 0 },
+  { id: "sostener", n: "sostener la línea", ico: "⛊", sobre: true,
+    dice: "que eso siga siendo tuyo cuando termine el año",
+    espera: "nada espectacular, y eso es lo que se le pide", pide: 0 },
+  { id: "hostigar", n: "hostigar sin comprometerse", ico: "⚑",
+    dice: "quemarle el país y no dar una batalla que pueda perder",
+    espera: "desgaste, ninguna conquista", pide: 0,
+    req: "organizacion.militar_org.cuadro_oficiales",
+    falta: "sin oficiales que sepan retirarse a tiempo esto es una derrota anunciada" },
+  { id: "desembarcar", n: "desembarcar allá", ico: "⛴", sobre: true, mar: true,
+    dice: "poner el ejército al otro lado del agua y arreglárselas",
+    espera: "una cabeza de playa, si el mar aguanta", pide: 0 },
+];
+const OPERACION_IDX = Object.fromEntries(OPERACIONES.map((x) => [x.id, x]));
+function operacionDisponible(o, s) {
+  const x = typeof o === "string" ? OPERACION_IDX[o] : o;
+  if (!x) return false;
+  if (x.mar && costaDelReino(s).puertos <= 0) return false;
+  return !x.req || new Set(((s && s.ciencia) || {}).sabidos || []).has(x.req);
+}
+
+// Lo que cada rasgo hace cuando al hombre lo dejan solo. Hasta acá los rasgos
+// eran una línea de sabor debajo del nombre; acá son la diferencia entre dos
+// campañas con el mismo ejército y el mismo objetivo.
+//   · paso    — lo rápido que se mueve
+//   · sangre  — lo que le cuesta en gente
+//   · muro    — lo que rinde delante de una plaza
+//   · deriva  — cuánto se sale de lo que se le pidió, para bien y para mal
+//   · piso    — lo que conserva cuando sale mal
+const OFICIO_RASGO = {
+  "Metódico":             { paso: 0.90, sangre: 0.78, muro: 1.05, deriva: 0.15, piso: 1.15 },
+  "Audaz":                { paso: 1.30, sangre: 1.30, muro: 0.95, deriva: 1.00, piso: 0.80 },
+  "Querido por la tropa": { paso: 1.05, sangre: 0.92, muro: 1.00, deriva: 0.45, piso: 1.25 },
+  "Frío":                 { paso: 1.10, sangre: 1.15, muro: 1.20, deriva: 0.60, piso: 0.95 },
+  "Ingenioso en el sitio": { paso: 0.95, sangre: 0.85, muro: 1.55, deriva: 0.30, piso: 1.10 },
+  "Cauteloso":            { paso: 0.72, sangre: 0.65, muro: 0.80, deriva: 0.10, piso: 1.40 },
+};
+const OFICIO_LLANO = { paso: 1, sangre: 1, muro: 1, deriva: 0.5, piso: 1 };
+function oficioDe(g) {
+  const r = g && (OFICIO_RASGO[g.rasgo] || OFICIO_RASGO[(g.rasgo || "").split(" ")[0]]);
+  return { ...OFICIO_LLANO, ...(r || {}) };
+}
+
+// Hasta dónde llega una directiva. No es un radio inventado: es lo que el
+// correo de tu siglo recorre en el tiempo que una campaña tarda en cambiar de
+// forma, más lo que un estado mayor agrega. Un rey medieval manda hasta donde
+// alcanza a enterarse; con telégrafo manda un continente.
+const OPERA_DIAS = 2.5;           // lo que una orden puede tardar y seguir sirviendo
+const MANDO_TOPE = 6000;          // con telégrafo se manda un continente y no más
+function alcanceDelMando(s) {
+  const sab = new Set(((s && s.ciencia) || {}).sabidos || []);
+  const cuadros = sab.has("organizacion.militar_org.cuadro_oficiales") ? 1.5 : 1;
+  const plana = sab.has("organizacion.militar_org.estado_mayor") ? 1.8 : 1;
+  // Con techo, porque el número sin techo no significa nada: el telégrafo
+  // pone la orden al otro lado del mundo en una hora, y a partir de ahí lo que
+  // limita el mando no es la distancia sino todo lo demás. Que un rey de 1200
+  // mande a ciento cincuenta kilómetros y un estado mayor de 1900 mande un
+  // continente es toda la historia que hace falta contar acá.
+  return acotar(velocidadDelAviso(s) * OPERA_DIAS * cuadros * plana, 120, MANDO_TOPE);
+}
+// Cuánto se parece lo que se hace a lo que se pidió. Baja con la distancia
+// —una orden que tarda un mes en llegar se cumple en un mundo que ya cambió—,
+// sube con el oficio del que la recibe, y nunca es uno ni cero: ningún general
+// hizo exactamente lo que le dijeron y ninguno hizo cualquier cosa.
+function obedienciaDe(op, s) {
+  if (!op) return 0;
+  const g = ((s && s.generales) || []).find((q) => idGeneral(q) === op.general);
+  if (!g) return 0;
+  const corte = ((s && s.provincias) || []).find((p) => p.capital) || ((s && s.provincias) || [])[0];
+  const suyas = huestesDe(g, s);
+  const donde = suyas[0] || (op.x != null ? { x: op.x, y: op.y } : null);
+  const lejos = corte && donde ? leguas(corte, donde) : 0;
+  const alcance = Math.max(1, alcanceDelMando(s));
+  // La distancia pesa como una razón y no como una resta: al doble del alcance
+  // se obedece la mitad, y nunca se llega a cero del todo.
+  const porLejos = alcance / (alcance + lejos);
+  const porOficio = 0.55 + ((g.pericia || 5) / 9) * 0.45;
+  return acotar(0.08 + porLejos * 0.64 * porOficio + porOficio * 0.28, 0, 1);
+}
+// Y lo que el hombre hace de más o de menos. Positivo es que se pasó de lo que
+// se le pidió; negativo, que se quedó corto. Las dos cosas son cumplir la
+// orden como uno la entendió, y las dos llenaron libros de historia.
+function derivaDe(op, s) {
+  const g = ((s && s.generales) || []).find((q) => idGeneral(q) === op.general);
+  if (!g) return 0;
+  const of = oficioDe(g);
+  const obe = obedienciaDe(op, s);
+  // Lo que se sale de lo pedido es su carácter por lo poco que lo atan.
+  return +(of.deriva * (1 - obe) * 2).toFixed(3);
+}
+
+// Lo que el reino sabe de la operación, que no es lo que está pasando. Un
+// parte tarda lo que tarda un correo, y esa demora es la mitad del precio de
+// delegar: se entera después, y a veces mucho después.
+function parteDeOperacion(op, s) {
+  if (!op) return null;
+  const g = ((s && s.generales) || []).find((q) => idGeneral(q) === op.general);
+  const suyas = huestesDe(g, s);
+  const donde = suyas[0] || null;
+  const dias = donde ? retrasoDelAviso(s, donde.x, donde.y) : 0;
+  return { general: g, huestes: suyas.length,
+    unidades: suyas.reduce((a, h) => a + unidadesTotales(h.ramas || {}), 0),
+    dias: Math.round(dias), obediencia: obedienciaDe(op, s), deriva: derivaDe(op, s),
+    // Lo que se leyó en la corte es de hace tantos días, y hay que decirlo.
+    fresco: dias < 3,
+    dice: dias < 3 ? "se sabe lo que está pasando"
+        : dias < 20 ? `lo último que se sabe es de hace ${Math.round(dias)} días`
+        : `lo último que llegó tiene ${Math.round(dias)} días: a saber qué pasó desde entonces` };
+}
+
+// Y acá el general da sus propias órdenes. Es el corazón del asunto: lo que
+// hasta ahora hacía el jugador hueste por hueste lo hace el hombre que está
+// ahí, y lo hace según su carácter y según cuánto lo aten.
+function ordenesDeLaOperacion(op, huestes, s, rnd) {
+  const o = OPERACION_IDX[op && op.tipo];
+  if (!o) return huestes;
+  const g = ((s && s.generales) || []).find((q) => idGeneral(q) === op.general);
+  if (!g) return huestes;
+  const of = oficioDe(g);
+  const der = derivaDe(op, s);
+  const provs = (s && s.provincias) || [];
+  const enemigas = huestes.filter((h) => h.de);
+  const objetivo = op.idx != null
+    ? (provs.find((p) => p.idx === op.idx) || (geomProvincia(op.idx)
+        ? { id: "op" + op.idx, idx: op.idx, nombre: geomProvincia(op.idx).n,
+            x: geomProvincia(op.idx).x, y: geomProvincia(op.idx).y, ajena: true } : null))
+    : null;
+  return huestes.map((h) => {
+    if (h.de || h.general !== idGeneral(g)) return h;
+    // Una hueste que ya está haciendo algo que sirve al objetivo se deja en
+    // paz: un general no rehace sus órdenes todos los días, y si lo hiciera
+    // su ejército no llegaría nunca a ninguna parte.
+    if (h.orden === "cercar" || h.orden === "asaltar") return h;
+    let meta = null, orden = "marchar";
+    if (o.id === "limpiar" || (o.id === "hostigar" && enemigas.length)) {
+      // Va por el ejército de enfrente. El audaz por el más grande que vea, el
+      // cauteloso por el más chico: los dos están limpiando la comarca.
+      const cerca = enemigas.slice().sort((a, b) =>
+        leguas(h, a) - leguas(h, b))[0];
+      const gordo = enemigas.slice().sort((a, b) =>
+        unidadesTotales(b.ramas || {}) - unidadesTotales(a.ramas || {}))[0];
+      const presa = der > 0.5 ? (gordo || cerca) : (cerca || gordo);
+      if (presa) meta = { x: presa.x, y: presa.y, id: null };
+    }
+    if (!meta && (o.id === "tomar" || o.id === "desembarcar") && objetivo) {
+      meta = { x: objetivo.x, y: objetivo.y, id: objetivo.id, prov: objetivo };
+      // Delante de una plaza, qué hace: el ingeniero la asalta, el cauteloso
+      // se sienta, y el resto según lo que traiga y lo que aguante.
+      if (leguas(h, objetivo) < 25) {
+        const fuerza = unidadesTotales(h.ramas || {}) * of.muro;
+        orden = fuerza > aguanteDe(objetivo, s) * 1.4 ? "asaltar" : "cercar";
+      }
+    }
+    if (!meta && o.id === "sostener" && objetivo) {
+      // Sostener es quedarse. Solo se mueve si está lejos de lo que cuida, y
+      // el que se pasa de la raya sale a buscar al que viene.
+      if (leguas(h, objetivo) > 40) meta = { x: objetivo.x, y: objetivo.y, id: objetivo.id };
+      else if (der > 0.7 && enemigas.length) {
+        const cerca = enemigas.slice().sort((a, b) => leguas(h, a) - leguas(h, b))[0];
+        if (cerca && leguas(h, cerca) < 120) meta = { x: cerca.x, y: cerca.y, id: null };
+      }
+    }
+    if (!meta && o.id === "hostigar") {
+      // Sin nadie a quien hostigar, quema el país: va a la comarca ajena más
+      // cercana y no se sienta delante de nada.
+      const ajena = provs.filter((p) => p.ajena || p.ocupada)
+        .sort((a, b) => leguas(h, a) - leguas(h, b))[0];
+      if (ajena) meta = { x: ajena.x, y: ajena.y, id: null };
+    }
+    if (!meta) return h;
+    const cerca = leguas(h, meta) < 12;
+    return { ...h, orden, objetivo: meta.id || null,
+      plaza: meta.prov && meta.prov.ajena ? meta.prov : null,
+      destino: cerca ? null : { x: meta.x, y: meta.y },
+      largo: cerca ? 0 : leguas(h, meta), recorrido: 0, llegada: cerca,
+      // Y a qué paso. Acá es donde el carácter del hombre se ve en el mapa.
+      paso: of.paso,
+      cerco: h.orden === "cercar" ? h.cerco : 0,
+      aguante: orden === "cercar" && meta.prov ? aguanteDe(meta.prov, s) : (h.aguante || 0) };
+  });
+}
+// Si la operación ya está cumplida. Cada intención se mide con su propia vara,
+// que es de lo que se trataba: «limpiar» no se mide en suelo y «sostener» no
+// se mide en conquistas.
+function operacionCumplida(op, s) {
+  const o = OPERACION_IDX[op && op.tipo];
+  if (!o) return false;
+  const provs = (s && s.provincias) || [];
+  if (o.id === "limpiar" || o.id === "hostigar")
+    return !((s && s.huestes) || []).some((h) => h.de);
+  if (o.id === "tomar" || o.id === "desembarcar")
+    return op.idx != null && provs.some((p) => p.idx === op.idx && !p.ocupada);
+  if (o.id === "sostener")
+    return op.idx != null && provs.some((p) => p.idx === op.idx && !p.ocupada);
+  return false;
 }
 
 // ——— quién la manda ———
@@ -12830,7 +13070,11 @@ function batallar(a, b, prov, s, rnd) {
     const l = Array.isArray(h) ? h : [h];
     const t = l.reduce((x, q2) => x + templeDe(q2), 0) / Math.max(1, l.length);
     const propia = l.some((q2) => !q2.de) ? dctr(s, "sangre") : 1;
-    return (1 - 0.32 * t) * propia;
+    // Y el hombre que la lleva, que es la otra mitad. Un metódico no pierde
+    // gente de más y un audaz la pierde a paladas ganando lo mismo: eso está
+    // en el rasgo de cada general y hasta ahora no valía nada.
+    const jefe = l.reduce((x, q2) => x + oficioDe(generalDe(q2, s)).sangre, 0) / Math.max(1, l.length);
+    return (1 - 0.32 * t) * propia * jefe;
   };
   return { ganaA, prob: q.prob, pulso: q,
            bajasA: (ganaA ? delGana : delPierde) * menos(a),
@@ -12922,7 +13166,34 @@ function correrCampana(s, dias, rnd) {
   const nacidas = levantarEnemigas(s, rnd);
   if (nacidas.length)
     hechos.push(`${nacidas[0].nombre} cruza la raya con ${unidadesTotales(nacidas[0].ramas)} unidades.`);
-  const enPie = [...conMando, ...nacidas];
+  let enPie = [...conMando, ...nacidas];
+  // ——— y ahora los que mandan solos ———
+  // Antes de mover nada, los generales con una operación delegada dan sus
+  // propias órdenes. No las revisa nadie: eso es lo que se compró al delegar,
+  // y es lo que hace que dos campañas con el mismo ejército y el mismo
+  // objetivo salgan distintas según a quién se le encargaron.
+  const opsVivas = [];
+  for (const op of (s && s.operaciones) || []) {
+    const g = ((s && s.generales) || []).find((q) => idGeneral(q) === op.general);
+    if (!g) {                             // el general se murió: la operación con él
+      hechos.push(`Sin ${op.generalN || "quien la mandara"}, la operación se deshace: `
+        + `las huestes se quedan donde están esperando órdenes.`);
+      continue;
+    }
+    // Se mira contra lo que había, no contra lo que acaba de cruzar la raya:
+    // si no, «limpiar la comarca» no se cumple nunca en una guerra, porque el
+    // vecino levanta otro ejército en cuanto se le deshace el anterior. El
+    // hombre informa que la comarca está limpia y eso es cierto; que al mes
+    // siguiente entre otro es una campaña nueva.
+    if (operacionCumplida(op, { ...s, huestes: conMando })) {
+      hechos.push(`${g.nombre} da por cumplido lo que se le encargó: `
+        + `${OPERACION_IDX[op.tipo].n}${op.sobre ? ` en ${op.sobre}` : ""}.`);
+      continue;
+    }
+    enPie = ordenesDeLaOperacion(op, enPie, { ...s, huestes: enPie }, rnd);
+    opsVivas.push({ ...op, dias: (op.dias || 0) + dias });
+  }
+  s = { ...s, huestes: enPie };
   correrFrente(teatro, s, enPie, dias);
   const reparto = repartoDelTeatro(teatro);
   // Y ahora se mira. Va acá, con el frente ya corrido y las huestes todavía en
@@ -13354,6 +13625,9 @@ function correrCampana(s, dias, rnd) {
            // Y cómo quedó el aire: los aparatos que no volvieron y las
            // tripulaciones, que es lo que de verdad se acaba.
            aire,
+           // Las operaciones que siguen en pie: se caen solas cuando se
+           // cumplen o cuando se muere el que las llevaba.
+           operaciones: opsVivas,
            enganos: enganosVivos({ ...s, anio: (s.anio || 0) + Math.floor(((s.dia || 0) + dias) / 365),
              dia: ((s.dia || 0) + dias) % 365 }) };
 }
@@ -20590,6 +20864,9 @@ export default function PaxMundi() {
         // Y la armada, que empieza haciendo lo único que una armada hace
         // siempre: estar. En la mar eso ya es casi todo.
         misionMar: "escuadra",
+        // Sin nada delegado: al principio se manda hueste por hueste, que es
+        // lo que se puede hacer cuando el reino cabe en un mapa.
+        operaciones: [],
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -22007,6 +22284,8 @@ export default function PaxMundi() {
           ? { ...(state.ejercito || {}), aviacion: camp.aire.aviones }
           : (state.ejercito || {}),
         pilotos: camp.aire ? camp.aire.pilotos : (state.pilotos || 0),
+        // Y lo que sigue delegado, que se cae solo al cumplirse.
+        operaciones: camp.operaciones || [],
         guerra: guerraNueva,
         bajasRecientes: Math.round(bajasNuevas + bajasGuerra),
         tributos: tributosNuevos,
@@ -25465,6 +25744,142 @@ export default function PaxMundi() {
                           );
                         })}
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── lo que se delega ──
+                    Solo aparece cuando hay a quién delegárselo: sin generales
+                    no hay nada que decir, y el reino manda hueste por hueste
+                    como hizo siempre. */}
+                {(s.generales || []).length > 0 && (() => {
+                  const ops = s.operaciones || [];
+                  const gens = (s.generales || []).filter((g) => g);
+                  const alcance = alcanceDelMando(s);
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ✎ LO QUE SE DELEGA
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: C.gold }}>
+                          {ops.length ? `${ops.length} en marcha` : "nada"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        Un jefe de estado dice qué, no cómo. Encargale una intención a un general y él
+                        resuelve el camino, las plazas y el orden — a su manera, que no va a ser la tuya.
+                        Delegar es dejar de ver: lo que vuelve es un parte con fecha.
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between",
+                        fontSize: 12, color: C.muted, marginTop: 5 }}>
+                        <span>Hasta dónde llega una orden</span>
+                        <span style={{ fontFamily: mono, color: alcance > 400 ? C.ink : C.brass }}>
+                          {Math.round(alcance)} km
+                        </span>
+                      </div>
+                      {alcance < 350 && (
+                        <div style={{ fontSize: 11, color: C.brass, marginTop: 5, lineHeight: 1.45 }}>
+                          Con el correo de este siglo una directiva tarda semanas en llegar. Más allá de
+                          ahí el hombre hace lo que entendió, y lo que entendió depende de quién sea.
+                        </div>
+                      )}
+                      {/* lo que ya está en marcha, con su parte fechado */}
+                      {ops.map((op) => {
+                        const o = OPERACION_IDX[op.tipo] || {};
+                        const p = parteDeOperacion(op, s);
+                        if (!p || !p.general) return null;
+                        return (
+                          <div key={op.id} style={{ marginTop: 8, padding: "7px 9px", borderRadius: 6,
+                            background: `${C.gold}12`, border: `1px solid ${C.gold}44` }}>
+                            <div style={{ fontSize: 12.5, color: C.gold }}>
+                              {o.ico} {p.general.nombre}: {o.n}{op.sobre ? ` en ${op.sobre}` : ""}
+                            </div>
+                            <div style={{ fontSize: 10.5, color: C.muted, marginTop: 2, lineHeight: 1.4 }}>
+                              {p.huestes} {p.huestes === 1 ? "hueste" : "huestes"}, {p.unidades} unidades.
+                              {" "}{capitalizar(p.dice)}.
+                            </div>
+                            <div style={{ fontSize: 10, fontFamily: mono, marginTop: 3,
+                              color: p.deriva > 1 ? C.red : p.deriva > 0.5 ? C.brass : C.muted }}>
+                              obedece {Math.round(p.obediencia * 100)}%
+                              {p.deriva > 1 ? " · va a hacer bastante más de lo que se le pidió"
+                                : p.deriva > 0.5 ? " · se va a tomar libertades"
+                                : " · hace lo que se le dijo"}
+                            </div>
+                            <button onClick={() => setState((st) => ({ ...st,
+                              operaciones: (st.operaciones || []).filter((q) => q.id !== op.id),
+                              cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                texto: `✎ Se le retira el mando de la operación a ${p.general.nombre}. `
+                                  + `Sus huestes vuelven a esperar órdenes de la corte.` }] }))}
+                              disabled={pensando}
+                              style={{ marginTop: 5, padding: "3px 8px", borderRadius: 5, cursor: "pointer",
+                                background: "transparent", border: `1px solid ${C.line}`,
+                                color: C.muted, fontFamily: mono, fontSize: 10 }}>
+                              ✕ retirarle el encargo
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {/* y a quién se le puede encargar algo nuevo */}
+                      {gens.filter((g) => !ops.some((q) => q.general === idGeneral(g))).map((g) => {
+                        const suyas = huestesDe(g, s);
+                        const of = oficioDe(g);
+                        return (
+                          <div key={idGeneral(g)} style={{ marginTop: 8, padding: "7px 9px",
+                            borderRadius: 6, background: "transparent", border: `1px solid ${C.line}` }}>
+                            <div style={{ fontSize: 12.5, color: suyas.length ? C.ink : C.muted }}>
+                              ✦ {g.nombre} <span style={{ fontFamily: mono, fontSize: 10.5, color: C.muted }}>
+                                {g.rasgo}, pericia {g.pericia}, {suyas.length} huestes</span>
+                            </div>
+                            <div style={{ fontSize: 10, fontFamily: mono, color: C.brass, marginTop: 2 }}>
+                              marcha ×{of.paso.toFixed(2)} · sangra ×{of.sangre.toFixed(2)} ·
+                              {" "}muros ×{of.muro.toFixed(2)} · se sale de lo pedido ×{of.deriva.toFixed(2)}
+                            </div>
+                            {suyas.length === 0 ? (
+                              <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3 }}>
+                                Sin huestes a su cargo no hay nada que encargarle.
+                              </div>
+                            ) : (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+                                {OPERACIONES.map((o) => {
+                                  const puede = operacionDisponible(o, s);
+                                  // Las que van sobre un sitio piden uno: se toma la comarca en
+                                  // disputa más cercana a sus huestes, que es lo que uno señalaría.
+                                  const cand = o.sobre
+                                    ? (s.provincias || []).filter((p) => o.id === "sostener" ? !p.ocupada : (p.ajena || p.ocupada))
+                                        .sort((a2, b2) => leguas(suyas[0], a2) - leguas(suyas[0], b2))[0]
+                                    : null;
+                                  const listo = puede && (!o.sobre || cand);
+                                  return (
+                                    <button key={o.id} disabled={!listo || pensando}
+                                      title={puede ? `${capitalizar(o.dice)}. Se espera ${o.espera}.`
+                                        : `hace falta saber «${MED_IDX[o.req]?.nombre || o.req}»: ${o.falta}`}
+                                      onClick={() => setState((st) => ({ ...st,
+                                        operaciones: [...(st.operaciones || []),
+                                          { id: "op" + st.turno + o.id, general: idGeneral(g),
+                                            generalN: g.nombre, tipo: o.id, dias: 0,
+                                            idx: cand ? cand.idx : null, sobre: cand ? cand.nombre : null,
+                                            x: cand ? cand.x : null, y: cand ? cand.y : null }],
+                                        cronica: [...st.cronica, { anio: st.anio, dia: st.dia, tipo: "orden",
+                                          texto: `✎ A ${g.nombre} se le encarga ${o.n}`
+                                            + (cand ? ` en ${cand.nombre}` : "") + `: ${o.dice}. `
+                                            + `Desde acá no se le dice cómo, y siendo ${g.rasgo.toLowerCase()} `
+                                            + `no va a hacerlo como lo haría otro.` }] }))}
+                                      style={{ padding: "4px 7px", borderRadius: 5,
+                                        cursor: listo ? "pointer" : "default",
+                                        background: "transparent",
+                                        border: `1px solid ${listo ? C.gold + "66" : C.line}`,
+                                        color: listo ? C.ink : C.muted, fontFamily: mono, fontSize: 10 }}>
+                                      {o.ico} {o.n}{cand ? ` · ${cand.nombre}` : ""}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
