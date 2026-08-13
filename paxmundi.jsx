@@ -7015,6 +7015,17 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const desliz = useRef(0);
   const sonda = useRef(null);
   const pedidoSonda = useRef(0);
+  // Si el mapa está en modo rápido, o sea sin las capas de detalle. Va por
+  // clase y no por estado de React a propósito: cambiar estado en mitad de un
+  // gesto obliga a rehacer el árbol entero, que es lo que se está tratando de
+  // evitar. Una clase la resuelve el navegador solo.
+  const enRapido = useRef(false);
+  const rapido = (si) => {
+    if (enRapido.current === si) return;
+    enRapido.current = si;
+    const c = cajaRef.current;
+    if (c && c.classList) c.classList.toggle("pm-rapido", si);
+  };
   const borrarRotulo = useRef(0);
 
   // ——— encuadre: nunca deforma, siempre respeta la forma del contenedor ———
@@ -7050,6 +7061,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const volarA = (dest, ms) => {
     detener();
     frenar();
+    rapido(true);
     const d = limitar(dest), o = { ...vbRef.current }, dur = ms || 560;
     const reloj = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
     const t0 = reloj();
@@ -7062,6 +7074,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       // El vuelo también se estira en vez de redibujarse cuadro a cuadro. Como
       // en el camino cambia mucho la escala, se irá asentando por el camino:
       // aun así son cinco dibujados en vez de treinta y cinco.
+      if (k >= 1) rapido(false);
       correr(limitar({ x: cx - w / 2, y: cy - w / (aspRef.current || 1.62) / 2,
         w, h: w / (aspRef.current || 1.62) }), k >= 1);
       anim.current = k < 1 ? requestAnimationFrame(paso) : 0;
@@ -7165,6 +7178,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     if (Math.abs(Math.log(d.w / v.w)) < 0.004 && Math.abs(dx) < d.w * 0.004 && Math.abs(dy) < d.h * 0.004) {
       meta.current = null;
       acercando.current = false;
+      rapido(false);                    // el último lleva todo: es el que se mira
       correr(d, true);                                   // el último, dibujado de verdad
       return;
     }
@@ -7182,6 +7196,12 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   // iba a terminar el primero, no de donde está la vista a medio camino—.
   function zoomSuave(f, sx, sy) {
     detener();
+    // Modo rápido solo si el mapa no está llegando. Un tirón suelto se dibuja
+    // entero y con todo: encender y apagar el modo cuesta dos rasterizados, y
+    // para un solo tirón eso es más caro que el detalle que ahorra. Pero si
+    // llega otro mientras el anterior todavía está viajando, entonces es un
+    // gesto continuo —una rueda que gira, un pellizco— y ahí sí conviene.
+    if (meta.current) rapido(true);
     const r = medirCaja();
     const v = meta.current || pendiente.current || vbRef.current;
     const w = acotar(v.w * f, 0.4, 440);
@@ -7339,6 +7359,10 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     const d = pendiente.current;
     pendiente.current = null;
     if (el && el.style) el.style.transform = "";
+    // Si no queda nada corriendo detrás, el gesto terminó —o se interrumpió— y
+    // el detalle tiene que volver. Sin esto, un gesto cortado a la mitad podía
+    // dejar el mapa pelado hasta el siguiente.
+    if (!meta.current && !anim.current) rapido(false);
     if (d) fijar(limitar(d), true);
   };
   // Y el mismo truco para acercar. Cada cuadro de un acercamiento suave
@@ -7578,7 +7602,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
   const capaRelieve = useMemo(() => {
     if (!capas.fisico) return null;
     return (
-      <g style={{ pointerEvents: "none" }}>
+      <g className="pm-detalle" style={{ pointerEvents: "none" }}>
         {/* Relieve por desplazamiento: la misma mancha tres veces, sombra
             corrida al sureste y luz al noroeste. Es la convención de siglos
             —la luz viene del noroeste— y con polígonos planos es lo único
@@ -7615,7 +7639,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
         </g>
       ),
       lineas: (
-        <g style={{ pointerEvents: "none" }}>
+        <g className="pm-detalle" style={{ pointerEvents: "none" }}>
           {grupos.map((g) => (
             <path key={"pd" + g.pais} d={g.d} fill="none" stroke="#0D1409" strokeWidth={finoCapa * 2.4}
               strokeLinejoin="miter" strokeMiterlimit="2" shapeRendering="geometricPrecision"
@@ -7633,7 +7657,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
 
   // Fronteras y aguas: por encima de las provincias.
   const capaAguas = useMemo(() => (
-    <g style={{ pointerEvents: "none" }}>
+    <g className="pm-detalle" style={{ pointerEvents: "none" }}>
       <path d={FRONT_PAIS} fill="none" stroke="#060A04" strokeWidth={finoCapa * 2.2}
         strokeLinejoin="miter" strokeMiterlimit="2" strokeLinecap="round"
         shapeRendering="geometricPrecision" opacity="0.6" />
@@ -7728,7 +7752,7 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
     }
     if (!cand.length) return null;
     return (
-      <g style={{ pointerEvents: "none" }}>
+      <g className="pm-detalle" style={{ pointerEvents: "none" }}>
         {repartirRotulos(cand, pxCapa * 96, pxCapa * 30, 18).map((c, i) => (
           <text key={"sr" + i} x={c.x} y={c.y} textAnchor="middle" fontSize={c.fs}
             fill="#E6D6AE" opacity="0.7"
@@ -8292,6 +8316,13 @@ function MapaMundi({ centro, marcas, vecinos, alto, seleccion, onSeleccion, pais
       role="application" aria-label="Mapa del mundo"
       style={{ position: "relative", width: "100%", height: alto || "100%", overflow: "hidden",
         background: "#08131C", outline: "none" }}>
+      {/* Mientras la escala está cambiando, el mapa se dibuja sin las capas
+          de detalle. No es una rebaja de calidad: es que rasterizar el mapa
+          entero en cada cuadro de un acercamiento cuesta trece segundos por
+          gesto, y las cuatro capas que se apagan son el 55% de los puntos y
+          justo las que nadie mira mientras el mapa se mueve. Vuelven solas en
+          cuanto se suelta, que es cuando se las mira. */}
+      <style>{".pm-rapido .pm-detalle{display:none}"}</style>
       {/* El lienzo es más grande que el hueco y sobresale por los cuatro
           lados. Ese sobrante no se ve nunca —el contenedor recorta— y es lo
           que hace que arrastrar sea gratis: el mapa se corre con un

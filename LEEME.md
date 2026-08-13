@@ -976,6 +976,56 @@ todo esto que **no se devuelve nunca**.
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
+## El mapa suelta el detalle mientras se mueve
+
+Acercarse con el trackpad hacía trabajar al navegador **trece segundos para un
+gesto de uno**. Encontrar el motivo costó más que arreglarlo, y las cinco
+primeras sondas dieron todas la respuesta equivocada.
+
+**Lo que no era.** No era la geometría: simplificar los trazos a medio píxel
+salva el 2%, porque los puntos ya están al límite de lo que el píxel distingue.
+No era el margen del lienzo: bajarlo de 0,3 a 0,1 arruina el arrastre y apenas
+toca el zoom, así que el valor que ya estaba escrito era el correcto. Y no eran
+los asentados: durante el gesto malo había nueve, y nueve mapas no son trece
+segundos.
+
+**Por qué no aparecía.** El perfilador de JavaScript decía «(program), 87%», que
+es su manera de decir «esto no es tuyo». Contar cuadros tampoco servía: en un
+navegador sin pantalla salen lecturas de ciento cincuenta por segundo. El
+trabajo estaba donde ninguna de las dos mira: **Chrome rasteriza en hilos
+aparte**. Hay que pedirle su propio registro interno, y ahí aparece de una vez:
+
+    12882 ms   2034 veces   RasterizerTaskImpl::RunOnWorkerThread
+      421 ms     47 veces   Layout
+
+Dos mil rasterizados para cuarenta tirones: la capa entera, en mosaicos, rehecha
+en cada cuadro.
+
+**Lo que era.** El supuesto del código era que estirar la capa dibujada sale
+gratis. Sale gratis si el estirón es un **corrimiento** —eso lo hace la tarjeta
+gráfica con lo ya pintado, y por eso arrastrar nunca fue el problema—, pero no
+si es una **escala**: ahí el navegador vuelve a rasterizar la capa a la
+resolución nueva. Y la capa mide 2,56 veces lo que se ve, porque ese margen de
+más es justo lo que hace gratis el arrastre.
+
+**Lo que se hizo.** Mientras la escala está cambiando, el mapa se dibuja sin las
+capas de detalle: los contornos de provincia, las fronteras, el relieve y los
+nombres de las sierras. Son el 55% de los puntos y son exactamente las que nadie
+mira mientras el mapa se está moviendo. Vuelven solas al soltar, que es cuando
+se las mira.
+
+Con dos cuidados que salieron de medir y no de suponer:
+
+- **Un tirón suelto no pierde nada.** Encender y apagar el modo cuesta dos
+  rasterizados, más caros que el detalle que ahorran si el gesto es uno solo. Se
+  enciende únicamente cuando llega un tirón mientras el anterior todavía está
+  viajando, que es la definición honesta de «el mapa no llega».
+- **Las ciudades se quedan.** Estaban en la lista de candidatas y la medición
+  dijo que quitarlas empeoraba. Se devolvieron al mapa.
+
+Rasterizado de un acercamiento de trackpad: **16,5 s → 9,5 s**. El arrastre no
+cambió, que era lo correcto: nunca había estado mal.
+
 ## La partida se guarda sola
 
 Al terminar cada turno, y también cuando dejás el juego —cambiás de pestaña,
