@@ -9599,11 +9599,25 @@ function ramaDisponible(rama, ciencia) {
 // cuatro y medio por ciento de siempre, que es lo que había antes y sirve de
 // suelo para una partida vieja o un turno sin gente.
 function brazosMaximos(poblacion, s) {
+  // Y lo que la última guerra se llevó y no devolvió: los que volvieron rotos
+  // no vuelven al campo, y veinte años después tampoco está el que no nació.
+  //
+  // Con tope, y no por piedad: los brazos de este juego son una tajada
+  // estrecha de la población —los que pueden ir a filas— y los mutilados se
+  // cuentan en gente. Sin tope, una guerra larga dejaba el país literalmente
+  // sin un hombre, y lo que pasó en Francia entre 1918 y 1939 fue muy malo
+  // pero no fue eso: fue no poder llenar las quintas, no no tener a nadie.
+  // No es un tope duro sino una saturación: un tope duro se alcanzaba a los
+  // dos años de guerra y a partir de ahí nada volvía a moverse —ni el eco de
+  // veinte años después—, que es justo lo que hay que poder ver.
+  const crudo = (s2, base) => { const f = brazosQueFaltan(s2);
+    return base * (f / (f + base)); };
   if (s && (s.provincias || []).some((p) => (p.pops || []).length)) {
     const b = brazosDelReino(s);
-    if (b.total > 0) return b.total;
+    if (b.total > 0) return Math.max(0, Math.round(b.total - crudo(s, b.total)));
   }
-  return Math.round((poblacion || 0) * 0.045);
+  const base = (poblacion || 0) * 0.045;
+  return Math.max(0, Math.round(base - (s ? crudo(s, base) : 0)));
 }
 function brazosOcupados(ej) { return brazosEnFilas(ej); }
 // Cuántas unidades podés sostener: población, riqueza y saber organizativo.
@@ -10720,6 +10734,130 @@ function velocidadEnLaMar(s) {
   let m = 0;
   for (const [id, v] of Object.entries(ARMADA_SABER)) if (sab.has(id)) m += v;
   return PASO_MAR * (0.55 + m * 0.5);
+}
+
+// ═══ LO QUE DEJA UNA GUERRA LARGA ════════════════════════════════════════
+//
+// Hasta acá las bajas eran un número que bajaba la población y se olvidaba. Es
+// la última mentira grande que quedaba, y es la más fea: lo que una guerra
+// larga le hace a un país no termina el día que se firma la paz. Empieza ahí.
+//
+// Cuatro cosas quedan, y las cuatro duran décadas:
+//
+//   · LOS QUE VOLVIERON ROTOS. Por cada muerto volvieron dos o tres hombres
+//     que no podían trabajar, y vivieron cuarenta años más. Eso no es una
+//     baja: es una carga permanente del estado, y es literalmente de donde
+//     salieron las pensiones —la primera política social moderna la inventó
+//     una guerra, no un reformador—.
+//   · EL HUECO. Una guerra mata varones jóvenes, y eso no se arregla con
+//     tiempo: se arregla con dos generaciones. Faltan matrimonios, faltan
+//     nacimientos, y veinte años después vuelve a faltar gente en edad de
+//     pelear. Ese segundo bajón —el eco— es más grande que el primero y casi
+//     nadie lo cuenta: el déficit de nacimientos de Francia entre 1915 y 1919
+//     fue mayor que sus muertos en combate.
+//   · EL RENCOR. No lo produce la guerra: lo produce la vuelta. El que ganó y
+//     volvió a un país sin trabajo es la materia prima de todos los
+//     paramilitares de entreguerras, y por eso el peligro de este bloque es
+//     mayor DESPUÉS de la paz que durante la guerra.
+//   · Y LO QUE HUBO QUE CONCEDER. Acá está la otra cara, y sin ella esto sería
+//     una lista de castigos y no un intercambio. Todo estado que le pidió
+//     todo a su pueblo tuvo que darle algo después: el voto, la pensión, la
+//     escuela. La guerra total construyó el estado de bienestar, y no por
+//     bondad de nadie —por la cuenta que hicieron los que volvieron armados—.
+const SECUELA_OLVIDO = 42;        // años en que se muere la gente que la vivió
+const ECO_ANIOS = 20;             // cuándo vuelve a faltar el que no nació
+// Cuántos vuelven rotos por cada uno que no vuelve. La proporción es la de
+// todas las guerras industriales y sorprende a todo el mundo: los heridos
+// graves fueron siempre dos o tres veces los muertos.
+const ROTOS_POR_MUERTO = 2.4;
+function secuelasDe(s) {
+  const q = (s && s.secuelas) || {};
+  return { mutilados: q.mutilados || 0, hueco: q.hueco || 0, rencor: q.rencor || 0,
+           conquista: q.conquista || 0, desde: q.desde || null, eco: q.eco || 0 };
+}
+// Lo que una tanda de bajas deja detrás. Se llama con los muertos del tramo y
+// devuelve lo que se suma a la cuenta larga.
+function secuelaDeLasBajas(muertos, s) {
+  const m = Math.max(0, muertos || 0);
+  if (m <= 0) return { mutilados: 0, hueco: 0, rencor: 0 };
+  // El hueco no son los muertos: son los muertos más los que no nacieron
+  // porque ellos no volvieron. Por eso es mayor que la cifra de la lápida.
+  return { mutilados: m * ROTOS_POR_MUERTO, hueco: m * 1.7,
+           // Y el rencor, que crece con lo que se pidió: un país movilizado a
+           // fondo devuelve hombres que creen que se les debe algo.
+           rencor: m * (0.4 + pesoMovilizacion(s).nivel * 0.22) };
+}
+// Lo que cuestan al año los que volvieron rotos. Es una partida nueva del
+// presupuesto que antes no existía y que no se puede dejar de pagar: la
+// primera vez que un estado se obligó a mantener a alguien de por vida fue
+// con los inválidos de una guerra.
+// Lo que cuesta al año cada hombre roto. Parece poco por cabeza y no lo es en
+// total: las pensiones de la guerra civil norteamericana fueron la mayor
+// partida del presupuesto federal en los años noventa, treinta años después de
+// que se firmara la paz.
+const PENSION_POR_ROTO = 0.036;
+function pensionesDeGuerra(s) {
+  return secuelasDe(s).mutilados * PENSION_POR_ROTO;
+}
+// Y los brazos que faltan. Dos veces: ahora, porque los que volvieron rotos no
+// vuelven al campo ni a la fábrica; y otra vez veinte años después, cuando
+// tendría que estar en edad de trabajar el que no nació.
+function brazosQueFaltan(s) {
+  const q = secuelasDe(s);
+  const eco = q.desde != null && (s.anio || 0) - q.desde >= ECO_ANIOS
+    ? q.hueco * 0.55 : 0;
+  return q.mutilados * 0.6 + eco;
+}
+// Y el eco, para poder contarlo cuando llega: es la sorpresa de este bloque y
+// llega una generación tarde, cuando nadie se acuerda de por qué.
+function ecoDeLaGuerra(s) {
+  const q = secuelasDe(s);
+  if (q.desde == null) return null;
+  const anos = (s.anio || 0) - q.desde;
+  if (anos < ECO_ANIOS || q.hueco <= 0) return null;
+  return { anos, falta: q.hueco * 0.55,
+    dice: "vuelve a faltar gente en edad de servir, y no por esta guerra sino por la de hace "
+      + `${Math.round(anos)} años: es el que no nació entonces el que no está ahora` };
+}
+// El rencor de los que volvieron. Sube al firmar la paz y no antes: mientras
+// se pelea hay a quién echarle la culpa, y el día que se acaba hay que
+// explicarle a un millón de hombres qué hacen ahora.
+function rencorVivo(s) {
+  const q = secuelasDe(s);
+  if (q.rencor <= 0) return 0;
+  // En guerra el rencor está contenido; en paz se suelta, y de golpe.
+  const suelto = (s && s.guerra) ? 0.35 : 1;
+  return q.rencor * suelto;
+}
+// Y lo que hubo que conceder. Un estado que le pidió todo a su gente tiene que
+// darle algo, y lo que da es irreversible: el voto no se devuelve. Cuesta a la
+// nobleza y compra estabilidad para siempre.
+function conquistaSocial(s) {
+  return acotar(secuelasDe(s).conquista, 0, 1);
+}
+// Cómo queda todo esto al cabo de unos días. Los rotos se mueren despacio, el
+// hueco se llena en dos generaciones y el rencor se apaga si hay con qué
+// darles de comer y no se apaga si no.
+function secuelasTrasElTiempo(s, dias, muertos) {
+  const q = secuelasDe(s);
+  const anos = Math.max(0, dias || 0) / 365;
+  const nuevo = secuelaDeLasBajas(muertos, s);
+  const olvido = Math.pow(0.5, anos / SECUELA_OLVIDO);
+  // El rencor no se olvida con el tiempo sino con el pan: un país que da de
+  // comer a los que volvieron no tiene paramilitares, y uno que no, sí.
+  const paga = pesoMovilizacion(s).civil > 0.9 && !(s && s.guerra) ? 0.86 : 0.97;
+  const hueco = (q.hueco + nuevo.hueco) * Math.pow(0.5, anos / (SECUELA_OLVIDO * 0.8));
+  return {
+    mutilados: (q.mutilados + nuevo.mutilados) * olvido,
+    hueco,
+    rencor: (q.rencor + nuevo.rencor) * Math.pow(paga, anos),
+    // Y la concesión, que crece con lo que se le pidió al pueblo y no baja
+    // nunca: es lo único de este bloque que no se puede deshacer.
+    conquista: acotar(q.conquista + (s && s.guerra
+      ? pesoMovilizacion(s).nivel * 0.045 * anos : 0), 0, 1),
+    desde: q.desde != null ? q.desde : (nuevo.hueco > 0 ? (s.anio || 0) : null),
+    eco: q.eco,
+  };
 }
 
 // ═══ EL COMBUSTIBLE: LO QUE NO SE FABRICA CON EMPEÑO ═════════════════════
@@ -14192,7 +14330,11 @@ function pulsoDelFrente(s) {
 // en la paz para no pagarla en sangre después.
 function mantenimientoEjercito(ej, s) {
   const paga = RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.mant, 0);
-  return paga + (s ? Math.round(planDeAdiestramiento(s).oro * unidadesTotales(ej || {})) : 0);
+  // Y las pensiones de los que volvieron rotos, que es una partida que no se
+  // puede dejar de pagar y que sobrevive al ejército que la generó: un reino
+  // puede licenciar a toda su tropa y seguir pagando esto treinta años.
+  return paga + (s ? Math.round(planDeAdiestramiento(s).oro * unidadesTotales(ej || {})) : 0)
+    + (s ? pensionesDeGuerra(s) : 0);
 }
 function brazosEnFilas(ej) {
   return RAMAS_EJERCITO.reduce((a, r) => a + ((ej || {})[r.id] || 0) * r.brazos, 0);
@@ -21422,6 +21564,9 @@ export default function PaxMundi() {
         // Y sin plantas de sintético, que es lo que hace el que no tiene
         // petróleo debajo ni con qué comprarlo.
         sintetico: false,
+        // Y sin nada que una guerra haya dejado detrás, porque todavía no hubo
+        // ninguna. Estos cuatro números duran décadas cuando empiezan.
+        secuelas: { mutilados: 0, hueco: 0, rencor: 0, conquista: 0, desde: null, eco: 0 },
         provincias: provsIni,
         poblacion: pobIni,
         pops: sociedadDelReino(provsIni, init.anio, formaGob),
@@ -22830,6 +22975,56 @@ export default function PaxMundi() {
       // La campaña se resuelve antes que el resto del turno: lo que una hueste
       // tomó estos días ya es tuyo cuando se hacen las cuentas de la cosecha y
       // del tesoro. Y lo que hizo se cuenta en la crónica como todo lo demás.
+      // ═══ LO QUE DEJA LA GUERRA ═══
+      // Los muertos del tramo dejan detrás gente rota, un hueco demográfico y
+      // rencor, y las tres cosas duran décadas. Se calcula acá porque lo que
+      // cuestan —pensiones y brazos que faltan— entra en el presupuesto de
+      // este mismo turno.
+      // Los muertos de este tramo ya están contados: esta sección va después
+      // de la guerra a propósito, porque hasta que no se resuelve no se sabe
+      // a cuánta gente hay que llorar. Y lo que cuesta —las pensiones— se
+      // cobra el año que viene, que es cuando de verdad llega la factura.
+      const muertosDelTramo = bajasGuerra;
+      const secAntes = secuelasDe(state);
+      const secFin = secuelasTrasElTiempo(estadoMov, lapso, muertosDelTramo);
+      const estadoSec = { ...estadoMov, secuelas: secFin };
+      // El rencor de los que volvieron pega en las facciones, y pega más
+      // fuerte en paz que en guerra: mientras se pelea hay a quién echarle la
+      // culpa, y el día que se firma hay que explicarle a un millón de hombres
+      // qué hacen ahora. Ahí es donde nacen los paramilitares.
+      const ren = rencorVivo(estadoSec);
+      if (ren > 0) {
+        const golpe = Math.min(9, ren * 0.0016) * esc;
+        facNueva.pueblo = Math.max(0, (facNueva.pueblo ?? 50) - golpe);
+        facNueva.ejercito = Math.max(0, (facNueva.ejercito ?? 50) - golpe * 0.7);
+        nuevosStats.estabilidad = clamp(nuevosStats.estabilidad - golpe * 0.5);
+        if (!state.avisoRencor && !state.guerra && ren > 2200) {
+          entradasMov.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+            texto: `⚑ Los que volvieron no encuentran trabajo. Se juntan en los cafés y en las `
+              + `plazas, siguen llamándose por el grado y algunos siguen armados. No los enojó la `
+              + `guerra: los enojó la vuelta, y eso es de lo que están hechos todos los `
+              + `paramilitares que vinieron después.` });
+        }
+      }
+      // Y el eco: veinte años después vuelve a faltar gente, y no por la
+      // guerra de ahora sino por la de entonces. Nadie se acuerda de por qué.
+      const eco = ecoDeLaGuerra(estadoSec);
+      if (eco && !state.avisoEco)
+        entradasMov.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+          texto: `⚑ Las levas de este año salen cortas y nadie entiende por qué: ${eco.dice}. `
+            + `El déficit de nacimientos de una guerra es siempre mayor que sus muertos, y llega `
+            + `una generación tarde.` });
+      // Y lo que hubo que conceder, que es la otra cara y no baja nunca.
+      if (secFin.conquista > 0.35 && secAntes.conquista <= 0.35)
+        entradasMov.push({ anio: anioNuevo, dia: diaNuevo, tipo: "mundo",
+          texto: `⚑ Al reino que le pidió todo a su gente le toca darle algo: se amplía el voto, se `
+            + `pagan pensiones, se abren escuelas. No lo decidió nadie por bondad — lo decidió la `
+            + `cuenta que hicieron los que volvieron armados. Y esto no se devuelve nunca.` });
+      if (secFin.conquista > 0.05) {
+        nuevosStats.estabilidad = clamp(nuevosStats.estabilidad + secFin.conquista * 2.2 * esc);
+        facNueva.pueblo = Math.min(100, (facNueva.pueblo ?? 50) + secFin.conquista * 4 * esc);
+        facNueva.nobleza = Math.max(0, (facNueva.nobleza ?? 50) - secFin.conquista * 3 * esc);
+      }
       const camp = correrCampana({ ...state, provincias: provs }, lapso,
         dado(semillaTurno + "|campana"));
       const provs2 = camp.provincias;
@@ -22893,6 +23088,11 @@ export default function PaxMundi() {
         // Y la obra atómica, con el año en que el mundo se enteró de que la
         // cosa era posible: eso no se puede volver a guardar.
         atomo: atomoFin, atomoMundo: atomoMundoFin,
+        // Y lo que la guerra dejó detrás: gente rota, un hueco que vuelve a
+        // doler veinte años después, rencor y lo que hubo que conceder.
+        secuelas: secFin,
+        avisoRencor: state.avisoRencor || (rencorVivo({ ...estadoSec, guerra: null }) > 2200 && !state.guerra),
+        avisoEco: state.avisoEco || !!eco,
 
         guerra: guerraNueva,
         bajasRecientes: Math.round(bajasNuevas + bajasGuerra),
@@ -26352,6 +26552,71 @@ export default function PaxMundi() {
                           );
                         })}
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── lo que dejó la guerra ──
+                    Solo aparece cuando hay algo que dejó: en un reino que no
+                    peleó nunca no hay nada que decir. */}
+                {(() => {
+                  const q = secuelasDe(s);
+                  if (q.mutilados < 1 && q.rencor < 1 && q.conquista < 0.02) return null;
+                  const eco = ecoDeLaGuerra(s);
+                  const ren = rencorVivo(s);
+                  return (
+                    <div style={{ padding: "10px 12px", marginBottom: 13, borderRadius: 8,
+                      background: C.panel2, border: `1px solid ${ren > 900 ? C.red + "55" : C.line}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 9.5, fontFamily: mono, letterSpacing: 1.4, color: C.muted }}>
+                          ⚑ LO QUE DEJÓ LA GUERRA
+                        </span>
+                        <span style={{ fontFamily: mono, fontSize: 12, color: C.muted }}>
+                          {q.desde != null ? `desde ${fmtAnio(q.desde)}` : "—"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                        Lo que una guerra larga le hace a un país no termina el día que se firma la
+                        paz: empieza ahí.
+                      </div>
+                      {[["Volvieron rotos", `${Math.round(q.mutilados)}`, q.mutilados > 0 ? C.red : C.muted],
+                        ["Sus pensiones al año", `⚜${pensionesDeGuerra(s).toFixed(1)}`,
+                          pensionesDeGuerra(s) > 1 ? C.brass : C.muted],
+                        ["Brazos que faltan", `${Math.round(brazosQueFaltan(s))}`, C.red],
+                        ["Rencor de los que volvieron", `${Math.round(ren)}`,
+                          ren > 900 ? C.red : ren > 200 ? C.brass : C.muted]].map(([a2, b2, c2]) => (
+                        <div key={a2} style={{ display: "flex", justifyContent: "space-between",
+                          gap: 10, fontSize: 12, color: C.muted, marginTop: 3 }}>
+                          <span>{a2}</span>
+                          <span style={{ color: c2, fontFamily: mono }}>{b2}</span>
+                        </div>
+                      ))}
+                      {s.guerra && ren > 200 && (
+                        <div style={{ fontSize: 11, color: C.brass, marginTop: 6, lineHeight: 1.45 }}>
+                          Mientras se pelea el rencor está contenido: hay a quién echarle la culpa. El
+                          día que se firme la paz se suelta de golpe, y ahí hay que explicarle a un
+                          montón de hombres qué hacen ahora.
+                        </div>
+                      )}
+                      {!s.guerra && ren > 900 && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          Los que volvieron no encuentran trabajo. Se juntan, siguen llamándose por el
+                          grado y algunos siguen armados. No los enojó la guerra: los enojó la vuelta.
+                        </div>
+                      )}
+                      {eco && (
+                        <div style={{ fontSize: 11, color: C.red, marginTop: 6, lineHeight: 1.45 }}>
+                          Y {eco.dice}. El déficit de nacimientos de una guerra es siempre mayor que
+                          sus muertos, y llega una generación tarde.
+                        </div>
+                      )}
+                      {q.conquista > 0.05 && (
+                        <div style={{ fontSize: 11, color: C.green, marginTop: 6, lineHeight: 1.45 }}>
+                          Y la otra cara: al reino que le pidió todo a su gente le tocó darle algo — el
+                          voto, la pensión, la escuela ({Math.round(q.conquista * 100)}% de camino
+                          andado). No lo decidió nadie por bondad, y no se devuelve nunca.
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

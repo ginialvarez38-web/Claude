@@ -938,6 +938,41 @@ Y es la única de las tres cosas que un ejército consume que **no perdona la
 organización**: saber de logística ahorra pan y pertrechos como ahorró siempre,
 y no ahorra ni una gota de combustible. Un motor quema lo que quema.
 
+## Lo que deja una guerra larga
+
+Hasta acá las bajas eran un número que bajaba la población y se olvidaba. Lo
+que una guerra larga le hace a un país no termina el día que se firma la paz:
+**empieza ahí**, y dura décadas.
+
+**Los que volvieron rotos.** Por cada muerto volvieron dos o tres hombres que
+no podían trabajar, y vivieron cuarenta años más. Eso no es una baja: es una
+carga permanente. Sus **pensiones** son una partida nueva del presupuesto que
+sobrevive al ejército que la generó — un reino puede licenciar hasta el último
+soldado y seguir pagándola treinta años. Las pensiones de la guerra civil
+norteamericana fueron la mayor partida del presupuesto federal en los años
+noventa, tres décadas después de la paz.
+
+**El hueco, y el eco veinte años después.** Una guerra mata varones jóvenes y
+eso no se arregla con tiempo. Faltan matrimonios, faltan nacimientos, y **veinte
+años más tarde vuelve a faltar gente en edad de servir** — no por la guerra de
+entonces sino por el que no nació entonces. Es el bajón más grande de los dos y
+llega cuando ya nadie se acuerda de por qué. El déficit de nacimientos de
+Francia entre 1915 y 1919 fue mayor que sus muertos en combate, y volvió a
+doler en 1939.
+
+**El rencor no lo hace la guerra: lo hace la vuelta.** Mientras se pelea está
+contenido — hay a quién echarle la culpa —, y el día que se firma se suelta de
+golpe: hay que explicarle a un montón de hombres qué hacen ahora. De ahí
+salieron todos los paramilitares de entreguerras. Y no se apaga con el tiempo
+sino **con el pan**: un país que sigue exprimiendo a su gente después de la paz
+no desactiva a nadie.
+
+**Y la otra cara, sin la cual esto sería una lista de castigos.** Todo estado
+que le pidió todo a su pueblo tuvo que darle algo después: el voto, la pensión,
+la escuela. La guerra total construyó el estado de bienestar, y no por bondad
+de nadie — por la cuenta que hicieron los que volvieron armados. Es lo único de
+todo esto que **no se devuelve nunca**.
+
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
