@@ -2,22 +2,45 @@ import { useState, useRef, useEffect, useMemo } from "react";
 
 // ——— PAX MUNDI v6 — Proyectos Nacionales con bitácora IA ———
 
+// ═══ EL ASPECTO ═════════════════════════════════════════════
+//
+// La interfaz era un atlas: pergamino, degradados, esquinas redondeadas y
+// tipografía con serifas. Se veía bien quieta y trabajaba en contra en
+// movimiento —un juego de estrategia se mira de reojo, mientras se piensa otra
+// cosa, y un degradado tenue no se lee de reojo—.
+//
+// Ahora es lo contrario y a propósito: superficies planas y casi negras,
+// esquinas rectas, una sola línea de separación, y el color reservado para
+// cuando significa algo. El mapa se queda como estaba —tiene su terreno, su
+// relieve y sus ciudades, y ése es el juego—; lo que cambia es todo lo que lo
+// rodea, que pasa de competir con él a enmarcarlo.
+//
+// El fondo es negro frío y no negro puro: el negro puro contra un mapa con
+// tierra y mar da un corte duro que cansa, y dos puntos de azul lo asientan.
 const C = {
-  bg: "#0A0F17",
-  panel: "linear-gradient(180deg, #1A2436 0%, #131C2A 100%)",
-  panelFlat: "#141D2B",
-  panel2: "#0F1622",
-  line: "rgba(232,220,195,0.16)",
-  ink: "#EDE3CC",
-  muted: "#8E99AB",
-  brass: "#D4AF37",
-  brassDark: "#A8862A",
-  red: "#E05252",
-  green: "#57B26B",
-  blue: "#5B9BD5",
-  cyan: "#45C4B0",
-  violet: "#B06FD8",
-  gold: "#E3B341",
+  bg: "#0B0D11",
+  // Plano, sin degradado. Un degradado en un panel que se abre y se cierra
+  // cincuenta veces por partida es una animación que nadie pidió.
+  panel: "#161A20",
+  panelFlat: "#161A20",
+  panel2: "#101318",
+  // Una sola línea, clara y fina. Antes era cálida y gruesa y el resultado era
+  // una reja: con veinte paneles en pantalla, los bordes pesaban más que el
+  // contenido.
+  line: "rgba(255,255,255,0.09)",
+  ink: "#F1F3F6",
+  muted: "#8B95A4",
+  // El bronce sigue siendo el acento —es la identidad del juego y no hay por
+  // qué tirarla— pero más limpio y más claro, que sobre negro el viejo #D4AF37
+  // se apagaba.
+  brass: "#E3B04B",
+  brassDark: "#9C7723",
+  red: "#E5484D",
+  green: "#4CA65B",
+  blue: "#4F9CF0",
+  cyan: "#2EBFAE",
+  violet: "#A87FE0",
+  gold: "#E3B04B",
   // El naranja del semáforo. Faltaba porque hasta ahora los avisos eran de dos
   // colores —va bien o va mal— y entre «requiere atención» y «situación
   // crítica» hay un escalón que el jugador necesita ver antes de que sea tarde.
@@ -120,8 +143,22 @@ const SALUD_SABER = {
 // El reino deja de ser un punto. Fase 1: las provincias son datos —cada una
 // con su tierra, su gente y su propio techo— y el total sigue siendo el de antes.
 const REGIONES_REALES = {"iberia":{"n":"Iberia","c":"Europa","p":[{"n":"Bética","la":37.4,"lo":-5.9,"t":"vega","co":1,"ri":1,"x":36.8,"y":55.0},{"n":"Lusitania","la":39.5,"lo":-8.4,"t":"colina","co":1,"ri":1,"x":23.3,"y":40.1},{"n":"Tarraconense","la":41.6,"lo":1.5,"t":"llanura","co":1,"ri":1,"x":76.7,"y":25.1},{"n":"Meseta Central","la":40.4,"lo":-3.7,"t":"meseta","co":0,"ri":1,"x":48.7,"y":33.6},{"n":"Cantabria","la":43.3,"lo":-4.0,"t":"montana","co":1,"ri":0,"x":47.0,"y":13.0},{"n":"Galecia","la":42.8,"lo":-8.2,"t":"colina","co":1,"ri":1,"x":24.4,"y":16.6},{"n":"Levante","la":39.0,"lo":-0.4,"t":"vega","co":1,"ri":1,"x":66.5,"y":43.6},{"n":"Valle del Ebro","la":41.9,"lo":-0.9,"t":"llanura","co":0,"ri":1,"x":63.8,"y":23.0}]},"galia":{"n":"Galia","c":"Europa","p":[{"n":"Île-de-France","la":48.9,"lo":2.4,"t":"llanura","co":0,"ri":1,"x":50.0,"y":15.3},{"n":"Normandía","la":49.2,"lo":0.1,"t":"colina","co":1,"ri":1,"x":38.2,"y":13.0},{"n":"Bretaña","la":48.2,"lo":-2.9,"t":"colina","co":1,"ri":0,"x":22.9,"y":20.5},{"n":"Aquitania","la":44.8,"lo":-0.6,"t":"llanura","co":1,"ri":1,"x":34.7,"y":46.0},{"n":"Provenza","la":43.6,"lo":5.4,"t":"colina","co":1,"ri":1,"x":65.3,"y":55.0},{"n":"Borgoña","la":47.1,"lo":4.8,"t":"colina","co":0,"ri":1,"x":62.3,"y":28.8},{"n":"Alsacia","la":48.6,"lo":7.7,"t":"vega","co":0,"ri":1,"x":77.1,"y":17.5},{"n":"Auvernia","la":45.5,"lo":3.1,"t":"montana","co":0,"ri":1,"x":53.6,"y":40.8}]},"italia":{"n":"Italia","c":"Europa","p":[{"n":"Latium","la":41.9,"lo":12.5,"t":"colina","co":1,"ri":1,"x":48.6,"y":31.8},{"n":"Padania","la":45.1,"lo":9.5,"t":"llanura","co":0,"ri":1,"x":36.6,"y":14.6},{"n":"Toscana","la":43.5,"lo":11.1,"t":"colina","co":1,"ri":1,"x":43.0,"y":23.2},{"n":"Campania","la":40.9,"lo":14.3,"t":"vega","co":1,"ri":1,"x":55.8,"y":37.2},{"n":"Apulia","la":41.0,"lo":16.6,"t":"llanura","co":1,"ri":0,"x":65.0,"y":36.7},{"n":"Sicilia","la":37.6,"lo":14.0,"t":"colina","co":1,"ri":0,"x":54.6,"y":55.0},{"n":"Cerdeña","la":40.1,"lo":9.1,"t":"montana","co":1,"ri":0,"x":35.0,"y":41.5},{"n":"Véneto","la":45.4,"lo":12.1,"t":"marisma","co":1,"ri":1,"x":47.0,"y":13.0}]},"britania":{"n":"Britania","c":"Europa","p":[{"n":"Támesis","la":51.5,"lo":-0.1,"t":"llanura","co":1,"ri":1,"x":62.6,"y":48.0},{"n":"Anglia Oriental","la":52.5,"lo":1.0,"t":"marisma","co":1,"ri":1,"x":67.3,"y":41.0},{"n":"Mercia","la":52.5,"lo":-1.9,"t":"llanura","co":0,"ri":1,"x":56.1,"y":41.2},{"n":"Northumbria","la":54.9,"lo":-1.6,"t":"colina","co":1,"ri":1,"x":56.8,"y":25.5},{"n":"Cornualles","la":50.4,"lo":-4.8,"t":"colina","co":1,"ri":0,"x":44.2,"y":55.0},{"n":"Gales","la":52.4,"lo":-3.8,"t":"montana","co":1,"ri":1,"x":47.7,"y":41.9},{"n":"Caledonia","la":56.8,"lo":-4.2,"t":"montana","co":1,"ri":1,"x":46.6,"y":13.0},{"n":"Hibernia","la":53.3,"lo":-7.7,"t":"vega","co":1,"ri":1,"x":32.7,"y":36.0}]},"germania":{"n":"Germania","c":"Europa","p":[{"n":"Renania","la":50.9,"lo":7.0,"t":"vega","co":0,"ri":1,"x":20.0,"y":38.0},{"n":"Westfalia","la":51.9,"lo":8.0,"t":"llanura","co":0,"ri":1,"x":24.5,"y":30.8},{"n":"Baja Sajonia","la":52.9,"lo":9.5,"t":"marisma","co":1,"ri":1,"x":31.1,"y":23.7},{"n":"Brandeburgo","la":52.5,"lo":13.4,"t":"llanura","co":0,"ri":1,"x":48.5,"y":26.5},{"n":"Baviera","la":48.5,"lo":11.6,"t":"meseta","co":0,"ri":1,"x":40.4,"y":55.0},{"n":"Suabia","la":48.5,"lo":9.2,"t":"colina","co":0,"ri":1,"x":29.8,"y":55.0},{"n":"Turingia","la":50.9,"lo":11.0,"t":"bosque","co":0,"ri":1,"x":37.8,"y":37.9},{"n":"Prusia Oriental","la":54.4,"lo":20.5,"t":"bosque","co":1,"ri":1,"x":80.0,"y":13.0}]},"escandinavia":{"n":"Escandinavia","c":"Europa","p":[{"n":"Escania","la":55.7,"lo":13.2,"t":"llanura","co":1,"ri":0,"x":49.2,"y":55.0},{"n":"Jutlandia","la":56.2,"lo":9.5,"t":"llanura","co":1,"ri":0,"x":41.2,"y":52.6},{"n":"Gotia","la":58.4,"lo":14.5,"t":"bosque","co":1,"ri":1,"x":49.3,"y":46.6},{"n":"Uplandia","la":59.9,"lo":17.6,"t":"bosque","co":1,"ri":1,"x":55.4,"y":40.8},{"n":"Norlandia","la":63.8,"lo":17.0,"t":"bosque","co":1,"ri":1,"x":53.8,"y":29.2},{"n":"Vestlandet","la":60.4,"lo":6.0,"t":"montana","co":1,"ri":0,"x":37.1,"y":39.8},{"n":"Trøndelag","la":63.4,"lo":10.9,"t":"montana","co":1,"ri":1,"x":44.5,"y":30.5},{"n":"Finmarca","la":69.0,"lo":23.0,"t":"estepa","co":1,"ri":0,"x":62.9,"y":13.0}]},"balcanes":{"n":"Balcanes","c":"Europa","p":[{"n":"Tracia","la":41.7,"lo":26.5,"t":"llanura","co":1,"ri":1,"x":75.5,"y":27.0},{"n":"Macedonia","la":40.8,"lo":22.3,"t":"colina","co":1,"ri":1,"x":54.3,"y":32.7},{"n":"Tesalia","la":39.6,"lo":22.4,"t":"vega","co":1,"ri":1,"x":55.0,"y":41.1},{"n":"Ática","la":38.0,"lo":23.7,"t":"colina","co":1,"ri":0,"x":61.7,"y":51.4},{"n":"Peloponeso","la":37.5,"lo":22.3,"t":"montana","co":1,"ri":0,"x":54.0,"y":55.0},{"n":"Epiro","la":39.7,"lo":20.8,"t":"montana","co":1,"ri":1,"x":46.6,"y":40.2},{"n":"Dalmacia","la":43.5,"lo":16.4,"t":"montana","co":1,"ri":0,"x":24.5,"y":15.0},{"n":"Mesia","la":43.8,"lo":25.0,"t":"llanura","co":0,"ri":1,"x":67.9,"y":13.0}]},"europa_central":{"n":"Europa Central","c":"Europa","p":[{"n":"Bohemia","la":50.1,"lo":14.4,"t":"colina","co":0,"ri":1,"x":26.6,"y":30.2},{"n":"Moravia","la":49.2,"lo":16.6,"t":"colina","co":0,"ri":1,"x":37.3,"y":37.0},{"n":"Panonia","la":47.2,"lo":19.1,"t":"llanura","co":0,"ri":1,"x":49.5,"y":52.0},{"n":"Silesia","la":51.1,"lo":17.0,"t":"llanura","co":0,"ri":1,"x":39.3,"y":22.7},{"n":"Gran Polonia","la":52.4,"lo":16.9,"t":"llanura","co":0,"ri":1,"x":38.8,"y":13.0},{"n":"Galitzia","la":49.8,"lo":24.0,"t":"colina","co":0,"ri":1,"x":73.4,"y":32.5},{"n":"Transilvania","la":46.8,"lo":23.6,"t":"montana","co":0,"ri":1,"x":71.4,"y":55.0},{"n":"Cárpatos","la":49.2,"lo":20.1,"t":"montana","co":0,"ri":1,"x":54.4,"y":37.0}]},"rusia":{"n":"Rusia","c":"Europa","p":[{"n":"Moscovia","la":55.8,"lo":37.6,"t":"bosque","co":0,"ri":1,"x":48.0,"y":31.3},{"n":"Nóvgorod","la":58.5,"lo":31.3,"t":"marisma","co":0,"ri":1,"x":37.2,"y":23.4},{"n":"Rutenia","la":50.5,"lo":30.5,"t":"llanura","co":0,"ri":1,"x":35.9,"y":47.0},{"n":"Estepa Póntica","la":47.8,"lo":35.2,"t":"estepa","co":1,"ri":1,"x":43.9,"y":55.0},{"n":"Cuenca del Volga","la":53.2,"lo":50.1,"t":"llanura","co":0,"ri":1,"x":69.2,"y":39.0},{"n":"Carelia","la":62.0,"lo":33.0,"t":"bosque","co":1,"ri":1,"x":40.1,"y":13.0},{"n":"Pomerania","la":54.4,"lo":18.6,"t":"llanura","co":1,"ri":1,"x":15.6,"y":35.5},{"n":"Urales","la":57.0,"lo":59.0,"t":"montana","co":0,"ri":1,"x":84.4,"y":27.8}]},"anatolia":{"n":"Anatolia","c":"Asia","p":[{"n":"Jonia","la":38.4,"lo":27.1,"t":"vega","co":1,"ri":1,"x":14.0,"y":36.1},{"n":"Bitinia","la":40.2,"lo":29.1,"t":"colina","co":1,"ri":1,"x":22.3,"y":26.6},{"n":"Frigia","la":39.0,"lo":30.5,"t":"meseta","co":0,"ri":1,"x":28.1,"y":32.9},{"n":"Capadocia","la":38.7,"lo":34.8,"t":"meseta","co":0,"ri":1,"x":45.9,"y":34.5},{"n":"Cilicia","la":37.0,"lo":35.3,"t":"vega","co":1,"ri":1,"x":47.9,"y":43.6},{"n":"Ponto","la":41.0,"lo":37.0,"t":"montana","co":1,"ri":1,"x":55.0,"y":22.3},{"n":"Armenia","la":40.2,"lo":44.5,"t":"montana","co":0,"ri":1,"x":86.0,"y":26.6},{"n":"Licia","la":36.6,"lo":29.8,"t":"montana","co":1,"ri":0,"x":25.2,"y":45.7}]},"levante":{"n":"Levante","c":"Asia","p":[{"n":"Fenicia","la":33.9,"lo":35.5,"t":"colina","co":1,"ri":1,"x":43.7,"y":25.4},{"n":"Galilea","la":32.8,"lo":35.3,"t":"colina","co":0,"ri":1,"x":43.3,"y":34.3},{"n":"Judea","la":31.8,"lo":35.2,"t":"meseta","co":0,"ri":1,"x":44.2,"y":42.7},{"n":"Filistea","la":31.5,"lo":34.5,"t":"llanura","co":1,"ri":0,"x":36.4,"y":46.0},{"n":"Damasceno","la":33.5,"lo":36.3,"t":"vega","co":0,"ri":1,"x":51.0,"y":29.7},{"n":"Orontes","la":35.5,"lo":36.3,"t":"vega","co":0,"ri":1,"x":50.1,"y":13.0},{"n":"Palmirena","la":34.6,"lo":38.3,"t":"estepa","co":0,"ri":0,"x":63.6,"y":20.3},{"n":"Nabatea","la":30.3,"lo":35.5,"t":"montana","co":0,"ri":0,"x":44.7,"y":55.0}]},"egipto":{"n":"Egipto","c":"África","p":[{"n":"Delta del Nilo","la":31.0,"lo":31.2,"t":"delta","co":1,"ri":1,"x":55.6,"y":13.0},{"n":"Menfis","la":29.9,"lo":31.2,"t":"vega","co":0,"ri":1,"x":58.7,"y":20.6},{"n":"Fayum","la":29.3,"lo":30.8,"t":"vega","co":0,"ri":1,"x":52.1,"y":25.4},{"n":"Alto Egipto","la":25.7,"lo":32.6,"t":"vega","co":0,"ri":1,"x":61.6,"y":39.5},{"n":"Nubia","la":22.3,"lo":31.6,"t":"meseta","co":0,"ri":1,"x":57.6,"y":55.0},{"n":"Marmárica","la":31.2,"lo":25.5,"t":"estepa","co":1,"ri":0,"x":33.1,"y":14.5},{"n":"Sinaí","la":29.5,"lo":33.9,"t":"montana","co":1,"ri":0,"x":66.9,"y":22.2},{"n":"Oasis del Desierto","la":25.5,"lo":28.9,"t":"estepa","co":0,"ri":0,"x":46.8,"y":40.4}]},"magreb":{"n":"Magreb","c":"África","p":[{"n":"Ifriqiya","la":36.8,"lo":10.2,"t":"vega","co":1,"ri":1,"x":73.4,"y":16.4},{"n":"Numidia","la":36.4,"lo":6.6,"t":"colina","co":1,"ri":1,"x":62.6,"y":17.8},{"n":"Mauretania","la":35.7,"lo":-0.6,"t":"llanura","co":1,"ri":1,"x":41.0,"y":20.3},{"n":"Rif","la":35.2,"lo":-4.0,"t":"montana","co":1,"ri":1,"x":30.8,"y":22.1},{"n":"Atlas Medio","la":33.0,"lo":-5.0,"t":"montana","co":0,"ri":1,"x":27.8,"y":30.1},{"n":"Sus","la":30.4,"lo":-9.6,"t":"vega","co":1,"ri":1,"x":14.0,"y":39.4},{"n":"Tripolitania","la":32.9,"lo":13.2,"t":"estepa","co":1,"ri":0,"x":82.4,"y":30.4},{"n":"Fezán","la":27.0,"lo":14.4,"t":"estepa","co":0,"ri":0,"x":86.0,"y":51.6}]},"mesopotamia":{"n":"Mesopotamia","c":"Asia","p":[{"n":"Sumeria","la":30.9,"lo":46.1,"t":"delta","co":1,"ri":1,"x":51.5,"y":36.6},{"n":"Acad","la":33.1,"lo":44.4,"t":"vega","co":0,"ri":1,"x":45.9,"y":27.9},{"n":"Asiria","la":36.3,"lo":43.1,"t":"llanura","co":0,"ri":1,"x":41.8,"y":15.4},{"n":"Alta Yazira","la":36.9,"lo":40.7,"t":"estepa","co":0,"ri":1,"x":33.6,"y":13.0},{"n":"Elam","la":32.3,"lo":48.7,"t":"llanura","co":0,"ri":1,"x":60.1,"y":31.1},{"n":"Zagros","la":34.3,"lo":47.1,"t":"montana","co":0,"ri":1,"x":54.8,"y":23.2},{"n":"Bahréin","la":26.2,"lo":50.6,"t":"llanura","co":1,"ri":0,"x":66.4,"y":55.0},{"n":"Desierto Sirio","la":32.5,"lo":41.5,"t":"estepa","co":0,"ri":0,"x":36.4,"y":30.3}]},"persia":{"n":"Persia","c":"Asia","p":[{"n":"Fars","la":29.6,"lo":52.5,"t":"meseta","co":0,"ri":1,"x":45.0,"y":45.8},{"n":"Media","la":35.7,"lo":51.4,"t":"meseta","co":0,"ri":1,"x":41.4,"y":22.2},{"n":"Jorasán","la":36.3,"lo":59.6,"t":"estepa","co":0,"ri":1,"x":67.9,"y":19.9},{"n":"Hircania","la":36.8,"lo":54.4,"t":"bosque","co":1,"ri":1,"x":51.1,"y":18.0},{"n":"Sistán","la":31.0,"lo":61.8,"t":"estepa","co":0,"ri":1,"x":75.0,"y":40.4},{"n":"Kermán","la":30.3,"lo":57.1,"t":"estepa","co":0,"ri":0,"x":59.8,"y":43.1},{"n":"Azerbaiyán","la":38.1,"lo":46.3,"t":"montana","co":0,"ri":1,"x":25.0,"y":13.0},{"n":"Golfo Pérsico","la":27.2,"lo":56.3,"t":"colina","co":1,"ri":0,"x":57.3,"y":55.0}]},"arabia":{"n":"Arabia","c":"Asia","p":[{"n":"Hiyaz","la":21.5,"lo":39.2,"t":"montana","co":1,"ri":0,"x":14.0,"y":29.6},{"n":"Néyed","la":24.7,"lo":46.7,"t":"estepa","co":0,"ri":0,"x":42.1,"y":16.8},{"n":"Yemen","la":15.4,"lo":44.2,"t":"montana","co":1,"ri":1,"x":32.8,"y":54.0},{"n":"Hadramaut","la":15.5,"lo":48.8,"t":"meseta","co":1,"ri":1,"x":50.0,"y":53.6},{"n":"Omán","la":23.6,"lo":58.4,"t":"montana","co":1,"ri":0,"x":86.0,"y":21.2},{"n":"Al-Hasa","la":25.4,"lo":49.6,"t":"estepa","co":1,"ri":0,"x":53.0,"y":14.0},{"n":"Asir","la":18.2,"lo":42.5,"t":"montana","co":1,"ri":1,"x":26.4,"y":42.8},{"n":"Rub al-Jali","la":20.0,"lo":50.0,"t":"estepa","co":0,"ri":0,"x":54.5,"y":35.6}]},"estepa":{"n":"Estepa Euroasiática","c":"Asia","p":[{"n":"Transoxiana","la":39.7,"lo":66.9,"t":"vega","co":0,"ri":1,"x":23.4,"y":48.0},{"n":"Corasmia","la":41.5,"lo":60.6,"t":"delta","co":0,"ri":1,"x":14.0,"y":44.0},{"n":"Ferganá","la":40.4,"lo":71.8,"t":"vega","co":0,"ri":1,"x":31.8,"y":46.3},{"n":"Zungaria","la":44.9,"lo":85.0,"t":"estepa","co":0,"ri":1,"x":51.9,"y":36.4},{"n":"Kazajia","la":48.0,"lo":68.0,"t":"estepa","co":0,"ri":1,"x":25.5,"y":29.5},{"n":"Altái","la":49.5,"lo":88.0,"t":"montana","co":0,"ri":1,"x":56.6,"y":26.2},{"n":"Mongolia","la":47.9,"lo":106.9,"t":"estepa","co":0,"ri":1,"x":86.0,"y":29.7},{"n":"Baikal","la":52.3,"lo":104.3,"t":"bosque","co":0,"ri":1,"x":82.0,"y":20.0}]},"india_norte":{"n":"India del Norte","c":"Asia","p":[{"n":"Punyab","la":31.1,"lo":74.9,"t":"llanura","co":0,"ri":1,"x":37.4,"y":16.3},{"n":"Doab","la":27.2,"lo":78.0,"t":"vega","co":0,"ri":1,"x":48.6,"y":32.0},{"n":"Magadha","la":25.2,"lo":85.1,"t":"vega","co":0,"ri":1,"x":74.1,"y":40.0},{"n":"Bengala","la":23.0,"lo":88.4,"t":"delta","co":1,"ri":1,"x":86.0,"y":48.9},{"n":"Guyarat","la":22.3,"lo":71.2,"t":"llanura","co":1,"ri":1,"x":24.1,"y":51.7},{"n":"Rajputana","la":26.9,"lo":73.8,"t":"estepa","co":0,"ri":1,"x":33.4,"y":33.2},{"n":"Sind","la":25.4,"lo":68.4,"t":"delta","co":1,"ri":1,"x":14.0,"y":39.2},{"n":"Himalaya","la":30.1,"lo":79.0,"t":"montana","co":0,"ri":1,"x":52.2,"y":20.3}]},"india_sur":{"n":"India del Sur","c":"Asia","p":[{"n":"Decán","la":17.4,"lo":76.6,"t":"meseta","co":0,"ri":1,"x":41.2,"y":21.2},{"n":"Malabar","la":10.8,"lo":76.0,"t":"vega","co":1,"ri":1,"x":39.2,"y":43.7},{"n":"Coromandel","la":12.9,"lo":79.9,"t":"llanura","co":1,"ri":1,"x":52.3,"y":36.2},{"n":"Chola","la":10.8,"lo":79.1,"t":"delta","co":1,"ri":1,"x":49.4,"y":44.1},{"n":"Konkan","la":17.5,"lo":73.5,"t":"colina","co":1,"ri":1,"x":30.9,"y":20.9},{"n":"Kalinga","la":19.8,"lo":85.0,"t":"llanura","co":1,"ri":1,"x":69.1,"y":13.0},{"n":"Ghats Occidentales","la":13.5,"lo":75.0,"t":"montana","co":0,"ri":1,"x":35.9,"y":34.5},{"n":"Ceilán","la":7.5,"lo":80.7,"t":"colina","co":1,"ri":1,"x":54.8,"y":55.0}]},"china_norte":{"n":"China del Norte","c":"Asia","p":[{"n":"Llanura Central","la":34.7,"lo":113.6,"t":"llanura","co":0,"ri":1,"x":46.8,"y":52.4},{"n":"Guanzhong","la":34.3,"lo":108.9,"t":"vega","co":0,"ri":1,"x":31.1,"y":54.1},{"n":"Hebei","la":38.0,"lo":115.5,"t":"llanura","co":1,"ri":1,"x":53.2,"y":38.4},{"n":"Shandong","la":36.4,"lo":118.0,"t":"colina","co":1,"ri":1,"x":61.6,"y":45.2},{"n":"Shanxi","la":37.5,"lo":112.5,"t":"meseta","co":0,"ri":1,"x":43.1,"y":40.5},{"n":"Manchuria","la":43.8,"lo":125.3,"t":"llanura","co":1,"ri":1,"x":86.0,"y":13.9},{"n":"Gansu","la":36.1,"lo":103.8,"t":"estepa","co":0,"ri":1,"x":14.0,"y":46.5},{"n":"Ordos","la":39.6,"lo":109.8,"t":"estepa","co":0,"ri":1,"x":34.1,"y":31.7}]},"china_sur":{"n":"China del Sur","c":"Asia","p":[{"n":"Jiangnan","la":31.2,"lo":120.6,"t":"delta","co":1,"ri":1,"x":86.0,"y":15.7},{"n":"Hubei","la":30.6,"lo":114.3,"t":"vega","co":0,"ri":1,"x":60.7,"y":18.4},{"n":"Sichuan","la":30.6,"lo":104.1,"t":"vega","co":0,"ri":1,"x":19.6,"y":18.4},{"n":"Fujian","la":26.1,"lo":119.3,"t":"montana","co":1,"ri":1,"x":80.8,"y":38.8},{"n":"Cantón","la":23.1,"lo":113.3,"t":"delta","co":1,"ri":1,"x":56.6,"y":52.3},{"n":"Hunan","la":28.2,"lo":112.9,"t":"colina","co":0,"ri":1,"x":55.0,"y":29.2},{"n":"Yunnan","la":25.0,"lo":102.7,"t":"montana","co":0,"ri":1,"x":14.0,"y":43.7},{"n":"Guangxi","la":23.8,"lo":108.3,"t":"colina","co":1,"ri":1,"x":36.5,"y":49.2}]},"japon":{"n":"Japón","c":"Asia","p":[{"n":"Kinai","la":34.7,"lo":135.5,"t":"vega","co":1,"ri":1,"x":48.5,"y":47.8},{"n":"Kantō","la":35.7,"lo":139.7,"t":"llanura","co":1,"ri":1,"x":62.4,"y":43.8},{"n":"Kyūshū","la":33.0,"lo":130.6,"t":"colina","co":1,"ri":1,"x":31.9,"y":55.0},{"n":"Shikoku","la":33.7,"lo":133.5,"t":"montana","co":1,"ri":1,"x":42.3,"y":54.2},{"n":"Chūgoku","la":34.6,"lo":133.0,"t":"montana","co":1,"ri":1,"x":39.1,"y":46.3},{"n":"Tōhoku","la":38.9,"lo":140.9,"t":"bosque","co":1,"ri":1,"x":66.4,"y":30.5},{"n":"Hokuriku","la":36.7,"lo":137.2,"t":"colina","co":1,"ri":1,"x":54.0,"y":39.6},{"n":"Ezo","la":43.1,"lo":141.4,"t":"bosque","co":1,"ri":1,"x":68.1,"y":13.0}]},"corea":{"n":"Corea","c":"Asia","p":[{"n":"Gyeonggi","la":37.5,"lo":127.0,"t":"llanura","co":1,"ri":1,"x":46.6,"y":38.5},{"n":"Jeolla","la":35.2,"lo":126.9,"t":"vega","co":1,"ri":1,"x":47.0,"y":55.0},{"n":"Gyeongsang","la":35.9,"lo":128.6,"t":"colina","co":1,"ri":1,"x":56.5,"y":50.6},{"n":"Chungcheong","la":36.6,"lo":127.3,"t":"colina","co":1,"ri":1,"x":48.9,"y":46.7},{"n":"Gangwon","la":37.8,"lo":128.3,"t":"montana","co":1,"ri":1,"x":55.1,"y":37.5},{"n":"Hwanghae","la":38.3,"lo":125.5,"t":"llanura","co":1,"ri":1,"x":39.3,"y":34.2},{"n":"Pyongan","la":39.9,"lo":125.7,"t":"colina","co":1,"ri":1,"x":40.7,"y":23.7},{"n":"Hamgyong","la":41.5,"lo":129.5,"t":"montana","co":1,"ri":1,"x":60.7,"y":13.0}]},"sudeste":{"n":"Sudeste Asiático","c":"Asia","p":[{"n":"Chao Praya","la":14.0,"lo":100.5,"t":"delta","co":1,"ri":1,"x":46.3,"y":24.2},{"n":"Mekong","la":11.9,"lo":105.6,"t":"delta","co":1,"ri":1,"x":53.7,"y":28.1},{"n":"Annam","la":16.5,"lo":107.6,"t":"colina","co":1,"ri":1,"x":57.1,"y":20.5},{"n":"Tonkín","la":21.0,"lo":105.8,"t":"delta","co":1,"ri":1,"x":53.5,"y":13.0},{"n":"Irawadi","la":17.0,"lo":96.2,"t":"delta","co":1,"ri":1,"x":39.6,"y":19.3},{"n":"Malaca","la":3.1,"lo":101.7,"t":"bosque","co":1,"ri":1,"x":48.0,"y":38.6},{"n":"Java","la":-7.3,"lo":110.4,"t":"montana","co":1,"ri":1,"x":60.4,"y":55.0},{"n":"Sumatra","la":-0.8,"lo":101.5,"t":"bosque","co":1,"ri":1,"x":47.6,"y":46.9}]},"sahel":{"n":"Sahel y Níger","c":"África","p":[{"n":"Curva del Níger","la":16.8,"lo":-3.0,"t":"vega","co":0,"ri":1,"x":39.4,"y":29.7},{"n":"Senegambia","la":14.7,"lo":-16.0,"t":"llanura","co":1,"ri":1,"x":14.0,"y":33.9},{"n":"Hausa","la":12.0,"lo":8.5,"t":"estepa","co":0,"ri":1,"x":61.6,"y":39.4},{"n":"Bornu","la":12.8,"lo":13.1,"t":"estepa","co":0,"ri":1,"x":70.1,"y":38.6},{"n":"Kanem","la":14.5,"lo":15.5,"t":"estepa","co":0,"ri":1,"x":76.8,"y":33.4},{"n":"Futa Yallon","la":11.3,"lo":-12.3,"t":"montana","co":0,"ri":1,"x":21.2,"y":40.8},{"n":"Aïr","la":18.0,"lo":8.0,"t":"montana","co":0,"ri":0,"x":61.0,"y":27.2},{"n":"Wadai","la":13.8,"lo":20.8,"t":"estepa","co":0,"ri":0,"x":86.0,"y":35.7}]},"guinea":{"n":"Costa de Guinea","c":"África","p":[{"n":"Ashanti","la":6.7,"lo":-1.6,"t":"bosque","co":1,"ri":1,"x":48.0,"y":32.7},{"n":"Yoruba","la":7.4,"lo":3.9,"t":"bosque","co":1,"ri":1,"x":66.3,"y":28.6},{"n":"Benín","la":6.3,"lo":5.6,"t":"bosque","co":1,"ri":1,"x":73.7,"y":32.9},{"n":"Delta del Níger","la":4.8,"lo":6.0,"t":"delta","co":1,"ri":1,"x":73.6,"y":41.4},{"n":"Costa de Marfil","la":6.8,"lo":-5.3,"t":"bosque","co":1,"ri":1,"x":35.7,"y":32.3},{"n":"Sierra Leona","la":8.5,"lo":-11.8,"t":"colina","co":1,"ri":1,"x":14.0,"y":26.6},{"n":"Grão Camarões","la":4.1,"lo":9.8,"t":"montana","co":1,"ri":1,"x":86.0,"y":41.4},{"n":"Dahomey","la":7.2,"lo":2.1,"t":"llanura","co":1,"ri":1,"x":58.3,"y":31.4}]},"etiopia":{"n":"Cuerno de África","c":"África","p":[{"n":"Meseta Etíope","la":9.0,"lo":38.7,"t":"meseta","co":0,"ri":1,"x":50.2,"y":43.4},{"n":"Tigray","la":13.5,"lo":39.5,"t":"montana","co":0,"ri":1,"x":56.0,"y":22.1},{"n":"Amhara","la":11.6,"lo":37.4,"t":"montana","co":0,"ri":1,"x":45.5,"y":31.7},{"n":"Shoa","la":8.5,"lo":39.3,"t":"meseta","co":0,"ri":1,"x":56.7,"y":48.9},{"n":"Eritrea","la":15.3,"lo":38.9,"t":"colina","co":1,"ri":1,"x":53.0,"y":13.0},{"n":"Ogadén","la":7.0,"lo":44.5,"t":"estepa","co":0,"ri":0,"x":80.8,"y":55.0},{"n":"Somalilandia","la":9.6,"lo":45.0,"t":"estepa","co":1,"ri":0,"x":83.3,"y":41.8},{"n":"Alto Nilo","la":9.5,"lo":31.6,"t":"marisma","co":0,"ri":1,"x":16.7,"y":42.3}]},"africa_oriental":{"n":"África Oriental","c":"África","p":[{"n":"Zanguebar","la":-6.2,"lo":39.2,"t":"vega","co":1,"ri":1,"x":51.0,"y":26.2},{"n":"Buganda","la":0.3,"lo":32.6,"t":"colina","co":0,"ri":1,"x":37.3,"y":13.0},{"n":"Kilwa","la":-8.9,"lo":39.5,"t":"llanura","co":1,"ri":1,"x":51.9,"y":34.6},{"n":"Interlacustre","la":-2.0,"lo":30.0,"t":"montana","co":0,"ri":1,"x":31.0,"y":18.6},{"n":"Kenia","la":-1.3,"lo":36.8,"t":"meseta","co":1,"ri":1,"x":46.0,"y":16.8},{"n":"Malaui","la":-13.3,"lo":34.3,"t":"meseta","co":0,"ri":1,"x":40.6,"y":42.8},{"n":"Mozambique","la":-18.9,"lo":35.0,"t":"llanura","co":1,"ri":1,"x":42.1,"y":55.0},{"n":"Madagascar","la":-18.9,"lo":47.5,"t":"montana","co":1,"ri":1,"x":69.0,"y":55.0}]},"congo":{"n":"Cuenca del Congo","c":"África","p":[{"n":"Bajo Congo","la":-4.3,"lo":15.3,"t":"bosque","co":1,"ri":1,"x":37.5,"y":35.7},{"n":"Cuenca Central","la":-1.0,"lo":22.0,"t":"bosque","co":0,"ri":1,"x":54.9,"y":27.1},{"n":"Katanga","la":-11.7,"lo":27.5,"t":"meseta","co":0,"ri":1,"x":69.3,"y":55.0},{"n":"Kasai","la":-6.0,"lo":22.4,"t":"bosque","co":0,"ri":1,"x":56.0,"y":40.1},{"n":"Ubangui","la":4.4,"lo":18.6,"t":"bosque","co":0,"ri":1,"x":46.1,"y":13.0},{"n":"Gabón","la":0.4,"lo":11.0,"t":"bosque","co":1,"ri":1,"x":26.3,"y":23.4},{"n":"Luanda","la":-8.8,"lo":13.2,"t":"llanura","co":1,"ri":1,"x":32.0,"y":47.4},{"n":"Kivu","la":-1.7,"lo":29.2,"t":"montana","co":0,"ri":1,"x":73.7,"y":28.9}]},"africa_austral":{"n":"África Austral","c":"África","p":[{"n":"El Cabo","la":-33.9,"lo":18.4,"t":"colina","co":1,"ri":1,"x":35.6,"y":55.0},{"n":"Natal","la":-29.9,"lo":31.0,"t":"vega","co":1,"ri":1,"x":67.5,"y":45.1},{"n":"Highveld","la":-26.2,"lo":28.0,"t":"meseta","co":0,"ri":1,"x":58.2,"y":34.7},{"n":"Zimbabue","la":-19.0,"lo":30.0,"t":"meseta","co":0,"ri":1,"x":63.0,"y":16.1},{"n":"Kalahari","la":-23.0,"lo":22.0,"t":"estepa","co":0,"ri":0,"x":44.1,"y":26.6},{"n":"Namibia","la":-22.6,"lo":17.1,"t":"estepa","co":1,"ri":0,"x":32.5,"y":25.5},{"n":"Drakensberg","la":-29.5,"lo":29.3,"t":"montana","co":0,"ri":1,"x":59.2,"y":43.2},{"n":"Zambezi","la":-17.8,"lo":25.8,"t":"vega","co":0,"ri":1,"x":53.1,"y":13.0}]},"mesoamerica":{"n":"Mesoamérica","c":"América","p":[{"n":"Valle de México","la":19.4,"lo":-99.1,"t":"vega","co":0,"ri":1,"x":26.0,"y":23.5},{"n":"Oaxaca","la":17.1,"lo":-96.7,"t":"montana","co":0,"ri":1,"x":39.7,"y":37.3},{"n":"Petén","la":16.9,"lo":-89.9,"t":"bosque","co":0,"ri":1,"x":78.6,"y":38.5},{"n":"Yucatán","la":20.7,"lo":-88.6,"t":"llanura","co":1,"ri":0,"x":86.0,"y":15.7},{"n":"Veracruz","la":19.2,"lo":-96.1,"t":"vega","co":1,"ri":1,"x":43.1,"y":24.7},{"n":"Chiapas","la":16.7,"lo":-92.6,"t":"montana","co":1,"ri":1,"x":63.1,"y":39.7},{"n":"Michoacán","la":19.6,"lo":-101.2,"t":"colina","co":1,"ri":1,"x":14.0,"y":22.3},{"n":"Guatemala","la":14.6,"lo":-90.5,"t":"montana","co":1,"ri":1,"x":75.1,"y":52.3}]},"andes":{"n":"Andes","c":"América","p":[{"n":"Cuzco","la":-13.5,"lo":-71.9,"t":"montana","co":0,"ri":1,"x":46.9,"y":27.3},{"n":"Altiplano","la":-16.5,"lo":-68.1,"t":"meseta","co":0,"ri":1,"x":51.9,"y":34.1},{"n":"Costa Norte","la":-8.1,"lo":-79.0,"t":"llanura","co":1,"ri":1,"x":39.8,"y":22.6},{"n":"Quito","la":-0.2,"lo":-78.5,"t":"montana","co":0,"ri":1,"x":41.0,"y":13.0},{"n":"Chile Central","la":-33.4,"lo":-70.6,"t":"vega","co":1,"ri":1,"x":50.5,"y":55.0},{"n":"Tucumán","la":-26.8,"lo":-65.2,"t":"colina","co":0,"ri":1,"x":58.2,"y":47.6},{"n":"Atacama","la":-23.6,"lo":-69.0,"t":"estepa","co":1,"ri":0,"x":51.3,"y":42.6},{"n":"Cochabamba","la":-17.4,"lo":-66.2,"t":"vega","co":0,"ri":1,"x":60.2,"y":36.2}]},"amazonia":{"n":"Amazonía y Plata","c":"América","p":[{"n":"Bajo Amazonas","la":-1.5,"lo":-48.5,"t":"delta","co":1,"ri":1,"x":52.5,"y":13.0},{"n":"Amazonía Central","la":-3.1,"lo":-60.0,"t":"bosque","co":0,"ri":1,"x":41.5,"y":14.6},{"n":"Nordeste","la":-8.1,"lo":-35.0,"t":"llanura","co":1,"ri":1,"x":66.1,"y":18.6},{"n":"Bahía","la":-12.9,"lo":-38.5,"t":"colina","co":1,"ri":1,"x":61.3,"y":25.5},{"n":"Pampa","la":-34.6,"lo":-58.4,"t":"llanura","co":1,"ri":1,"x":43.0,"y":46.3},{"n":"Paraguay","la":-25.3,"lo":-57.6,"t":"llanura","co":0,"ri":1,"x":43.8,"y":36.9},{"n":"Mato Grosso","la":-15.6,"lo":-56.1,"t":"meseta","co":0,"ri":1,"x":45.2,"y":27.2},{"n":"Patagonia","la":-43.3,"lo":-68.0,"t":"estepa","co":1,"ri":1,"x":33.9,"y":55.0}]},"norteamerica_este":{"n":"Norteamérica Oriental","c":"América","p":[{"n":"Bajo Misisipi","la":30.0,"lo":-90.1,"t":"delta","co":1,"ri":1,"x":29.0,"y":50.9},{"n":"Chesapeake","la":37.5,"lo":-76.4,"t":"marisma","co":1,"ri":1,"x":59.3,"y":30.1},{"n":"Nueva Inglaterra","la":42.4,"lo":-71.1,"t":"bosque","co":1,"ri":1,"x":71.0,"y":16.6},{"n":"Grandes Lagos","la":43.7,"lo":-79.4,"t":"bosque","co":1,"ri":1,"x":52.7,"y":13.0},{"n":"Ohio","la":39.1,"lo":-84.5,"t":"colina","co":0,"ri":1,"x":40.6,"y":25.0},{"n":"Piedmont","la":35.8,"lo":-80.0,"t":"colina","co":0,"ri":1,"x":53.0,"y":36.5},{"n":"Apalaches","la":37.0,"lo":-81.5,"t":"montana","co":0,"ri":1,"x":47.1,"y":30.5},{"n":"Florida","la":28.5,"lo":-81.4,"t":"marisma","co":1,"ri":1,"x":48.2,"y":55.0}]},"norteamerica_oeste":{"n":"Norteamérica Occidental","c":"América","p":[{"n":"Grandes Llanuras","la":39.0,"lo":-98.5,"t":"estepa","co":0,"ri":1,"x":75.6,"y":42.0},{"n":"Río Grande","la":35.1,"lo":-106.6,"t":"estepa","co":0,"ri":1,"x":66.8,"y":47.8},{"n":"California","la":37.8,"lo":-122.4,"t":"vega","co":1,"ri":1,"x":50.9,"y":43.6},{"n":"Columbia","la":45.5,"lo":-122.7,"t":"bosque","co":1,"ri":1,"x":51.0,"y":33.4},{"n":"Gran Cuenca","la":40.8,"lo":-115.8,"t":"meseta","co":0,"ri":0,"x":58.1,"y":39.2},{"n":"Rocosas","la":39.7,"lo":-105.0,"t":"montana","co":0,"ri":1,"x":67.6,"y":39.4},{"n":"Sonora","la":29.1,"lo":-110.9,"t":"estepa","co":1,"ri":1,"x":62.4,"y":55.0},{"n":"Alaska","la":61.2,"lo":-149.9,"t":"montana","co":1,"ri":1,"x":24.4,"y":13.0}]},"oceania":{"n":"Oceanía","c":"Oceanía","p":[{"n":"Nueva Gales","la":-33.9,"lo":151.2,"t":"colina","co":1,"ri":1,"x":56.4,"y":46.3},{"n":"Victoria","la":-37.8,"lo":144.9,"t":"llanura","co":1,"ri":1,"x":49.7,"y":51.5},{"n":"Queensland","la":-27.5,"lo":153.0,"t":"bosque","co":1,"ri":1,"x":58.0,"y":38.0},{"n":"Australia del Sur","la":-34.9,"lo":138.6,"t":"estepa","co":1,"ri":1,"x":42.4,"y":47.0},{"n":"Australia Occ.","la":-31.9,"lo":115.9,"t":"estepa","co":1,"ri":1,"x":19.5,"y":43.8},{"n":"Outback","la":-25.0,"lo":133.0,"t":"estepa","co":0,"ri":0,"x":37.2,"y":35.6},{"n":"Nueva Zelanda","la":-41.3,"lo":174.8,"t":"montana","co":1,"ri":1,"x":80.5,"y":55.0},{"n":"Nueva Guinea","la":-6.1,"lo":145.4,"t":"montana","co":1,"ri":1,"x":50.1,"y":13.0}]}};
-const serif = "Georgia, 'Times New Roman', serif";
-const mono = "'Courier New', monospace";
+// Las dos familias. Se llaman así por lo que hacen y no por lo que son: `serif`
+// es la de los títulos y `mono` la de los números. Los nombres quedaron de
+// cuando la interfaz era un atlas y las letras tenían remates; cambiarlos
+// ahora serían cuatrocientas ediciones para no ganar nada, así que se quedan
+// con el nombre viejo y el comentario que lo explica.
+//
+// No hay tipografía descargada ni la va a haber: el juego se abre con doble
+// clic desde un archivo y no pide nada de afuera. Las dos pilas son de las que
+// ya están en el sistema, ordenadas de la mejor a la que siempre existe.
+const serif = "'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, "
+  + "'Helvetica Neue', Arial, sans-serif";
+// Para los números. Tienen que ser de ancho fijo: una columna de cifras que
+// baila al cambiar de turno es imposible de comparar de un vistazo, y comparar
+// de un vistazo es para lo único que sirve una columna de cifras.
+const mono = "'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Consolas', "
+  + "'DejaVu Sans Mono', 'Liberation Mono', monospace";
 
 const TERRENOS = {
   delta:   { n: "Delta",    ico: "≈", fert: 1.55, def: 0.80, com: 1.25, col: "#3E8E7E" },
@@ -19612,17 +19649,66 @@ const GlobalStyle = () => (
     @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
     @keyframes glowBrass { 0%,100% { box-shadow: 0 0 12px rgba(212,175,55,0.25); } 50% { box-shadow: 0 0 22px rgba(212,175,55,0.5); } }
     @keyframes latido { 0%,100% { opacity: 0.85; } 50% { opacity: 0.28; } }
-    .pm-fade { animation: fadeUp 0.45s ease both; }
+    .pm-fade { animation: fadeUp 0.28s ease both; }
     .pm-latido { animation: latido 1.9s ease-in-out infinite; }
-    .pm-mapa:focus-visible { box-shadow: inset 0 0 0 2px rgba(212,175,55,0.55); }
-    .pm-card { transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
-    .pm-card:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
-    .pm-cta { transition: transform 0.12s ease, filter 0.12s ease; }
-    .pm-cta:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.1); }
-    .pm-cta:not(:disabled):active { transform: translateY(0); }
-    .pm-scroll::-webkit-scrollbar { width: 6px; }
-    .pm-scroll::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.3); border-radius: 3px; }
-    .pm-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+    .pm-mapa:focus-visible { box-shadow: inset 0 0 0 2px rgba(227,176,75,0.55); }
+
+    /* ─── LA FORMA ────────────────────────────────────────────────────────
+       Esquinas rectas en todo. Están escritas a mano en doscientos cuarenta
+       sitios, así que se corrigen desde acá con un «!important», que es lo
+       único que le gana a un estilo en línea. Doscientas cuarenta ediciones a
+       mano para el mismo resultado serían doscientas cuarenta ocasiones de
+       equivocarse.
+
+       La lista de elementos es a propósito y no un «*»: con el asterisco, la
+       regla recorría también los mil quinientos nodos del mapa buscando una
+       subcadena en cada recálculo de estilo, y eso le costaba al arrastre un
+       setenta por ciento más de rasterizado —medido—. Ninguna figura de un SVG
+       tiene esquinas que redondear, así que no hace falta preguntárselo. */
+    div, button, input, textarea, select, span, a, section, header, nav, ul, li, table, td, th {
+      border-radius: 0 !important;
+    }
+    /* …salvo lo que se pidió redondo del todo, que eso no es estilo, es dibujo:
+       los puntos de estado, las fichas de cara, los discos de una barra. */
+    [style*="border-radius: 50%"], [style*="border-radius:50%"] {
+      border-radius: 50% !important;
+    }
+
+    /* Nada se levanta al pasarle por encima. El realce por elevación es de
+       página web: supone que el elemento es una tarjeta de papel y que hay una
+       luz. Acá no hay papel ni luz, hay una consola: lo que responde al ratón
+       lo dice cambiando de borde y de fondo, que se lee igual de rápido y no
+       mueve nada de sitio. Que la interfaz no tiemble importa más de lo que
+       parece cuando se la mira ocho horas. */
+    .pm-card { transition: background 0.12s linear, border-color 0.12s linear; }
+    .pm-card:not(:disabled):hover { background: rgba(255,255,255,0.05);
+      border-color: rgba(227,176,75,0.45); }
+    .pm-cta { transition: background 0.12s linear, border-color 0.12s linear; }
+    .pm-cta:not(:disabled):hover { filter: brightness(1.14); }
+    .pm-cta:not(:disabled):active { filter: brightness(0.94); }
+
+    /* La barra de desplazamiento, del ancho de una línea y del color de una
+       línea. Antes era de bronce y llamaba la atención sobre sí misma, que es
+       exactamente lo que no tiene que hacer. */
+    .pm-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .pm-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); }
+    .pm-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.26); }
+    .pm-scroll::-webkit-scrollbar-track { background: transparent; }
+    .pm-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.14) transparent; }
+
+    /* El foco del teclado, visible y del color del acento. Jugar con teclado
+       tiene que ser posible, y para eso hay que ver dónde se está parado. */
+    :focus-visible { outline: 2px solid rgba(227,176,75,0.8); outline-offset: -2px; }
+
+    /* Los números, siempre alineados en columna: el uno tiene que ocupar lo
+       mismo que el ocho. Sin eso, una cifra que cambia al pasar el turno corre
+       la columna entera, y comparar dos turnos deja de poder hacerse de un
+       vistazo, que es justo para lo que sirve una columna de cifras. */
+    body { font-variant-numeric: tabular-nums; }
+    /* Los campos y los botones heredan la tipografía de la página. El navegador
+       les pone la suya por defecto, y sin esto el juego tenía dos tipografías:
+       la del texto y la de todo lo que se puede tocar. */
+    input, button, textarea, select { font-family: inherit; }
     @media (prefers-reduced-motion: reduce) { .pm-fade, .pm-card, .pm-cta, .pm-latido { animation: none !important; transition: none !important; } }
     /* El dedo no acierta un botón de 21 píxeles de alto. Se agrandan todos de
        una: caso por caso no sirve, porque el que falla es siempre el que no se
@@ -19640,16 +19726,11 @@ const GlobalStyle = () => (
   `}</style>
 );
 
-const FONDO = {
-  minHeight: "100vh",
-  background: `
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212,175,55,0.09), transparent),
-    radial-gradient(ellipse 60% 40% at 85% 110%, rgba(69,196,176,0.05), transparent),
-    repeating-linear-gradient(0deg, transparent 0px, transparent 39px, rgba(255,255,255,0.014) 40px),
-    repeating-linear-gradient(90deg, transparent 0px, transparent 39px, rgba(255,255,255,0.014) 40px),
-    #0A0F17`,
-  color: C.ink,
-};
+// El fondo. Tenía dos resplandores de color y una cuadrícula de papel
+// milimetrado, que es lo que se le pone a una página para que no se vea vacía.
+// Acá no hace falta: detrás de todo esto hay un mapa del mundo, y lo que tiene
+// que hacer el fondo es no competir con él. Un color y nada más.
+const FONDO = { minHeight: "100vh", background: C.bg, color: C.ink };
 
 function Vecino({ v }) {
   const tonos = { guerra: C.red, aliado: C.green, tension: C.gold, paz: C.blue };
@@ -23649,14 +23730,15 @@ export default function PaxMundi() {
         display: "flex", alignItems: "center", gap: estrecho ? 8 : 14,
         flexWrap: estrecho ? "wrap" : "nowrap",
         alignContent: "center", padding: estrecho ? "0 8px" : "0 12px",
-        background: "linear-gradient(180deg, rgba(8,13,19,0.97), rgba(8,13,19,0.86))",
-        borderBottom: `1px solid ${C.line}`, backdropFilter: "blur(3px)" }}>
+        background: C.bg,
+        borderBottom: `1px solid ${C.line}` }}>
         {/* El nombre del reino no se recorta. Con el degradado recortado a la
             caja del texto y la caja encogida por el buscador, «Francia» salía
             como «F»: un truco de pintura no puede costarle al jugador saber qué
             país está gobernando. */}
         <div style={{ flex: "0 0 auto", maxWidth: estrecho ? 132 : 220, overflow: "hidden", order: estrecho ? 1 : 0 }}>
-          <div style={{ fontSize: 16, lineHeight: 1.1, whiteSpace: "nowrap", color: C.gold }}>
+          <div style={{ fontSize: 15, lineHeight: 1.1, whiteSpace: "nowrap", color: C.ink,
+            fontWeight: 600, letterSpacing: 0.2 }}>
             {s.nacion.nombre}</div>
           <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1 }}>
             {fmtMesAnio(s.anio, s.dia).toUpperCase()} · TURNO {s.turno}
@@ -23739,13 +23821,17 @@ export default function PaxMundi() {
           {mandoDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
             piT, pobTecho: techoOcupado }).map((ind) => (
             <div key={ind.id} title={`${ind.n}: ${ind.pie} · ${DICE[ind.nivel] || ""}`}
-              style={{ padding: "3px 8px", borderRadius: 6, minWidth: 52, textAlign: "right",
-                background: `${colorNivel(ind.nivel)}14`,
-                border: `1px solid ${colorNivel(ind.nivel)}44` }}>
-              <div style={{ fontFamily: mono, fontSize: 8.5, letterSpacing: 0.9, color: C.muted,
+              style={{ padding: "3px 8px", minWidth: 52, textAlign: "right",
+                background: "transparent",
+                borderLeft: `1px solid ${C.line}`,
+                /* El estado va en una barrita abajo y no en el borde de una
+                   caja: dice lo mismo, ocupa un píxel y no dibuja un recuadro
+                   más sobre el mapa. */
+                borderBottom: `2px solid ${colorNivel(ind.nivel)}` }}>
+              <div style={{ fontFamily: mono, fontSize: 8, letterSpacing: 1.1, color: C.muted,
                 textTransform: "uppercase", whiteSpace: "nowrap" }}>{ind.ico} {ind.n}</div>
-              <div style={{ fontFamily: mono, fontSize: 12.5, color: colorNivel(ind.nivel),
-                whiteSpace: "nowrap" }}>{ind.v}</div>
+              <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 600,
+                color: colorNivel(ind.nivel), whiteSpace: "nowrap" }}>{ind.v}</div>
             </div>
           ))}
         </div>
@@ -28343,8 +28429,8 @@ export default function PaxMundi() {
           es como se vuelve al mundo sin buscar ningún botón de salida. */}
       <nav style={{ position: "fixed", left: 0, right: 0, bottom: 0, height: ALTO_PIE, zIndex: 6,
         display: "flex", alignItems: "stretch", gap: 2, padding: "5px 8px",
-        background: "linear-gradient(0deg, rgba(8,13,19,0.97), rgba(8,13,19,0.82))",
-        borderTop: `1px solid ${C.line}`, backdropFilter: "blur(3px)", overflowX: "auto" }}>
+        background: C.bg,
+        borderTop: `1px solid ${C.line}`, overflowX: "auto" }}>
         {MANDOS.map((m) => {
           const col = C[m.col] || C.ink;
           const abierto = tab === m.id;
@@ -28355,9 +28441,10 @@ export default function PaxMundi() {
               title={m.n}
               style={{ flex: 1, minWidth: 62, display: "flex", flexDirection: "column",
                 alignItems: "center", justifyContent: "center", gap: 1, cursor: "pointer",
-                borderRadius: 7, position: "relative",
-                background: abierto ? `linear-gradient(0deg, ${col}26, transparent)` : "transparent",
-                border: `1px solid ${abierto ? col : "transparent"}`,
+                position: "relative",
+                background: abierto ? "rgba(255,255,255,0.05)" : "transparent",
+                border: "1px solid transparent",
+                borderBottom: `2px solid ${abierto ? col : "transparent"}`,
                 color: abierto ? col : C.muted, fontFamily: mono, fontSize: 9 }}>
               <span style={{ fontSize: 15, lineHeight: 1 }}>{m.ico}</span>
               <span style={{ letterSpacing: 0.7, textTransform: "uppercase" }}>{m.n}</span>

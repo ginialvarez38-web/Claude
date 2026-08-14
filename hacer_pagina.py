@@ -28,7 +28,7 @@ CABECERA = """<!doctype html>
 <title>Pax Mundi</title>
 <style>
   html, body { margin: 0; padding: 0; background: #0A0F17; color: #EDE3CC; }
-  body { font-family: Georgia, 'Times New Roman', serif; }
+  body { font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif; }
   #cargando { position: fixed; inset: 0; display: flex; align-items: center;
     justify-content: center; flex-direction: column; gap: 14px; text-align: center;
     padding: 24px; }
@@ -40,7 +40,7 @@ CABECERA = """<!doctype html>
     animation: vaiven 1.1s ease-in-out infinite; }
   @keyframes vaiven { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
   #fallo { position: fixed; inset: 0; display: none; padding: 32px;
-    font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.7;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Consolas', 'DejaVu Sans Mono', 'Liberation Mono', monospace; font-size: 13px; line-height: 1.7;
     background: #0A0F17; overflow: auto; white-space: pre-wrap; }
   #fallo b { color: #E05252; }
 </style>

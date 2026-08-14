@@ -976,6 +976,54 @@ todo esto que **no se devuelve nunca**.
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
+## El aspecto: de atlas a consola
+
+La interfaz era un atlas —pergamino, degradados, esquinas redondeadas,
+tipografía con serifas— y eso se ve bien en una captura y trabaja en contra
+mientras se juega. Un juego de estrategia se mira de reojo, mientras se está
+pensando otra cosa, y un degradado tenue no se lee de reojo.
+
+Ahora es lo contrario y a propósito: superficies planas y casi negras, esquinas
+rectas, una sola línea de separación y el color reservado para cuando significa
+algo.
+
+**Lo que cambió, y solo esto:**
+
+- **La paleta.** Fondo negro frío —no negro puro: contra un mapa con tierra y
+  mar, el negro puro da un corte que cansa—. Paneles planos, sin degradado. Una
+  única línea de separación, fina y clara, en lugar de la cálida y gruesa de
+  antes, que con veinte paneles en pantalla pesaba más que el contenido. El
+  bronce sigue siendo el acento, un punto más claro para que no se apague sobre
+  negro.
+- **La tipografía.** Sin serifas para el texto, de ancho fijo para los números,
+  y `tabular-nums` en todo el cuerpo: el uno tiene que ocupar lo mismo que el
+  ocho, o una cifra que cambia al pasar el turno corre la columna entera y
+  comparar dos turnos deja de poder hacerse de un vistazo.
+- **La forma.** Esquinas rectas en todo, menos lo que se pidió redondo del todo
+  —los puntos de estado, las fichas de cara—, que eso no es estilo, es dibujo.
+- **El realce.** Nada se levanta al pasarle el ratón por encima. La elevación es
+  de página web: supone papel y una luz. Acá lo que responde lo dice cambiando
+  de borde y de fondo, y la interfaz no tiembla.
+- **Los indicadores de la cabecera.** Eran ocho cápsulas con borde de color y
+  fondo teñido: ocho recuadros compitiendo entre sí y con el mapa. Ahora el
+  estado va en una barrita de dos píxeles al pie de cada cifra. Dice lo mismo y
+  no dibuja un recuadro más.
+- **El fondo.** Tenía dos resplandores de color y una cuadrícula de papel
+  milimetrado. Detrás de todo esto hay un mapa del mundo: lo que tiene que hacer
+  el fondo es no competir con él.
+
+**Lo que no cambió, y es deliberado:** el mapa —terreno, relieve, ríos,
+ciudades, rótulos— está exactamente como estaba; ningún sistema del juego; y
+ningún control cambió de sitio, de nombre ni de comportamiento. Es un repintado,
+no una mudanza.
+
+Casi todo sale de tres sitios: la paleta `C`, que tiene mil trescientas
+referencias, y las dos familias tipográficas, que tienen cuatrocientas. La forma
+—las esquinas— estaba escrita a mano en doscientos cuarenta estilos en línea y
+se corrige desde la hoja global con un «!important», que es lo único que le gana
+a un estilo en línea; doscientas cuarenta ediciones a mano para el mismo
+resultado serían doscientas cuarenta ocasiones de equivocarse.
+
 ## El mapa suelta el detalle mientras se mueve
 
 Acercarse con el trackpad hacía trabajar al navegador **trece segundos para un
