@@ -1012,6 +1012,38 @@ algo.
   milimetrado. Detrás de todo esto hay un mapa del mundo: lo que tiene que hacer
   el fondo es no competir con él.
 
+**Los iconos, que eran el motivo de que no se viera terminado.** Estaban puestos
+con emoji, y un emoji no es un icono: es un dibujo a color, con su propio
+estilo, su propio grosor de línea y su propia paleta, decidido por quien hizo la
+tipografía del sistema. La barra de abajo tenía cinco emoji a color —🏛 🎓 👑 🏗
+📜— al lado de cinco símbolos monocromos —⚑ ⚜ ◈ ⚗ ⚔—: diez botones y ni dos
+dibujados por la misma mano. Y encima cambian de aparato en aparato, así que el
+mismo botón no se ve igual en Windows que en un teléfono.
+
+Ahora son treinta iconos dibujados acá, todos en una caja de 24, todos de línea,
+todos del mismo grosor, sin relleno y del color que les dé el sitio donde estén,
+así el icono se tiñe con el estado en vez de pelearse con él. Son geométricos a
+propósito: a diecinueve píxeles un dibujo detallado es una mancha, y tres hubo
+que rehacerlos justamente por eso —la moneda salía como un borrón, el yunque
+parecía una lámpara y las espadas cruzadas se leían como una equis; quedaron una
+pila de monedas, un muro de sillería y dos hojas con sus guardas—. Se comprueban
+mirando la barra ampliada al doble: a tamaño real uno cree que se entienden.
+
+Los que van **dentro de una frase** —la crónica, los rótulos de factores— no
+pueden ser dibujos: en una línea de texto no entra un SVG. Ésos pasaron a
+símbolos de una sola tinta del mismo bloque tipográfico que los que ya había
+—♔ ⌂ ✎ ⚒ ⚘ junto a ⚑ ⚜ ⚔ ⚗—, que no es lo mismo que un icono pero al menos pesa
+lo mismo que sus vecinos y no cambia de dibujo según el aparato.
+
+**La portada.** Era una columna de texto centrada sobre negro, sin nada donde
+apoyar la vista. Ahora detrás está el mundo, dibujado con el mismo trazo que usa
+el mapa del juego —así que no hay nada nuevo que cargar—, apagado bajo dos velos:
+uno que lo funde hacia abajo para que el texto se lea sobre algo tranquilo y una
+viñeta que cierra los bordes. El título pasa de liviano y espaciado, con un
+brillo que le recorría por encima sin parar, a pesado y apretado, con el bronce
+puesto en un filo de luz arriba: una palabra entera de color dorado se lee como
+un adorno, un filo se lee como metal.
+
 **Lo que no cambió, y es deliberado:** el mapa —terreno, relieve, ríos,
 ciudades, rótulos— está exactamente como estaba; ningún sistema del juego; y
 ningún control cambió de sitio, de nombre ni de comportamiento. Es un repintado,

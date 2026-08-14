@@ -78,21 +78,21 @@ const STAT_META = {
 };
 
 const ERAS = [
-  { id: "Antigüedad clásica (500 a.C.)", nombre: "Antigüedad", icono: "🏛", color: "#C1793F", detalle: "500 a.C. · imperios, falanges y rutas de bronce", ej: "Roma, Esparta, Persia, Cartago" },
-  { id: "Era medieval (1200 d.C.)", nombre: "Medieval", icono: "🏰", color: "#8B6FC9", detalle: "1200 d.C. · reinos, cruzadas y rutas de seda", ej: "Castilla, Mongolia, Bizancio" },
-  { id: "Era napoleónica (1805)", nombre: "Napoleónica", icono: "🎖", color: "#4A78B5", detalle: "1805 · coaliciones, pólvora y revolución", ej: "Francia, Prusia, España" },
-  { id: "Guerra Fría (1962)", nombre: "Guerra Fría", icono: "🚀", color: "#C94F4F", detalle: "1962 · bloques, espías y carrera espacial", ej: "URSS, EE.UU., Cuba, Yugoslavia" },
-  { id: "Era moderna (2026)", nombre: "Moderna", icono: "🌐", color: "#45C4B0", detalle: "2026 · tecnología, comercio y multipolaridad", ej: "Paraguay, Brasil, India, Polonia" },
+  { id: "Antigüedad clásica (500 a.C.)", nombre: "Antigüedad", icono: "antiguedad", color: "#C1793F", detalle: "500 a.C. · imperios, falanges y rutas de bronce", ej: "Roma, Esparta, Persia, Cartago" },
+  { id: "Era medieval (1200 d.C.)", nombre: "Medieval", icono: "medieval", color: "#8B6FC9", detalle: "1200 d.C. · reinos, cruzadas y rutas de seda", ej: "Castilla, Mongolia, Bizancio" },
+  { id: "Era napoleónica (1805)", nombre: "Napoleónica", icono: "napoleonica", color: "#4A78B5", detalle: "1805 · coaliciones, pólvora y revolución", ej: "Francia, Prusia, España" },
+  { id: "Guerra Fría (1962)", nombre: "Guerra Fría", icono: "fria", color: "#C94F4F", detalle: "1962 · bloques, espías y carrera espacial", ej: "URSS, EE.UU., Cuba, Yugoslavia" },
+  { id: "Era moderna (2026)", nombre: "Moderna", icono: "moderna", color: "#45C4B0", detalle: "2026 · tecnología, comercio y multipolaridad", ej: "Paraguay, Brasil, India, Polonia" },
 ];
 
 const INSTITUCIONES = [
-  { id: "escuela", nombre: "Escuela", icono: "📖", costo: 30, pi: 1, mant: 2, req: null, desc: "Alfabetiza al pueblo" },
-  { id: "colegio", nombre: "Colegio", icono: "🏫", costo: 50, pi: 2, mant: 3, req: "escuela", desc: "Forma a la juventud" },
-  { id: "instituto", nombre: "Instituto", icono: "📐", costo: 80, pi: 3, mant: 5, req: "colegio", desc: "Saberes especializados" },
-  { id: "centro", nombre: "Centro de estudios", icono: "🔬", costo: 120, pi: 4, mant: 7, req: "instituto", desc: "Investigación aplicada" },
-  { id: "facultad", nombre: "Facultad", icono: "🏛", costo: 170, pi: 6, mant: 10, req: "centro", desc: "Educación superior" },
-  { id: "academia", nombre: "Academia", icono: "🎓", costo: 230, pi: 8, mant: 14, req: "facultad", desc: "Élite del conocimiento" },
-  { id: "universidad", nombre: "Universidad", icono: "⚜", costo: 300, pi: 12, mant: 20, req: "academia", desc: "Cumbre del saber" },
+  { id: "escuela", nombre: "Escuela", icono: "libro", costo: 30, pi: 1, mant: 2, req: null, desc: "Alfabetiza al pueblo" },
+  { id: "colegio", nombre: "Colegio", icono: "escuela", costo: 50, pi: 2, mant: 3, req: "escuela", desc: "Forma a la juventud" },
+  { id: "instituto", nombre: "Instituto", icono: "compas", costo: 80, pi: 3, mant: 5, req: "colegio", desc: "Saberes especializados" },
+  { id: "centro", nombre: "Centro de estudios", icono: "micro", costo: 120, pi: 4, mant: 7, req: "instituto", desc: "Investigación aplicada" },
+  { id: "facultad", nombre: "Facultad", icono: "templo", costo: 170, pi: 6, mant: 10, req: "centro", desc: "Educación superior" },
+  { id: "academia", nombre: "Academia", icono: "birrete", costo: 230, pi: 8, mant: 14, req: "facultad", desc: "Élite del conocimiento" },
+  { id: "universidad", nombre: "Universidad", icono: "sabio", costo: 300, pi: 12, mant: 20, req: "academia", desc: "Cumbre del saber" },
 ];
 // ═══ POBLACIÓN: la trampa malthusiana ═══════════════════════
 // El techo es cuánta gente puede alimentar la tierra con lo que sabés hacerle.
@@ -6989,7 +6989,7 @@ const ROTULO_TIT = { mar: "AGUAS", río: "RÍO", lago: "LAGO", sierra: "CORDILLE
 const ROTULO_COL = { mar: "#7FC0DE", río: "#5FB0D6", lago: "#5FB0D6", sierra: "#C6BC9A",
                      pico: "#E4DCC0", tierra: "#C9A227" };
 const BOTONES_MAPA = [["+", "acercar"], ["−", "alejar"], ["⌖", "encuadrar tu reino"],
-                      ["🌐", "ver el mundo entero"], ["▤", "leyenda y capas"]];
+                      ["⊕", "ver el mundo entero"], ["▤", "leyenda y capas"]];
 // Cuánto mundo se dibuja de más a cada lado del hueco visible. Es el colchón
 // del arrastre: mientras el tirón quepa en él, el mapa se corre entero con un
 // «transform» —eso lo hace la tarjeta gráfica y no cuesta nada— y no se
@@ -15315,10 +15315,10 @@ function mantenimientoTotal(edu) {
 }
 
 const CATEGORIAS = [
-  { id: "investigacion", label: "Investigación", icono: "🔬", color: "#45C4B0" },
+  { id: "investigacion", label: "Investigación", icono: "⚗", color: "#45C4B0" },
   { id: "ejercito", label: "Ejército", icono: "⚔", color: "#E05252" },
-  { id: "infraestructura", label: "Infraestructura", icono: "🏗", color: "#E3B341" },
-  { id: "cultura", label: "Cultura", icono: "🎭", color: "#B06FD8" },
+  { id: "infraestructura", label: "Infraestructura", icono: "⚒", color: "#E3B341" },
+  { id: "cultura", label: "Cultura", icono: "☙", color: "#B06FD8" },
   { id: "economia", label: "Economía", icono: "◆", color: "#57B26B" },
 ];
 
@@ -15341,7 +15341,7 @@ const DOMINIOS = {
   tierra_espacio: { n: "Tierra y espacio", ico: "◐", col: "#4FA8A0" },
   sociales: { n: "Sociales", ico: "⚖", col: "#D4756B" },
   organizacion: { n: "Organización", ico: "⌂", col: "#9B8FC7" },
-  agrarias: { n: "Agrarias", ico: "🌾", col: "#A8B85C" },
+  agrarias: { n: "Agrarias", ico: "⚘", col: "#A8B85C" },
 };
 const RAMAS = {
   "medicina.teoria_enfermedad": { n: "Teoría de la enfermedad", stat: "estabilidad",
@@ -15680,10 +15680,10 @@ function factoresInsight(n, ciencia, edu, anio, foco) {
   const afines = sedes.filter((x) => x.dom === n.dom);
   const grales = sedes.filter((x) => !x.dom);
   const afinAct = afines.find((x) => x.inv && x.inv.estado === "activa") || afines[0];
-  if (afinAct) F.push({ t: `🏛 ${afinAct.nombre || "sede afín"}`, f: 1.3 * (afines.length > 1 ? 1.1 : 1), b: true });
-  else if (grales.length) F.push({ t: `🏛 ${grales.length} sede${grales.length > 1 ? "s" : ""} general${grales.length > 1 ? "es" : ""}`, f: 1 + 0.12 * Math.min(3, grales.length), b: true });
+  if (afinAct) F.push({ t: `⌂ ${afinAct.nombre || "sede afín"}`, f: 1.3 * (afines.length > 1 ? 1.1 : 1), b: true });
+  else if (grales.length) F.push({ t: `⌂ ${grales.length} sede${grales.length > 1 ? "s" : ""} general${grales.length > 1 ? "es" : ""}`, f: 1 + 0.12 * Math.min(3, grales.length), b: true });
   const dirAfin = afines.find((x) => x.director && x.tipo !== "escuela" && x.tipo !== "colegio");
-  if (dirAfin) F.push({ t: `🎓 ${dirAfin.director}`, f: 1.35, b: true });
+  if (dirAfin) F.push({ t: `✎ ${dirAfin.director}`, f: 1.35, b: true });
   if (foco === n.rama) F.push({ t: "◉ tu foco", f: 2.2, b: true });
   if (ciencia.crisis && ciencia.crisis.length) {
     if (n.bloq.some((b) => ciencia.crisis.includes(b))) F.push({ t: "⟡ derriba un marco en crisis", f: 3.0, b: true });
@@ -15918,11 +15918,11 @@ const PROBLEMAS_MED = [
 ];
 
 const GOBIERNOS = [
-  { id: "Monarquía", icono: "👑" },
-  { id: "República", icono: "🏛" },
-  { id: "Imperio", icono: "🦅" },
-  { id: "Teocracia", icono: "⛪" },
-  { id: "Democracia", icono: "🗳" },
+  { id: "Monarquía", icono: "corona" },
+  { id: "República", icono: "templo" },
+  { id: "Imperio", icono: "aguila" },
+  { id: "Teocracia", icono: "iglesia" },
+  { id: "Democracia", icono: "urna" },
 ];
 
 const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
@@ -19106,13 +19106,13 @@ const INFORMES = [
       return { donde: { nombre: (c.provCapital || {}).nombre || "la capital" },
                n: Math.round((h.parte || 0) * 100), cual: h.cambio ? "cambio" : "sigue" }; },
     porCual: {
-      cambio: ["🗳 Se vota, y cambia el gobierno: los {n} de cada cien no le alcanzan al que estaba. En {donde} lo celebran unos y lo entierran otros",
-        "🗳 Gana la oposición con {n} de cada cien votos. (Hay quien dice que es el fin de algo|Hay quien dice que no cambiará nada|Los dos tienen parte de razón)",
-        "🗳 El recuento da la vuelta al gobierno: {n} por ciento. (Se traspasa el poder sin sangre, que es lo nuevo|Nadie recuerda que esto se hiciera así antes)"],
-      sigue: ["🗳 Se vota y gana el que estaba, con {n} de cada cien. (Los mismos, cuatro años más|Cambian las caras y no el rumbo)",
-        "🗳 Elecciones: {n} por ciento para el gobierno. En {donde} el resultado se sabía y aun así se hizo cola",
-        "🗳 Se renueva el gobierno en las urnas con {n} de cada cien votos[, y la oposición dice que hubo trampa]"] },
-    fr: ["🗳 Se celebran elecciones y el gobierno saca {n} de cada cien votos"] },
+      cambio: ["▤ Se vota, y cambia el gobierno: los {n} de cada cien no le alcanzan al que estaba. En {donde} lo celebran unos y lo entierran otros",
+        "▤ Gana la oposición con {n} de cada cien votos. (Hay quien dice que es el fin de algo|Hay quien dice que no cambiará nada|Los dos tienen parte de razón)",
+        "▤ El recuento da la vuelta al gobierno: {n} por ciento. (Se traspasa el poder sin sangre, que es lo nuevo|Nadie recuerda que esto se hiciera así antes)"],
+      sigue: ["▤ Se vota y gana el que estaba, con {n} de cada cien. (Los mismos, cuatro años más|Cambian las caras y no el rumbo)",
+        "▤ Elecciones: {n} por ciento para el gobierno. En {donde} el resultado se sabía y aun así se hizo cola",
+        "▤ Se renueva el gobierno en las urnas con {n} de cada cien votos[, y la oposición dice que hubo trampa]"] },
+    fr: ["▤ Se celebran elecciones y el gobierno saca {n} de cada cien votos"] },
 
   // ——— la calle ———
   // Se cuenta lo que se vio, no lo que significó: quien escribe la crónica está
@@ -19777,19 +19777,93 @@ const fmtMesAnio = (a, d) => `${MESES[mesDe(d)]} de ${fmtAnio(a)}`;
 // a la izquierda lo que reclama atención y a la derecha lo que se está
 // mirando—. Nada de esto abre una escena nueva ni saca al jugador del mundo.
 
+// ═══ LOS ICONOS ═════════════════════════════════════════════
+//
+// Estaban puestos con emoji, y ése era el motivo por el que el juego no se veía
+// terminado. Un emoji no es un icono: es un dibujo a color, con su propio
+// estilo, su propio grosor de línea y su propia paleta, decidido por quien hizo
+// la tipografía del sistema. Poner cinco al lado de cinco símbolos monocromos
+// —🏛 🎓 👑 junto a ⚑ ⚜ ⚔— da una barra donde no hay dos cosas dibujadas por la
+// misma mano. Y además cambian de un aparato a otro: el mismo botón no se ve
+// igual en Windows que en un teléfono.
+//
+// Éstos son de una sola mano: todos en una caja de 24, todos de línea, todos
+// del mismo grosor, todos sin relleno y todos del color que les dé el sitio
+// donde estén —`currentColor`—, así el icono se tiñe con el estado en vez de
+// pelearse con él. Son geométricos a propósito: a dieciséis píxeles, un dibujo
+// detallado es una mancha.
+const TRAZOS = {
+  // ⚑ el consejo: un estandarte
+  bandera: "M6 3v18M6 4h12l-2.5 4L18 12H6",
+  // la crónica: un rollo escrito
+  rollo: "M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zM9 8h6M9 12h6M9 16h3",
+  // el gobierno: una corona
+  corona: "M3 8l3.5 3L12 5l5.5 6L21 8l-2 10H5zM5 18h14",
+  // la economía: una moneda
+  moneda: "M4 6.5c0-1.6 3.6-2.9 8-2.9s8 1.3 8 2.9-3.6 2.9-8 2.9-8-1.3-8-2.9M4 6.5v5.4c0 1.6 3.6 2.9 8 2.9s8-1.3 8-2.9V6.5M4 11.9v5.4c0 1.6 3.6 2.9 8 2.9s8-1.3 8-2.9v-5.4",
+  // las tierras: un mapa plegado
+  mapa: "M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15",
+  // las obras: un martillo y un yunque
+  obra: "M3 5h18v14H3zM3 9.7h18M3 14.3h18M9.5 5v4.7M15.5 5v4.7M6.5 9.7v4.6M12.5 9.7v4.6M18.5 9.7v4.6M9.5 14.3V19M15.5 14.3V19",
+  // las ciencias: un matraz
+  matraz: "M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M7.5 15h9",
+  // la educación: un birrete
+  birrete: "M2 8l10-4 10 4-10 4zM6 10.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-5.5",
+  // las sedes: un frontón con columnas
+  templo: "M3 9l9-5 9 5H3zM5 9v9M9.5 9v9M14.5 9v9M19 9v9M3 21h18",
+  // el ejército: dos espadas cruzadas
+  espadas: "M4 3l11.5 11.5 2 2M20 3L8.5 14.5l-2 2M13 18.5l4.5-4.5M11 18.5L6.5 14",
+  // las épocas
+  antiguedad: "M3 9l9-5 9 5H3zM6 9v9M12 9v9M18 9v9M3 21h18M4 12h16",
+  medieval: "M4 21V8l3 2V6h3v4h4V6h3v4l3-2v13zM10 21v-5h4v5",
+  napoleonica: "M12 15a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9M9 2h6l-1 9h-4zM9.5 17.5l2.5 2 2.5-2",
+  fria: "M12 2c3 3 4.5 6.5 4.5 10.5L12 17l-4.5-4.5C7.5 8.5 9 5 12 2M12 8.5a1.6 1.6 0 1 0 0 .01M8 15l-2.5 5 4-1.5M16 15l2.5 5-4-1.5",
+  moderna: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M3.5 9h17M3.5 15h17M12 3c-2.5 2.6-3.8 5.7-3.8 9s1.3 6.4 3.8 9c2.5-2.6 3.8-5.7 3.8-9S14.5 5.6 12 3",
+  // formas de gobierno
+  aguila: "M12 6v13M12 8l-4-2-5 1 4 3-3 1 4 2M12 8l4-2 5 1-4 3 3 1-4 2M9.5 19h5",
+  iglesia: "M12 2v5M10 4h4M6 21V10l6-4 6 4v11zM10 21v-5h4v5",
+  urna: "M4 10h16v11H4zM10.5 14.5h3M8 10V6.5l8-2.5V10",
+  // saberes y sedes
+  libro: "M4 4.5h6a2.5 2.5 0 0 1 2 2.5 2.5 2.5 0 0 1 2-2.5h6v14h-6a2.5 2.5 0 0 0-2 2 2.5 2.5 0 0 0-2-2H4zM12 7v13",
+  escuela: "M3 21V9l9-6 9 6v12zM9 21v-6h6v6M9.5 11h5",
+  compas: "M12 3a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6M11 6.4L5.5 21M13 6.4L18.5 21M8.6 15.5h6.8",
+  micro: "M9 20h9M11 20l-1.5-5M14 4l3.5 2-4 7-3.5-2zM9 11l-2.5 4.5a3 3 0 0 0 5 3",
+  sabio: "M12 3l2.5 4 4.5.7-3.2 3.2.8 4.5-4.6-2.3-4.6 2.3.8-4.5L5 7.7 9.5 7zM7 21h10",
+  espiga: "M12 21V8M12 8c0-2 1.5-3.5 3.5-4 0 2.2-1.3 3.7-3.5 4M12 8c0-2-1.5-3.5-3.5-4 0 2.2 1.3 3.7 3.5 4M12 13c0-2 1.5-3.5 3.5-4 0 2.2-1.3 3.7-3.5 4M12 13c0-2-1.5-3.5-3.5-4 0 2.2 1.3 3.7 3.5 4",
+  via: "M6 3v18M18 3v18M3 8h18M3 13h18M3 18h18",
+  vela: "M12 3s2.5 2.4 2.5 4a2.5 2.5 0 0 1-5 0c0-1.6 2.5-4 2.5-4M9 11h6v10H9zM7 21h10",
+  persona: "M12 4a3.6 3.6 0 1 0 0 7.2A3.6 3.6 0 0 0 12 4M4.5 21c0-4 3.4-6.2 7.5-6.2s7.5 2.2 7.5 6.2",
+  mascara: "M4 5h16v7a8 8 0 0 1-16 0zM8.5 9.5h.01M15.5 9.5h.01M9 15c1.8 1.3 4.2 1.3 6 0",
+  escudo: "M12 3l8 3v6c0 4.6-3.2 7.7-8 9-4.8-1.3-8-4.4-8-9V6z",
+  disco: "M4 4h13l3 3v13H4zM8 4v5h7V4M7 13h10v7H7",
+};
+// El icono en sí. Sin relleno y con las puntas redondeadas, que es lo que hace
+// que un juego de iconos parezca uno y no diez.
+function Ico({ n, t = 18, g = 1.6, style }) {
+  const d = TRAZOS[n];
+  if (!d) return null;
+  return (
+    <svg width={t} height={t} viewBox="0 0 24 24" fill="none" aria-hidden="true"
+      style={{ display: "block", flex: "0 0 auto", ...style }}>
+      <path d={d} stroke="currentColor" strokeWidth={g}
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // Los ministerios de la barra de abajo. Cada uno despliega un panel lateral;
 // ninguno abre una pantalla.
 const MANDOS = [
-  { id: "consejo", n: "Consejo", ico: "⚑", col: "gold" },
-  { id: "cronica", n: "Crónica", ico: "📜", col: "brass" },
-  { id: "gob", n: "Gobierno", ico: "👑", col: "red" },
-  { id: "eco", n: "Economía", ico: "⚜", col: "gold" },
-  { id: "prov", n: "Tierras", ico: "◈", col: "green" },
-  { id: "proy", n: "Obras", ico: "🏗", col: "gold" },
-  { id: "ciencia", n: "Ciencias", ico: "⚗", col: "cyan" },
-  { id: "edu", n: "Educación", ico: "🎓", col: "violet" },
-  { id: "sedes", n: "Sedes", ico: "🏛", col: "blue" },
-  { id: "ejercito", n: "Ejército", ico: "⚔", col: "red" },
+  { id: "consejo", n: "Consejo", ico: "bandera", col: "gold" },
+  { id: "cronica", n: "Crónica", ico: "rollo", col: "brass" },
+  { id: "gob", n: "Gobierno", ico: "corona", col: "red" },
+  { id: "eco", n: "Economía", ico: "moneda", col: "gold" },
+  { id: "prov", n: "Tierras", ico: "mapa", col: "green" },
+  { id: "proy", n: "Obras", ico: "obra", col: "gold" },
+  { id: "ciencia", n: "Ciencias", ico: "matraz", col: "cyan" },
+  { id: "edu", n: "Educación", ico: "birrete", col: "violet" },
+  { id: "sedes", n: "Sedes", ico: "templo", col: "blue" },
+  { id: "ejercito", n: "Ejército", ico: "espadas", col: "red" },
 ];
 const MANDO_IDX = Object.fromEntries(MANDOS.map((x) => [x.id, x]));
 // Las dos franjas fijas. Todo lo demás se ajusta a ellas, así que el mapa sabe
@@ -20123,14 +20197,14 @@ const FACTORES = {
 };
 
 const OBRAS_SITIO = [
-  { id: "caminos", n: "abrir caminos", ico: "🛤", mando: "proy",
+  { id: "caminos", n: "abrir caminos", ico: "≡", mando: "proy",
     pesa: { aislada: 1, brazos: 0.55, mercado: 0.35, seguridad: 0.25 },
     dice: "un camino vale donde todavía no llega ninguno" },
   { id: "puerto", n: "armar un puerto", ico: "⚓", mando: "proy",
     exige: (p) => (p.costera || p.rioNav ? null : "no toca el agua"),
     pesa: { mercado: 1, transporte: 0.6, brazos: 0.5, seguridad: 0.3 },
     dice: "hace falta agua que llegue al mar o que la barca suba" },
-  { id: "regadio", n: "traer el agua al campo", ico: "🌾", mando: "proy",
+  { id: "regadio", n: "traer el agua al campo", ico: "⚘", mando: "proy",
     pesa: { tierra: 1, agua: 0.9, brazos: 0.45 },
     dice: "el regadío se pone donde hay tierra buena y con qué regarla" },
   { id: "mercado", n: "abrir un mercado", ico: "⚖", mando: "proy",
@@ -20139,16 +20213,16 @@ const OBRAS_SITIO = [
   { id: "hospital", n: "levantar un hospital", ico: "✚", mando: "proy",
     pesa: { aguamala: 1, brazos: 0.8, mercado: 0.2 },
     dice: "un hospital hace más bien donde el agua está peor" },
-  { id: "templo", n: "levantar un templo", ico: "⛪", mando: "proy",
+  { id: "templo", n: "levantar un templo", ico: "✝", mando: "proy",
     pesa: { desafecto: 0.9, brazos: 0.7, seguridad: 0.2 },
     dice: "el templo calma, y calma donde hace falta calmar" },
-  { id: "fortificar", n: "fortificar", ico: "🛡", mando: "ejercito",
+  { id: "fortificar", n: "fortificar", ico: "▣", mando: "ejercito",
     pesa: { frontera: 1, brazos: 0.5, transporte: 0.3 },
     dice: "se fortifica la raya, no el centro" },
-  { id: "sede", n: "fundar casa de estudios", ico: "🏛", mando: "sedes",
+  { id: "sede", n: "fundar casa de estudios", ico: "⌂", mando: "sedes",
     pesa: { letras: 1, mercado: 0.6, brazos: 0.5, seguridad: 0.3 },
     dice: "una casa de estudios cuaja donde ya hay quien lea" },
-  { id: "factoria", n: "abrir una industria", ico: "🏭", mando: "eco",
+  { id: "factoria", n: "abrir una industria", ico: "⚙", mando: "eco",
     pesa: { recursos: 1, brazos: 0.8, transporte: 0.7, mercado: 0.4 },
     dice: "una industria quiere materia, brazos y por dónde sacar lo que hace" },
 ];
@@ -20315,11 +20389,11 @@ const ASESORES = {
   eco:      { n: "el contador mayor",     ico: "⚜", de: "la hacienda" },
   prov:     { n: "el veedor de tierras",  ico: "◈", de: "las comarcas" },
   ciencia:  { n: "el prefecto de estudios", ico: "⚗", de: "el saber" },
-  edu:      { n: "el maestro mayor",      ico: "🎓", de: "las escuelas" },
+  edu:      { n: "el maestro mayor",      ico: "✎", de: "las escuelas" },
   ejercito: { n: "el maestre de campo",   ico: "⚔", de: "la tropa" },
-  gob:      { n: "el canciller",          ico: "👑", de: "el gobierno" },
-  proy:     { n: "el maestro de obras",   ico: "🏗", de: "las obras" },
-  sedes:    { n: "el rector",             ico: "🏛", de: "los estudios" },
+  gob:      { n: "el canciller",          ico: "♔", de: "el gobierno" },
+  proy:     { n: "el maestro de obras",   ico: "⚒", de: "las obras" },
+  sedes:    { n: "el rector",             ico: "⌂", de: "los estudios" },
 };
 
 // Redondeos que se leen. Un asesor que dice «faltan 37,4183 al año» no está
@@ -20644,7 +20718,7 @@ const VEDADO = [
 const SECRETARIOS = [
   { id: "eco", n: "el escribano de la hacienda", ico: "✒", de: "las cuentas" },
   { id: "ejercito", n: "el veedor de las tropas", ico: "⚔", de: "la leva y la paga" },
-  { id: "sedes", n: "el bedel mayor", ico: "🏛", de: "las casas de estudios" },
+  { id: "sedes", n: "el bedel mayor", ico: "⌂", de: "las casas de estudios" },
   { id: "ciencia", n: "el amanuense de los sabios", ico: "⚗", de: "el rumbo del saber" },
 ];
 const SECRE_IDX = Object.fromEntries(SECRETARIOS.map((x) => [x.id, x]));
@@ -20980,7 +21054,7 @@ function mudarCapital(s, id) {
       provincias: s.provincias.map((q) => q.id === id
         ? { ...q, capital: true, lealtad: acotar((q.lealtad ?? 60) + 6, 0, 100) }
         : q.capital ? { ...q, capital: false, lealtad: acotar((q.lealtad ?? 60) - 8, 0, 100) } : q) },
-    texto: `👑 La corte se muda a ${p.nombre}${vieja ? `, y ${vieja.nombre} deja de ser cabeza del reino` : ""}`
+    texto: `♔ La corte se muda a ${p.nombre}${vieja ? `, y ${vieja.nombre} deja de ser cabeza del reino` : ""}`
       + ` (⚜ ${COSTE_CAPITAL}, Estabilidad −3). Los que se quedan lo dirán durante una generación.` };
 }
 
@@ -21047,13 +21121,13 @@ const ACCIONES = [
   { id: "administrar", n: "administrarla", ico: "▤", col: "green",
     puede: (p) => !p.ajena,
     hace: (p) => ({ tipo: "ir", mando: "prov", id: p.id }) },
-  { id: "camino", n: "abrir camino", ico: "🛤", col: "brass",
+  { id: "camino", n: "abrir camino", ico: "≡", col: "brass",
     // solo si hay escalón por subir y con qué pagarlo
     puede: (p, s, x) => { if (p.ajena || p.ocupada) return false;
       const c = costeCamino(p, s); return !!c && x.oro >= c.oro; },
     rotulo: (p, s) => { const c = costeCamino(p, s); return `abrir ${c.n} · ⚜ ${c.oro}`; },
     hace: (p) => ({ tipo: "obra", obra: "camino", id: p.id }) },
-  { id: "capital", n: "hacer capital", ico: "👑", col: "gold",
+  { id: "capital", n: "hacer capital", ico: "♔", col: "gold",
     puede: (p, s, x) => !p.ajena && !p.capital && !p.ocupada && x.oro >= COSTE_CAPITAL,
     rotulo: () => `hacer capital · ⚜ ${COSTE_CAPITAL}`,
     hace: (p) => ({ tipo: "obra", obra: "capital", id: p.id }) },
@@ -21210,10 +21284,10 @@ function avisosDelReino(s, x) {
   // lo bueno también es noticia: si solo se avisa de lo malo, el panel es una
   // lista de reproches y el jugador deja de mirarlo
   if (s.gobierno && s.gobierno.votado === anio)
-    pon("urnas", "chance", "🗳", "Hubo elecciones",
+    pon("urnas", "chance", "▤", "Hubo elecciones",
       `Gobierna ${(PARTIDO_IDX[s.gobierno.partido] || { n: "el que ganó" }).n}.`, "gob");
   const obras = (s.proyectos || []).filter((p) => p.estado === "completado" && p.fin === anio);
-  if (obras.length) pon("obra", "bien", "🏗",
+  if (obras.length) pon("obra", "bien", "⚒",
     obras.length > 1 ? `${obras.length} obras terminadas` : `${obras[0].nombre}, terminado`,
     "Ya rinde lo que prometía.", "proy");
   const sinRumbo = !(s.ciencia || {}).foco && (x.piT || 0) > 2;
@@ -23256,23 +23330,42 @@ export default function PaxMundi() {
   if (fase === "setup" || fase === "cargando") {
     const eraSel = ERAS.find((e) => e.id === era);
     return (
-      <div style={{ ...FONDO, fontFamily: serif, display: "flex", flexDirection: "column", alignItems: "center", padding: "44px 16px" }}>
+      <div style={{ ...FONDO, fontFamily: serif, display: "flex", flexDirection: "column",
+        alignItems: "center", padding: "44px 16px", position: "relative", overflow: "hidden" }}>
         <GlobalStyle />
-        <div className="pm-fade" style={{ maxWidth: 580, width: "100%" }}>
+        <div aria-hidden="true" style={{ position: "fixed", inset: 0, zIndex: 0,
+          pointerEvents: "none", overflow: "hidden" }}>
+          <svg viewBox="10 8 340 168" preserveAspectRatio="xMidYMid slice"
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+            <path d={MUNDO_D} fill="#33465A" opacity="0.62" />
+            <path d={MUNDO_D} fill="none" stroke="#7CA0BC" strokeWidth="0.3" opacity="0.8" />
+          </svg>
+          {/* Dos velos encima: uno que apaga el mundo hacia abajo, para que el
+              texto se lea sobre algo tranquilo, y una viñeta que cierra los
+              bordes. Sin ellos el fondo compite con la portada en vez de
+              sostenerla. */}
+          <div style={{ position: "absolute", inset: 0,
+            background: `linear-gradient(180deg, ${C.bg}66 0%, ${C.bg}CC 38%, ${C.bg}F5 62%, ${C.bg} 80%)` }} />
+          <div style={{ position: "absolute", inset: 0,
+            background: `radial-gradient(ellipse 78% 62% at 50% 8%, transparent 30%, ${C.bg} 82%)` }} />
+        </div>
+        <div className="pm-fade" style={{ maxWidth: 580, width: "100%", position: "relative", zIndex: 1 }}>
           <div style={{ textAlign: "center", marginBottom: 34 }}>
             <div style={{ fontSize: 11, letterSpacing: 4, textTransform: "uppercase", color: C.brass, fontFamily: mono }}>
               ✦ atlas de naciones · motor de historia viva ✦
             </div>
             <h1 style={{
-              fontSize: 56, fontWeight: 400, margin: "12px 0 4px", letterSpacing: 3,
-              background: `linear-gradient(90deg, ${C.brass}, #F3E5B8, ${C.brass})`,
-              backgroundSize: "200% auto",
+              fontSize: 62, fontWeight: 800, margin: "10px 0 6px", letterSpacing: -1.2,
+              lineHeight: 1, color: C.ink,
+              /* El bronce en un filo de luz arriba, no en toda la letra: una
+                 palabra entera de color dorado se lee como un adorno; un filo
+                 se lee como metal. */
+              background: `linear-gradient(175deg, #FFF3D4 0%, ${C.ink} 34%, #9AA6B4 100%)`,
               WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-              animation: "shimmer 5s linear infinite",
             }}>
               PAX MUNDI
             </h1>
-            <div style={{ width: 90, height: 2, background: `linear-gradient(90deg, transparent, ${C.brass}, transparent)`, margin: "0 auto 12px" }} />
+            <div style={{ width: 64, height: 3, background: C.brass, margin: "0 auto 14px" }} />
             <p style={{ color: C.muted, fontSize: 14, margin: 0, lineHeight: 1.6 }}>
               Gobernás una nación. Decretá proyectos nacionales, fundá universidades, atraé a los grandes sabios de la historia y navegá un espacio epistémico donde la ciencia emerge en vez de comprarse.
             </p>
@@ -23322,7 +23415,7 @@ export default function PaxMundi() {
                 ? "Se puede guardar mientras esta pestaña siga abierta, pero al cerrarla se pierde."
                 : "No hay dónde: al cerrar, la partida se pierde entera."}
               {" "}Se puede jugar igual, pero al terminar bajate la partida a un
-              archivo desde <b>💾 PARTIDA</b>, arriba a la derecha, y traela de
+              archivo desde <b>▤ PARTIDA</b>, arriba a la derecha, y traela de
               vuelta la próxima vez.
               {donde.fallos.length > 0 && (
                 <div style={{ fontFamily: mono, fontSize: 10.5, color: C.muted, marginTop: 7 }}>
@@ -23339,16 +23432,25 @@ export default function PaxMundi() {
                 style={{
                   textAlign: "left", padding: "13px 15px", cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 13,
-                  background: era === e.id ? `linear-gradient(90deg, ${e.color}26, transparent)` : C.panel,
-                  border: `1px solid ${era === e.id ? e.color : C.line}`,
-                  borderLeft: `4px solid ${era === e.id ? e.color : "rgba(255,255,255,0.1)"}`,
-                  color: C.ink, borderRadius: 8, fontFamily: serif,
-                  boxShadow: era === e.id ? `0 0 16px ${e.color}33` : "0 2px 8px rgba(0,0,0,0.3)",
+                  background: era === e.id ? "rgba(255,255,255,0.055)" : C.panel,
+                  border: `1px solid ${era === e.id ? `${e.color}88` : C.line}`,
+                  borderLeft: `3px solid ${era === e.id ? e.color : "transparent"}`,
+                  color: C.ink, fontFamily: serif,
                 }}>
-                <span style={{ fontSize: 26 }}>{e.icono}</span>
+                {/* El icono va en su propio recuadro: le da al botón un punto
+                    de apoyo a la izquierda y hace que las cinco tarjetas se
+                    lean como una lista y no como cinco cosas sueltas. */}
+                <span style={{ width: 42, height: 42, display: "grid", placeItems: "center",
+                  flex: "0 0 auto", color: era === e.id ? e.color : C.muted,
+                  background: era === e.id ? `${e.color}1F` : "rgba(255,255,255,0.04)",
+                  border: `1px solid ${era === e.id ? `${e.color}66` : "transparent"}` }}>
+                  <Ico n={e.icono} t={22} g={1.5} />
+                </span>
                 <span>
-                  <span style={{ fontSize: 16, display: "block", color: era === e.id ? e.color : C.ink }}>{e.nombre}</span>
-                  <span style={{ fontSize: 12, color: C.muted, display: "block", marginTop: 2 }}>{e.detalle}</span>
+                  <span style={{ fontSize: 15.5, display: "block", fontWeight: 600,
+                    letterSpacing: 0.2, color: era === e.id ? e.color : C.ink }}>{e.nombre}</span>
+                  <span style={{ fontSize: 12, color: C.muted, display: "block", marginTop: 3,
+                    lineHeight: 1.4 }}>{e.detalle}</span>
                 </span>
               </button>
             ))}
@@ -23432,7 +23534,8 @@ export default function PaxMundi() {
                   borderRadius: 22, fontFamily: serif,
                   boxShadow: formaGob === g.id ? "0 0 12px rgba(212,175,55,0.25)" : "none",
                 }}>
-                {g.icono} {g.id}
+                <Ico n={g.icono} t={17} g={1.6} style={{ margin: "0 auto 5px" }} />
+                {g.id}
               </button>
             ))}
           </div>
@@ -23851,7 +23954,10 @@ export default function PaxMundi() {
             color: donde.dura ? C.muted : C.red,
             fontFamily: mono, fontSize: 9.5, letterSpacing: 0.8, order: estrecho ? 1 : 0 }}>
           {/* En el teléfono, solo el símbolo: la palabra se comía el buscador. */}
-          {estrecho ? (donde.dura ? "💾" : "⚠") : (donde.dura ? "💾 PARTIDA" : "⚠ NO SE GUARDA")}
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            {donde.dura ? <Ico n="disco" t={13} g={1.7} /> : <span>⚠</span>}
+            {!estrecho && (donde.dura ? "PARTIDA" : "NO SE GUARDA")}
+          </span>
         </button>
       </header>
 
@@ -24129,12 +24235,16 @@ export default function PaxMundi() {
       {tab && MANDO_IDX[tab] && !compara && (
       <aside className="pm-fade" style={{ ...hoja("min(430px, 44vw)"),
         zIndex: 5, overflowY: "auto", overflowX: "hidden",
-        background: "rgba(12,18,26,0.955)" }}>
+        background: "rgba(13,16,21,0.965)",
+        borderLeft: `1px solid ${C.line}`,
+        boxShadow: "-16px 0 34px rgba(0,0,0,0.5)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
           position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
           background: "rgba(10,16,23,0.99)" }}>
-          <span style={{ color: C[MANDO_IDX[tab].col] }}>{MANDO_IDX[tab].ico}</span>
-          <span style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: 1.8,
+          <span style={{ color: C[MANDO_IDX[tab].col], display: "flex" }}>
+            <Ico n={MANDO_IDX[tab].ico} t={17} g={1.7} />
+          </span>
+          <span style={{ fontFamily: serif, fontSize: 12.5, letterSpacing: 1.6, fontWeight: 600,
             textTransform: "uppercase", color: C[MANDO_IDX[tab].col] }}>{MANDO_IDX[tab].n}</span>
           <button onClick={() => setTab(null)} title="cerrar y ver el mundo (Esc)"
             style={{ marginLeft: "auto", padding: "2px 8px", borderRadius: 5, cursor: "pointer",
@@ -24866,7 +24976,7 @@ export default function PaxMundi() {
                         const rs = Object.entries(porRama).sort((a2, b2) => b2[1] - a2[1]);
                         const mayor = atend[0];
                         return (
-                          <Seccion ico="📖" txt="Labor de este año" col={C.cyan}>
+                          <Seccion ico="❑" txt="Labor de este año" col={C.cyan}>
                             {narrado && (
                               <div style={{ padding: "10px 12px", marginBottom: 6, borderRadius: 7,
                                 background: `linear-gradient(135deg, ${C.cyan}12, transparent)`,
@@ -24937,7 +25047,7 @@ export default function PaxMundi() {
                         )}
                       </Seccion>
 
-                      <Seccion ico="📜" txt="Memoria del saber" col={C.green}
+                      <Seccion ico="❧" txt="Memoria del saber" col={C.green}
                         sub="Lo que ha ocurrido en tus academias.">
                         {memoria.length === 0 && (
                           <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic" }}>
@@ -25072,12 +25182,14 @@ export default function PaxMundi() {
                         opacity: !reqOk ? 0.4 : 1, color: C.ink, fontFamily: serif,
                       }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                        <span style={{ fontSize: 19 }}>{inst.icono}</span>
+                        <span style={{ display: "flex", color: C.brass }}>
+                          <Ico n={inst.icono} t={19} g={1.5} />
+                        </span>
                         <span>
                           <span style={{ fontSize: 13, display: "block" }}>
                             {inst.nombre}
                             {tiene > 0 && <span style={{ color: C.green, fontFamily: mono, fontSize: 11 }}> ×{tiene}</span>}
-                            {!reqOk && <span style={{ fontSize: 11 }}> 🔒</span>}
+                            {!reqOk && <span style={{ fontSize: 11 }}> ⊘</span>}
                           </span>
                           <span style={{ fontSize: 11, color: C.muted, display: "block" }}>
                             {inst.desc}{!reqOk && reqNombre ? ` · requiere ${reqNombre.toLowerCase()}` : ""}
@@ -25164,7 +25276,7 @@ export default function PaxMundi() {
                     border: `1px solid ${C.green}`, borderRadius: 6,
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                      <span style={{ fontSize: 13 }}>🧙 {sb.nombre}</span>
+                      <span style={{ fontSize: 13 }}>✦ {sb.nombre}</span>
                       <span style={{ fontFamily: mono, fontSize: 11, color: C.cyan }}>+{sb.bonoPI} PI/t</span>
                     </div>
                     <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{sb.campo} · {sb.aporte}</div>
@@ -25180,7 +25292,7 @@ export default function PaxMundi() {
                     borderRadius: 6, cursor: s.edu.oro >= costoProxSabio && !atrayendo ? "pointer" : "default",
                     fontFamily: mono, fontSize: 12, letterSpacing: 1,
                   }}>
-                  {atrayendo ? "🕯 Enviando emisarios…" : `🧙 ATRAER SABIO HISTÓRICO · ⚜ ${costoProxSabio}`}
+                  {atrayendo ? "⋯ Enviando emisarios…" : `✦ ATRAER SABIO HISTÓRICO · ⚜ ${costoProxSabio}`}
                 </button>
                 {errorEdu && <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>⚠ {errorEdu}</div>}
               </div>
@@ -25326,7 +25438,7 @@ export default function PaxMundi() {
 
                 {(s.edu.sedes || []).length === 0 && (
                   <div style={{ fontSize: 13, color: C.muted, fontStyle: "italic", textAlign: "center", padding: "14px 0" }}>
-                    Aún no hay sedes. Construí instituciones en la pestaña 🎓 Educación.
+                    Aún no hay sedes. Construí instituciones en la pestaña ✎ Educación.
                   </div>
                 )}
 
@@ -25375,7 +25487,7 @@ export default function PaxMundi() {
                           </div>
                         )}
                         <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>
-                          🧙 {sede.director ? <span style={{ color: C.green }}>{sede.director}</span> : "sin director"}
+                          ✦ {sede.director ? <span style={{ color: C.green }}>{sede.director}</span> : "sin director"}
                           {" · "}
                           {!puedeInv ? "solo enseña (+" + meta.pi + " PI/año)"
                             : invActiva ? <span style={{ color: C.blue }}>investigando: {inv.nombre} ({Math.round(inv.progreso)}%)</span>
@@ -25413,7 +25525,7 @@ export default function PaxMundi() {
                           </div>
                           {s.edu.sabios.length === 0 ? (
                             <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic", marginBottom: 10 }}>
-                              No tenés sabios en la corte. Atraé uno en 🎓 Educación.
+                              No tenés sabios en la corte. Atraé uno en ✎ Educación.
                             </div>
                           ) : (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
@@ -25429,7 +25541,7 @@ export default function PaxMundi() {
                                       color: esAqui ? C.green : enOtra ? C.muted : C.ink,
                                       borderRadius: 20, fontFamily: serif,
                                     }}>
-                                    {esAqui ? "✓ " : ""}🧙 {sb.nombre}{enOtra ? " (en otra sede)" : ""}
+                                    {esAqui ? "✓ " : ""}✦ {sb.nombre}{enOtra ? " (en otra sede)" : ""}
                                   </button>
                                 );
                               })}
@@ -25491,7 +25603,7 @@ export default function PaxMundi() {
                               )}
                               {encargando && (
                                 <div style={{ marginTop: 8, fontFamily: mono, fontSize: 12, color: C.blue, animation: "pulse 1.4s infinite" }}>
-                                  📜 Los académicos redactan el plan de estudio…
+                                  ❧ Los académicos redactan el plan de estudio…
                                 </div>
                               )}
                             </>
@@ -28142,7 +28254,9 @@ export default function PaxMundi() {
                 }}>
                   <div>
                     <div style={{ fontSize: 14 }}>
-                      {GOBIERNOS.find((g) => g.id === s.gobierno.forma)?.icono || "👑"} {s.gobierno.forma} · <span style={{ color: C.gold }}>{s.nacion.lider}</span>
+                      <Ico n={GOBIERNOS.find((g) => g.id === s.gobierno.forma)?.icono || "corona"}
+                        t={14} g={1.6} style={{ display: "inline-block", verticalAlign: "-2px", marginRight: 5 }} />
+                      {s.gobierno.forma} · <span style={{ color: C.gold }}>{s.nacion.lider}</span>
                     </div>
                     <div style={{ fontSize: 11, color: C.muted, fontStyle: "italic" }}>“{s.nacion.lema}”</div>
                   </div>
@@ -28177,7 +28291,7 @@ export default function PaxMundi() {
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 3, flexWrap: "wrap", gap: 4 }}>
                           <span style={{ fontSize: 14 }}>
-                            {m.esSabio ? "🧙 " : "👤 "}{m.nombre}
+                            {m.esSabio ? "✦ " : "◆ "}{m.nombre}
                             <span style={{ fontSize: 11, color: C.muted, fontStyle: "italic" }}> · {m.rasgo}</span>
                           </span>
                           <span style={{ fontSize: 10.5, color: areaMeta.color, fontFamily: mono }}>
@@ -28204,7 +28318,7 @@ export default function PaxMundi() {
                           </div>
                           {s.edu.sabios.length === 0 ? (
                             <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic", marginBottom: 10 }}>
-                              No tenés sabios en la corte. Atraé uno en 🎓 Educación.
+                              No tenés sabios en la corte. Atraé uno en ✎ Educación.
                             </div>
                           ) : (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
@@ -28220,7 +28334,7 @@ export default function PaxMundi() {
                                       color: esAqui ? C.green : enOtroCargo ? C.muted : C.ink,
                                       borderRadius: 20, fontFamily: serif,
                                     }}>
-                                    {esAqui ? "✓ " : ""}🧙 {sb.nombre}{enOtroCargo ? " (en otro cargo)" : ""}
+                                    {esAqui ? "✓ " : ""}✦ {sb.nombre}{enOtroCargo ? " (en otro cargo)" : ""}
                                   </button>
                                 );
                               })}
@@ -28236,7 +28350,7 @@ export default function PaxMundi() {
                               borderRadius: 6, cursor: s.edu.oro >= COSTO_CANDIDATO && buscandoCargo !== m.id ? "pointer" : "default",
                               fontFamily: mono, fontSize: 12, letterSpacing: 1,
                             }}>
-                            {buscandoCargo === m.id ? "🕯 Entrevistando candidatos…" : `👤 BUSCAR NUEVO CANDIDATO · ⚜ ${COSTO_CANDIDATO}`}
+                            {buscandoCargo === m.id ? "⋯ Entrevistando candidatos…" : `◆ BUSCAR NUEVO CANDIDATO · ⚜ ${COSTO_CANDIDATO}`}
                           </button>
                           {errorGob && <div style={{ marginTop: 8, fontSize: 12, color: C.red }}>⚠ {errorGob}</div>}
                         </div>
@@ -28440,14 +28554,15 @@ export default function PaxMundi() {
             <button key={m.id} onClick={() => setTab(abierto ? null : m.id)}
               title={m.n}
               style={{ flex: 1, minWidth: 62, display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center", gap: 1, cursor: "pointer",
+                alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer",
                 position: "relative",
                 background: abierto ? "rgba(255,255,255,0.05)" : "transparent",
                 border: "1px solid transparent",
                 borderBottom: `2px solid ${abierto ? col : "transparent"}`,
                 color: abierto ? col : C.muted, fontFamily: mono, fontSize: 9 }}>
-              <span style={{ fontSize: 15, lineHeight: 1 }}>{m.ico}</span>
-              <span style={{ letterSpacing: 0.7, textTransform: "uppercase" }}>{m.n}</span>
+              <Ico n={m.ico} t={19} g={abierto ? 1.85 : 1.5} />
+              <span style={{ letterSpacing: 1, textTransform: "uppercase", fontSize: 9.5,
+                fontWeight: abierto ? 600 : 400 }}>{m.n}</span>
               {nota && (
                 <span style={{ position: "absolute", top: 4, right: 6, fontSize: 8.5,
                   color: colorNivel(nota.nivel), fontFamily: mono }}>{nota.txt}</span>
