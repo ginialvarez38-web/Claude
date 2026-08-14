@@ -18,16 +18,29 @@ import { useState, useRef, useEffect, useMemo } from "react";
 // El fondo es negro frío y no negro puro: el negro puro contra un mapa con
 // tierra y mar da un corte duro que cansa, y dos puntos de azul lo asientan.
 const C = {
-  bg: "#0B0D11",
+  // ——— la escala de superficies ———
+  //
+  // Acá estaba el error de la vuelta anterior. Al aplanarlo todo dejé las tres
+  // superficies casi en el mismo negro, y medido en claridad percibida —L*, que
+  // es la métrica que corresponde: el contraste WCAG entre dos negros está
+  // comprimido y no dice nada— los saltos eran de 2,2 y 3,3. Hace falta entre
+  // 4 y 8 para que el ojo vea un escalón. Con menos el resultado no es
+  // «sobrio», es una mancha sin jerarquía, que es justo lo que se ve barato.
+  //
+  // Ahora los saltos son 4,4 · 6,8 · 6,6. El fondo se hunde, el panel se
+  // levanta, y entre los dos hay aire aunque los dos sigan siendo oscuros.
+  bg: "#080A0E",
   // Plano, sin degradado. Un degradado en un panel que se abre y se cierra
   // cincuenta veces por partida es una animación que nadie pidió.
-  panel: "#161A20",
-  panelFlat: "#161A20",
-  panel2: "#101318",
-  // Una sola línea, clara y fina. Antes era cálida y gruesa y el resultado era
-  // una reja: con veinte paneles en pantalla, los bordes pesaban más que el
-  // contenido.
-  line: "rgba(255,255,255,0.09)",
+  panel: "#1D242E",
+  panelFlat: "#1D242E",
+  panel2: "#12161D",
+  // Lo que está por encima del panel: lo elegido, lo que responde al ratón, la
+  // fila sobre la que está el dedo.
+  alto: "#2A323E",
+  // La línea también sube: con las superficies separadas de verdad, una al
+  // nueve por ciento se perdía y los paneles quedaban sin filo.
+  line: "rgba(255,255,255,0.13)",
   ink: "#F1F3F6",
   muted: "#8B95A4",
   // El bronce sigue siendo el acento —es la identidad del juego y no hay por
@@ -19681,8 +19694,8 @@ const GlobalStyle = () => (
        mueve nada de sitio. Que la interfaz no tiemble importa más de lo que
        parece cuando se la mira ocho horas. */
     .pm-card { transition: background 0.12s linear, border-color 0.12s linear; }
-    .pm-card:not(:disabled):hover { background: rgba(255,255,255,0.05);
-      border-color: rgba(227,176,75,0.45); }
+    .pm-card:not(:disabled):hover { background: rgba(255,255,255,0.07);
+      border-color: rgba(227,176,75,0.5); }
     .pm-cta { transition: background 0.12s linear, border-color 0.12s linear; }
     .pm-cta:not(:disabled):hover { filter: brightness(1.14); }
     .pm-cta:not(:disabled):active { filter: brightness(0.94); }
@@ -21352,7 +21365,7 @@ function RuedaAcciones({ x, y, titulo, glosa, acciones, onElegir, onCerrar }) {
         {/* el disco del medio: de qué se trata y qué hace lo que se está señalando */}
         <div style={{ position: "absolute", left: -62, top: -40, width: 124, height: 80,
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          borderRadius: 62, background: "rgba(10,16,23,0.97)", border: `1px solid ${C.line}`,
+          borderRadius: 62, background: "rgba(29,36,46,0.97)", border: `1px solid ${C.line}`,
           boxShadow: "0 3px 12px rgba(0,0,0,0.45)", pointerEvents: "none", padding: "0 8px" }}>
           <div style={{ fontFamily: serif, fontSize: 13, color: C.ink, textAlign: "center",
             lineHeight: 1.15 }}>{titulo}</div>
@@ -21376,7 +21389,7 @@ function RuedaAcciones({ x, y, titulo, glosa, acciones, onElegir, onCerrar }) {
               style={{ position: "absolute", left: cx - RB, top: cy - RB,
                 width: RB * 2, height: RB * 2, borderRadius: RB, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-                background: act ? `${col}2E` : "rgba(10,16,23,0.96)",
+                background: act ? `${col}2E` : "rgba(29,36,46,0.96)",
                 border: `1px solid ${act ? col : C.line}`, color: act ? col : C.ink,
                 boxShadow: act ? `0 0 14px ${col}55` : "0 4px 14px rgba(0,0,0,0.5)",
                 transition: "background 90ms, border-color 90ms" }}>
@@ -23432,7 +23445,7 @@ export default function PaxMundi() {
                 style={{
                   textAlign: "left", padding: "13px 15px", cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 13,
-                  background: era === e.id ? "rgba(255,255,255,0.055)" : C.panel,
+                  background: era === e.id ? C.alto : C.panel,
                   border: `1px solid ${era === e.id ? `${e.color}88` : C.line}`,
                   borderLeft: `3px solid ${era === e.id ? e.color : "transparent"}`,
                   color: C.ink, fontFamily: serif,
@@ -23873,7 +23886,7 @@ export default function PaxMundi() {
           {hallazgosBusca.length > 0 && (
             <div className="pm-fade" style={{ position: "absolute", top: "calc(100% + 5px)", left: 0,
               width: "max(330px, 100%)", maxHeight: "70vh", overflowY: "auto", zIndex: 9,
-              background: "rgba(10,16,23,0.985)", border: `1px solid ${C.line}`, borderRadius: 9,
+              background: "rgba(29,36,46,0.985)", border: `1px solid ${C.line}`, borderRadius: 9,
               boxShadow: "0 14px 34px rgba(0,0,0,0.6)" }}>
               {hallazgosBusca.map((r, i) => (
                 <button key={r.tipo + r.n + i} onMouseDown={(ev) => { ev.preventDefault(); irA(r); }}
@@ -23988,7 +24001,7 @@ export default function PaxMundi() {
         <div className="pm-fade" style={{ position: "fixed", zIndex: 7,
           left: "50%", transform: "translateX(-50%)", bottom: ALTO_PIE + 12,
           padding: "9px 14px", borderRadius: 10, maxWidth: "min(460px, 92vw)",
-          background: "rgba(10,16,23,0.96)", border: `1px solid ${C.gold}88`,
+          background: "rgba(29,36,46,0.96)", border: `1px solid ${C.gold}88`,
           boxShadow: "0 8px 26px rgba(0,0,0,0.55)", display: "flex",
           alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 15 }}>⚑</span>
@@ -24124,7 +24137,7 @@ export default function PaxMundi() {
       {dondeSitio && (
         <div className="pm-fade" style={{ position: "fixed", top: ALTO_CAB + 10,
           left: "50%", transform: "translateX(-50%)", zIndex: 6, maxWidth: "min(560px, 70vw)",
-          padding: "9px 12px", borderRadius: 10, background: "rgba(10,16,23,0.95)",
+          padding: "9px 12px", borderRadius: 10, background: "rgba(29,36,46,0.95)",
           border: `1px solid ${C.brass}66`, boxShadow: "0 8px 26px rgba(0,0,0,0.55)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <span style={{ fontSize: 16 }}>{OBRA_SITIO_IDX[sitio].ico}</span>
@@ -24174,7 +24187,7 @@ export default function PaxMundi() {
         background: "rgba(12,18,26,0.97)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
           position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
-          background: "rgba(10,16,23,0.99)" }}>
+          background: "rgba(29,36,46,0.99)" }}>
           <span style={{ color: C.cyan }}>⇄</span>
           <span style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: 1.8,
             textTransform: "uppercase", color: C.cyan }}>una al lado de otra</span>
@@ -24235,12 +24248,12 @@ export default function PaxMundi() {
       {tab && MANDO_IDX[tab] && !compara && (
       <aside className="pm-fade" style={{ ...hoja("min(430px, 44vw)"),
         zIndex: 5, overflowY: "auto", overflowX: "hidden",
-        background: "rgba(13,16,21,0.965)",
+        background: "rgba(29,36,46,0.965)",
         borderLeft: `1px solid ${C.line}`,
         boxShadow: "-16px 0 34px rgba(0,0,0,0.5)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
           position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
-          background: "rgba(10,16,23,0.99)" }}>
+          background: "rgba(29,36,46,0.99)" }}>
           <span style={{ color: C[MANDO_IDX[tab].col], display: "flex" }}>
             <Ico n={MANDO_IDX[tab].ico} t={17} g={1.7} />
           </span>
@@ -28509,7 +28522,7 @@ export default function PaxMundi() {
           title={avisosAbiertos ? "plegar los avisos" : "ver los avisos"}
           style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 6,
             margin: "8px 0 4px 8px", padding: "4px 9px", borderRadius: 20, pointerEvents: "auto",
-            cursor: "pointer", background: "rgba(10,16,23,0.86)",
+            cursor: "pointer", background: "rgba(29,36,46,0.86)",
             border: `1px solid ${colorNivel(avisos[0].nivel)}55`, color: C.muted,
             fontFamily: mono, fontSize: 9.5, letterSpacing: 1.4 }}>
           <span style={{ color: colorNivel(avisos[0].nivel) }}>●</span>
@@ -28521,7 +28534,7 @@ export default function PaxMundi() {
               <button key={a.id} className="pm-card" onClick={() => a.ir && setTab(a.ir)}
                 style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6,
                   padding: "8px 10px", borderRadius: 8, cursor: a.ir ? "pointer" : "default",
-                  background: "rgba(10,16,23,0.90)",
+                  background: "rgba(29,36,46,0.90)",
                   border: `1px solid ${colorNivel(a.nivel)}44`,
                   borderLeft: `3px solid ${colorNivel(a.nivel)}`,
                   boxShadow: "0 3px 12px rgba(0,0,0,0.45)",
@@ -28556,7 +28569,7 @@ export default function PaxMundi() {
               style={{ flex: 1, minWidth: 62, display: "flex", flexDirection: "column",
                 alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer",
                 position: "relative",
-                background: abierto ? "rgba(255,255,255,0.05)" : "transparent",
+                background: abierto ? C.alto : "transparent",
                 border: "1px solid transparent",
                 borderBottom: `2px solid ${abierto ? col : "transparent"}`,
                 color: abierto ? col : C.muted, fontFamily: mono, fontSize: 9 }}>

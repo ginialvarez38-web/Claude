@@ -990,11 +990,19 @@ algo.
 **Lo que cambió, y solo esto:**
 
 - **La paleta.** Fondo negro frío —no negro puro: contra un mapa con tierra y
-  mar, el negro puro da un corte que cansa—. Paneles planos, sin degradado. Una
-  única línea de separación, fina y clara, en lugar de la cálida y gruesa de
-  antes, que con veinte paneles en pantalla pesaba más que el contenido. El
+  mar, el negro puro da un corte que cansa—. Paneles planos, sin degradado. El
   bronce sigue siendo el acento, un punto más claro para que no se apague sobre
   negro.
+- **Y los escalones entre superficies, que fue el error de la primera vuelta.**
+  Al aplanarlo todo dejé el fondo, el panel hundido y el panel a casi el mismo
+  negro. Medido en claridad percibida —L\*, que es la métrica que corresponde:
+  el contraste WCAG entre dos negros está comprimido y no dice nada— los saltos
+  eran de **2,2 y 3,3**, y hace falta entre 4 y 8 para que el ojo vea un
+  escalón. Con menos, el resultado no es «sobrio»: es una mancha sin jerarquía,
+  que es exactamente lo que se ve barato. Ahora los saltos son **4,4 · 6,8 ·
+  6,6**: el fondo se hunde, el panel se levanta y entre los dos hay aire aunque
+  los dos sigan siendo oscuros. De paso, las diez superficies flotantes que
+  tenían su propio negro escrito a mano pasaron todas a la misma escala.
 - **La tipografía.** Sin serifas para el texto, de ancho fijo para los números,
   y `tabular-nums` en todo el cuerpo: el uno tiene que ocupar lo mismo que el
   ocho, o una cifra que cambia al pasar el turno corre la columna entera y
