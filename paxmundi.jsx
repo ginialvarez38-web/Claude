@@ -43,21 +43,32 @@ const C = {
   line: "rgba(255,255,255,0.13)",
   ink: "#F1F3F6",
   muted: "#8B95A4",
-  // El bronce sigue siendo el acento —es la identidad del juego y no hay por
-  // qué tirarla— pero más limpio y más claro, que sobre negro el viejo #D4AF37
-  // se apagaba.
-  brass: "#E3B04B",
-  brassDark: "#9C7723",
-  red: "#E5484D",
-  green: "#4CA65B",
-  blue: "#4F9CF0",
-  cyan: "#2EBFAE",
-  violet: "#A87FE0",
-  gold: "#E3B04B",
+  // ——— los acentos, que son pigmentos y no colores de pantalla ———
+  //
+  // Estaban elegidos como colores de interfaz —#E5484D, #4F9CF0— y eso los
+  // ponía en el 66% de saturación media. Un rojo de aviso de aplicación al lado
+  // de un mapa con tierras y mares no dice «peligro»: dice «formulario».
+  //
+  // Ahora salen de pigmentos: bermellón, verdigrís, lapislázuli, cardenillo,
+  // púrpura, oro viejo, ocre tostado. Saturación media del 41%, y ninguno por
+  // encima del 48%.
+  //
+  // No se eligieron a ojo: para cada uno se fijó el matiz del pigmento, se
+  // acotó la saturación y se subió la claridad lo mínimo necesario para que
+  // contraste 4,5 a 1 contra el panel. Sobrio y legible no son un intercambio
+  // si se resuelven las dos condiciones a la vez en vez de tantear una.
+  brass: "#C6A45C",
+  brassDark: "#7E6428",
+  red: "#C2766B",
+  green: "#409C52",
+  blue: "#678EC1",
+  cyan: "#3E9892",
+  violet: "#A181BD",
+  gold: "#C6A45C",
   // El naranja del semáforo. Faltaba porque hasta ahora los avisos eran de dos
   // colores —va bien o va mal— y entre «requiere atención» y «situación
   // crítica» hay un escalón que el jugador necesita ver antes de que sea tarde.
-  orange: "#E08A3C",
+  orange: "#B87E51",
 };
 
 // ═══ EL SEMÁFORO ════════════════════════════════════════════
@@ -24007,19 +24018,34 @@ export default function PaxMundi() {
           minWidth: 0, scrollbarWidth: "none", order: estrecho ? 1 : 0 }}>
           {mandoDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
             piT, pobTecho: techoOcupado }).map((ind) => (
+            /* Acá había ocho fichas iguales, cada una con su rótulo, su cifra y
+               su barra de color debajo. Eso es un tablero de indicadores de
+               empresa, y no hay nada que lo delate más: ocho casillas del mismo
+               tamaño gritando a la vez, con ocho colores encendidos aunque no
+               pase nada.
+               Un reino no se lee así. Se lee como un renglón: el rótulo
+               pequeño y apagado, la cifra encima con peso, y el color guardado
+               para cuando la cosa va mal —que es cuando el color significa algo
+               y por eso se ve—. Cuando todo marcha, la franja es de un solo
+               tono y no pide nada; el día que el tesoro se hunde, hay una cifra
+               roja en una franja tranquila y se ve desde la otra punta. */
+            (() => {
+              const malo = ind.nivel === "grave" || ind.nivel === "mal";
+              const ojo = ind.nivel === "ojo";
+              return (
             <div key={ind.id} title={`${ind.n}: ${ind.pie} · ${DICE[ind.nivel] || ""}`}
-              style={{ padding: "3px 7px", minWidth: 50, textAlign: "right",
-                background: "transparent",
-                borderLeft: `1px solid ${C.line}`,
-                /* El estado va en una barrita abajo y no en el borde de una
-                   caja: dice lo mismo, ocupa un píxel y no dibuja un recuadro
-                   más sobre el mapa. */
-                borderBottom: `2px solid ${colorNivel(ind.nivel)}` }}>
-              <div style={{ fontFamily: mono, fontSize: 8, letterSpacing: 1.1, color: C.muted,
-                textTransform: "uppercase", whiteSpace: "nowrap" }}>{ind.ico} {ind.n}</div>
-              <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 600,
-                color: colorNivel(ind.nivel), whiteSpace: "nowrap" }}>{ind.v}</div>
+              style={{ padding: "2px 9px", minWidth: 50, textAlign: "right",
+                borderLeft: `1px solid ${C.line}` }}>
+              <div style={{ fontFamily: mono, fontSize: 8, letterSpacing: 1.2,
+                color: malo ? colorNivel(ind.nivel) : C.muted, opacity: malo ? 0.95 : 0.72,
+                textTransform: "uppercase", whiteSpace: "nowrap" }}>{ind.n}</div>
+              <div style={{ fontFamily: mono, fontSize: 13.5, fontWeight: 600,
+                letterSpacing: 0.2, whiteSpace: "nowrap",
+                color: malo ? colorNivel(ind.nivel) : ojo ? C.ink : C.ink,
+                opacity: malo || ojo ? 1 : 0.92 }}>{ind.v}</div>
             </div>
+              );
+            })()
           ))}
         </div>
 

@@ -976,6 +976,36 @@ todo esto que **no se devuelve nunca**.
 `MILICIA.md` tiene el mapa completo de lo que falta del sistema militar y en
 qué orden conviene hacerlo.
 
+## Los acentos son pigmentos, no colores de pantalla
+
+Estaban elegidos como colores de interfaz —#E5484D de rojo, #4F9CF0 de azul— y
+eso los ponía en el **66% de saturación media**, con cinco de ocho por encima
+del 62%. Un rojo de aviso de aplicación al lado de un mapa con tierras y mares
+no dice «peligro»: dice «formulario».
+
+Ahora salen de pigmentos —bermellón, verdigrís, lapislázuli, cardenillo,
+púrpura, oro viejo, ocre tostado— y la saturación media es del **41%**, ninguno
+por encima del 48%.
+
+No se eligieron a ojo. Para cada uno se fijó el matiz del pigmento, se acotó la
+saturación al tope y se subió la claridad **lo mínimo necesario** para que
+contraste 4,5 a 1 contra el panel. Sobrio y legible dejan de ser un intercambio
+cuando se resuelven las dos condiciones a la vez en lugar de tantear una y
+mirar qué pasa con la otra.
+
+## La franja de mando no es un tablero de indicadores
+
+Ahí había ocho fichas iguales, cada una con su rótulo, su cifra y una barra de
+color debajo. Eso es un tablero de indicadores de empresa, y no hay nada que lo
+delate más: ocho casillas del mismo tamaño gritando a la vez, con ocho colores
+encendidos aunque no esté pasando nada.
+
+Un reino no se lee así. Se lee como un renglón: el rótulo pequeño y apagado, la
+cifra encima con peso, y **el color guardado para cuando la cosa va mal**. Con
+todo en orden la franja es de un solo tono y no pide nada; el día que el tesoro
+se hunde hay una cifra roja en una franja tranquila y se ve desde la otra punta
+de la pantalla. Un color que está siempre encendido no avisa de nada.
+
 ## El aspecto: de atlas a consola
 
 La interfaz era un atlas —pergamino, degradados, esquinas redondeadas,
