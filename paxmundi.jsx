@@ -19864,6 +19864,69 @@ function Ico({ n, t = 18, g = 1.6, style }) {
   );
 }
 
+// ═══ EL EMBLEMA ═════════════════════════════════════════════
+//
+// En Age of History cada nación tiene su escudo, y está arriba a la izquierda
+// en todo momento. Es lo primero que ancla la pantalla: sin él, la cabecera
+// empieza con una palabra suelta y la interfaz no parece de nadie.
+//
+// Acá no puede haber banderas de archivo —el juego se abre con doble clic desde
+// un archivo y no pide nada de afuera, y además las naciones pueden inventarse—
+// así que el escudo se dibuja del nombre. Del nombre salen tres cosas: el
+// campo, la partición y la carga. Siempre las mismas para el mismo nombre, así
+// que Castilla tiene su escudo y lo tiene siempre.
+const CAMPOS = ["#8C2B2B", "#2E5A8C", "#2F6B44", "#7A5F1E", "#5A3A6B", "#1F5E63",
+                "#8A4A1E", "#3A4A5E"];
+const PARTICIONES = [
+  "",                                        // llano
+  "M0,0h12v24H0z",                           // partido
+  "M0,0h24v12H0z",                           // cortado
+  "M0,0h12v12H0zM12,12h12v12H12z",           // cuartelado
+  "M0,0h24L0,24z",                           // tajado
+  "M12,0l12,24H0z",                          // chevron
+];
+// Las cargas van todas de línea y todas geométricas. La primera versión tenía
+// una maciza —un escudete relleno— y a treinta píxeles se leía como un huevo:
+// una mancha de color con silueta blanda no es una figura, es un borrón. Con
+// trazo, hasta la forma más simple se reconoce.
+const CARGAS = [
+  "M12,3.2l2.6,5.6 6.1,0.8-4.5,4.2 1.2,6.1L12,17l-5.4,2.9 1.2-6.1L3.3,9.6l6.1-0.8z", // estrella
+  "M12,20.5C8,18.6 6,15.6 6,11.7V5.2l6-1.7 6,1.7v6.5c0,3.9-2,6.9-6,8.8z",             // escudete
+  "M12,3.5v17M4.5,10h15M7.5,3.5h9M7.5,20.5h9",                                        // cruz
+  "M4.5,4.5l15,15M19.5,4.5l-15,15",                                                   // aspa
+  "M12,4.5a7.5,7.5 0 1,0 0.1,0M12,9a3,3 0 1,0 0.1,0",                                 // anillo
+  "M3.5,12h17M8,7l-4.5,5 4.5,5M16,7l4.5,5-4.5,5",                                     // faja
+  "M12,3.5l8.5,5v7l-8.5,5-8.5-5v-7z",                                                 // losange
+  "M5,19V8l3.5,2.5V6.5h7v4L19,8v11zM10.5,19v-4h3v4",                                  // torre
+];
+function emblemaDe(nombre) {
+  const t = String(nombre || "reino");
+  let a = 0, b = 0, c = 0;
+  for (let i = 0; i < t.length; i++) {
+    const k = t.charCodeAt(i);
+    a = (a * 31 + k) % 9973; b = (b * 17 + k * 7) % 9973; c = (c * 13 + k * 3) % 9973;
+  }
+  return { campo: CAMPOS[a % CAMPOS.length],
+           campo2: CAMPOS[(a + 3 + (b % 5)) % CAMPOS.length],
+           particion: PARTICIONES[b % PARTICIONES.length],
+           carga: CARGAS[c % CARGAS.length],
+           tinta: (c % 3 === 0) ? "#E8DCBE" : "#E3B04B" };
+}
+function Emblema({ nombre, t = 34 }) {
+  const e = emblemaDe(nombre);
+  return (
+    <svg width={t} height={t} viewBox="0 0 24 24" aria-hidden="true"
+      style={{ display: "block", flex: "0 0 auto" }}>
+      <rect x="0" y="0" width="24" height="24" fill={e.campo} />
+      {e.particion && <path d={e.particion} fill={e.campo2} />}
+      <path d={e.carga} fill="none" stroke={e.tinta} strokeWidth="1.7"
+        strokeLinejoin="round" strokeLinecap="round" />
+      <rect x="0.6" y="0.6" width="22.8" height="22.8" fill="none"
+        stroke="rgba(0,0,0,0.55)" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 // Los ministerios de la barra de abajo. Cada uno despliega un panel lateral;
 // ninguno abre una pantalla.
 const MANDOS = [
@@ -23852,12 +23915,20 @@ export default function PaxMundi() {
             caja del texto y la caja encogida por el buscador, «Francia» salía
             como «F»: un truco de pintura no puede costarle al jugador saber qué
             país está gobernando. */}
-        <div style={{ flex: "0 0 auto", maxWidth: estrecho ? 132 : 220, overflow: "hidden", order: estrecho ? 1 : 0 }}>
+        <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 9,
+          maxWidth: estrecho ? 168 : 258, overflow: "hidden", order: estrecho ? 1 : 0 }}>
+          <span style={{ display: "flex", padding: 2, background: "rgba(0,0,0,0.5)",
+            border: `1px solid ${C.brassDark}` }}>
+            <Emblema nombre={s.nacion.nombre} t={estrecho ? 26 : 32} />
+          </span>
+          <div style={{ minWidth: 0, overflow: "hidden" }}>
           <div style={{ fontSize: 15, lineHeight: 1.1, whiteSpace: "nowrap", color: C.ink,
             fontWeight: 600, letterSpacing: 0.2 }}>
             {s.nacion.nombre}</div>
-          <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1 }}>
+          <div style={{ fontFamily: mono, fontSize: 9.5, color: C.brass, letterSpacing: 1.1,
+            whiteSpace: "nowrap" }}>
             {fmtMesAnio(s.anio, s.dia).toUpperCase()} · TURNO {s.turno}
+          </div>
           </div>
         </div>
 
@@ -23867,8 +23938,8 @@ export default function PaxMundi() {
             mapa y los ministerios, que es donde de verdad se pierde el tiempo:
             un buscador que encuentra ciudades pero no encuentra «dónde se ve el
             hambre» resuelve la mitad más fácil del problema. */}
-        <div style={{ position: "relative", minWidth: 128,
-          flex: estrecho ? "1 1 100%" : "0 1 250px",
+        <div style={{ position: "relative", minWidth: 104,
+          flex: estrecho ? "1 1 100%" : "1 1 190px",
           order: estrecho ? 2 : 0 }}>
           <input ref={buscaRef} value={busca}
             onChange={(ev) => { setBusca(ev.target.value); setBuscaSel(0); }}
@@ -23927,17 +23998,17 @@ export default function PaxMundi() {
 
         {/* Los indicadores no se recortan en el teléfono: se corren. Cortar el
             tesoro por la mitad es peor que hacerlo arrastrar. */}
-        <div className="pm-scroll" style={{ display: "flex", gap: 3,
+        <div className="pm-scroll" style={{ display: "flex", gap: 2,
           /* Con «auto» el margen empuja hasta el borde y, al haber dos filas,
              se queda la primera entera. En el teléfono ocupa lo que sobra. */
           marginLeft: estrecho ? 0 : "auto",
-          flex: estrecho ? "1 1 0" : "0 1 auto",
+          flex: estrecho ? "1 1 0" : "0 0 auto",
           overflowX: estrecho ? "auto" : "hidden", overflowY: "hidden",
           minWidth: 0, scrollbarWidth: "none", order: estrecho ? 1 : 0 }}>
           {mandoDelReino(s, { bruto: oroBruto, mant: mantT, servicio: servicioDeuda,
             piT, pobTecho: techoOcupado }).map((ind) => (
             <div key={ind.id} title={`${ind.n}: ${ind.pie} · ${DICE[ind.nivel] || ""}`}
-              style={{ padding: "3px 8px", minWidth: 52, textAlign: "right",
+              style={{ padding: "3px 7px", minWidth: 50, textAlign: "right",
                 background: "transparent",
                 borderLeft: `1px solid ${C.line}`,
                 /* El estado va en una barrita abajo y no en el borde de una
@@ -24251,14 +24322,20 @@ export default function PaxMundi() {
         background: "rgba(29,36,46,0.965)",
         borderLeft: `1px solid ${C.line}`,
         boxShadow: "-16px 0 34px rgba(0,0,0,0.5)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
-          position: "sticky", top: 0, zIndex: 3, borderBottom: `1px solid ${C.line}`,
-          background: "rgba(29,36,46,0.99)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px",
+          position: "sticky", top: 0, zIndex: 3,
+          /* La tapa del panel. Un panel sin tapa no parece un panel: parece un
+             trozo de página. La banda toma el color del ministerio, apagado
+             hasta que el texto claro se lea encima, y lleva el color puro en un
+             filo abajo. A pleno serían diez ministerios haciendo de semáforo;
+             apagado es una tapa que dice de qué es esto sin gritarlo. */
+          background: `linear-gradient(180deg, ${C[MANDO_IDX[tab].col]}30, ${C[MANDO_IDX[tab].col]}18)`,
+          borderBottom: `2px solid ${C[MANDO_IDX[tab].col]}` }}>
           <span style={{ color: C[MANDO_IDX[tab].col], display: "flex" }}>
-            <Ico n={MANDO_IDX[tab].ico} t={17} g={1.7} />
+            <Ico n={MANDO_IDX[tab].ico} t={18} g={1.8} />
           </span>
-          <span style={{ fontFamily: serif, fontSize: 12.5, letterSpacing: 1.6, fontWeight: 600,
-            textTransform: "uppercase", color: C[MANDO_IDX[tab].col] }}>{MANDO_IDX[tab].n}</span>
+          <span style={{ fontFamily: serif, fontSize: 13, letterSpacing: 1.8, fontWeight: 700,
+            textTransform: "uppercase", color: C.ink }}>{MANDO_IDX[tab].n}</span>
           <button onClick={() => setTab(null)} title="cerrar y ver el mundo (Esc)"
             style={{ marginLeft: "auto", padding: "2px 8px", borderRadius: 5, cursor: "pointer",
               background: "transparent", border: `1px solid ${C.line}`, color: C.muted,

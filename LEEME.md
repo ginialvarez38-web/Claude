@@ -1052,6 +1052,27 @@ brillo que le recorría por encima sin parar, a pesado y apretado, con el bronce
 puesto en un filo de luz arriba: una palabra entera de color dorado se lee como
 un adorno, un filo se lee como metal.
 
+**Lo que se tomó de Age of History.** Dos capturas del juego bastaron para ver
+qué le falta al nuestro, y son dos cosas concretas:
+
+- **Cada panel se abre con una banda de título sólida.** Un panel sin tapa no
+  parece un panel, parece un trozo de página, y el nuestro tenía una línea fina
+  con una etiqueta de doce píxeles. Ahora la banda toma el color del ministerio
+  —apagado, que a pleno serían diez ministerios haciendo de semáforo— con el
+  color puro en un filo abajo.
+- **El escudo de la nación, siempre arriba a la izquierda.** Es lo primero que
+  ancla la pantalla: sin él, la cabecera empieza con una palabra suelta y la
+  interfaz no parece de nadie. Acá no puede haber banderas de archivo —el juego
+  no pide nada de afuera y las naciones pueden inventarse—, así que el escudo se
+  dibuja del nombre: campo, partición y carga salen de él, siempre los mismos
+  para el mismo nombre. Ocho campos × seis particiones × ocho cargas × dos
+  tintas son 768 escudos posibles, y en catorce reinos probados salieron catorce
+  distintos.
+
+  Las cargas van todas de línea. La primera versión tenía una maciza y a treinta
+  píxeles se leía como un huevo: una mancha de color con silueta blanda no es
+  una figura, es un borrón.
+
 **Lo que no cambió, y es deliberado:** el mapa —terreno, relieve, ríos,
 ciudades, rótulos— está exactamente como estaba; ningún sistema del juego; y
 ningún control cambió de sitio, de nombre ni de comportamiento. Es un repintado,
