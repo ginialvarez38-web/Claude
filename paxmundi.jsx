@@ -19877,63 +19877,156 @@ function Ico({ n, t = 18, g = 1.6, style }) {
 
 // ═══ EL EMBLEMA ═════════════════════════════════════════════
 //
-// En Age of History cada nación tiene su escudo, y está arriba a la izquierda
-// en todo momento. Es lo primero que ancla la pantalla: sin él, la cabecera
-// empieza con una palabra suelta y la interfaz no parece de nadie.
+// Cada nación tiene su escudo y está arriba a la izquierda en todo momento. Es
+// lo primero que ancla la pantalla: sin él la cabecera empieza con una palabra
+// suelta y la interfaz no parece de nadie.
 //
-// Acá no puede haber banderas de archivo —el juego se abre con doble clic desde
-// un archivo y no pide nada de afuera, y además las naciones pueden inventarse—
-// así que el escudo se dibuja del nombre. Del nombre salen tres cosas: el
-// campo, la partición y la carga. Siempre las mismas para el mismo nombre, así
-// que Castilla tiene su escudo y lo tiene siempre.
-const CAMPOS = ["#8C2B2B", "#2E5A8C", "#2F6B44", "#7A5F1E", "#5A3A6B", "#1F5E63",
-                "#8A4A1E", "#3A4A5E"];
+// Acá no puede haber banderas de archivo —el juego se abre con doble clic y no
+// pide nada de afuera, y además las naciones pueden inventarse—, así que el
+// escudo se dibuja del nombre, y siempre sale el mismo para el mismo nombre.
+//
+// La primera versión era un cuadrado de color con una figura encima, y se veía
+// por lo que era: algo calculado. Lo que hace que un escudo se lea como escudo
+// no es tener un dibujo dentro. Son tres cosas, y las tres estaban mal:
+//
+//   · LA SILUETA. Un escudo no es un cuadrado. Acá es una tarja —lados rectos,
+//     hombros cuadrados, base en punta—, que es la forma que se reconoce sin
+//     tener que pensarla.
+//   · LA REGLA DE TINTURA. En heráldica no se pone metal sobre metal ni color
+//     sobre color: el oro y la plata van sobre gules, azur, sinople, sable o
+//     púrpura, y al revés. Es una regla de legibilidad de hace ocho siglos —un
+//     escudo tenía que reconocerse a caballo y a distancia— y el ojo la nota
+//     aunque no la sepa. Antes se sacaban dos tintas de la misma bolsa al azar
+//     y por eso salían escudos turbios que no eran de ningún sitio. Ahora se
+//     cumple por construcción: no hay manera de generar uno que la rompa.
+//   · LAS CARGAS. Tienen que ser figuras heráldicas de verdad —flor de lis,
+//     águila, torre, creciente— y macizas, que es como se pintan. Con buena
+//     silueta una figura maciza se lee a treinta píxeles; lo que no se leía era
+//     la de antes, que tenía la silueta blanda.
+//
+// Los esmaltes van apagados a propósito y del mismo sitio que el resto de la
+// paleta: un escudo de colores encendidos es un logotipo.
+const ESMALTES = ["#A33B36", "#2F5580", "#3B6B44", "#262B31", "#5F4368"];   // gules, azur, sinople, sable, púrpura
+const METALES = ["#C6A45C", "#C3C8CF"];                                     // oro, plata
+// La tarja. Se usa dos veces: de silueta y de recorte para que el campo y las
+// particiones no se salgan de ella.
+const TARJA = "M2.5,1.5h19v11.4c0,5.9-3.7,10-9.5,12.6C6.2,22.9 2.5,18.8 2.5,12.9Z";
+// Las particiones clásicas. Se pintan con la segunda tintura encima del campo,
+// recortadas por la tarja.
 const PARTICIONES = [
-  "",                                        // llano
-  "M0,0h12v24H0z",                           // partido
-  "M0,0h24v12H0z",                           // cortado
-  "M0,0h12v12H0zM12,12h12v12H12z",           // cuartelado
-  "M0,0h24L0,24z",                           // tajado
-  "M12,0l12,24H0z",                          // chevron
+  null,                                    // llano
+  "M12,0h13v27H12z",                       // partido
+  "M0,0h25v13H0z",                         // cortado
+  "M12,0h13v13H12zM0,13h12v14H0z",         // cuartelado
+  "M0,0h25L0,27z",                         // tajado
+  "M12.5,3L25,27H0z",                      // chevrón
 ];
-// Las cargas van todas de línea y todas geométricas. La primera versión tenía
-// una maciza —un escudete relleno— y a treinta píxeles se leía como un huevo:
-// una mancha de color con silueta blanda no es una figura, es un borrón. Con
-// trazo, hasta la forma más simple se reconoce.
+// Las cargas, macizas y con silueta de verdad. Cada una centrada en la mitad
+// alta de la tarja, que es donde va una carga cuando el escudo es liso.
 const CARGAS = [
-  "M12,3.2l2.6,5.6 6.1,0.8-4.5,4.2 1.2,6.1L12,17l-5.4,2.9 1.2-6.1L3.3,9.6l6.1-0.8z", // estrella
-  "M12,20.5C8,18.6 6,15.6 6,11.7V5.2l6-1.7 6,1.7v6.5c0,3.9-2,6.9-6,8.8z",             // escudete
-  "M12,3.5v17M4.5,10h15M7.5,3.5h9M7.5,20.5h9",                                        // cruz
-  "M4.5,4.5l15,15M19.5,4.5l-15,15",                                                   // aspa
-  "M12,4.5a7.5,7.5 0 1,0 0.1,0M12,9a3,3 0 1,0 0.1,0",                                 // anillo
-  "M3.5,12h17M8,7l-4.5,5 4.5,5M16,7l4.5,5-4.5,5",                                     // faja
-  "M12,3.5l8.5,5v7l-8.5,5-8.5-5v-7z",                                                 // losange
-  "M5,19V8l3.5,2.5V6.5h7v4L19,8v11zM10.5,19v-4h3v4",                                  // torre
+  // Flor de lis: pétalo central, dos laterales que se enroscan hacia abajo, la
+  // faja que los ata y el pie. La primera versión intentaba hacerla de una
+  // tirada y salía una cerradura; hecha por partes, cada una con su forma, se
+  // reconoce a la primera. Es la carga más conocida de todas y por eso es la
+  // que menos perdona.
+  { d: "M12.5,3C13.9,5.4 14.6,7.7 14.6,9.6c0,1.4-.4,2.4-1,3.1h-2.2c-.6-.7-1-1.7-1-3.1C10.4,7.7 11.1,5.4 12.5,3z"
+       + "M8,12.9h9v1.6H8z"
+       + "M11.2,14.5c0,2.1-1,3.7-2.8,4.4-1.4.5-2.6.1-3.2-.9-.5-.9-.2-2 .8-2.7-.6.9-.4 1.8.4 2.2 1 .5 2.2-.2 2.8-1.6.3-.6.4-1 .4-1.4z"
+       + "M13.8,14.5c0,2.1 1,3.7 2.8,4.4 1.4.5 2.6.1 3.2-.9.5-.9.2-2-.8-2.7.6.9.4 1.8-.4 2.2-1 .5-2.2-.2-2.8-1.6-.3-.6-.4-1-.4-1.4z"
+       + "M11.4,14.5h2.2v4.9c.7.6 1.4 1.2 1.4 1.9h-5c0-.7.7-1.3 1.4-1.9z" },
+  // cruz llana. La anterior llevaba dos barras sueltas arriba y abajo que
+  // flotaban separadas del palo y parecían un error de dibujo.
+  { d: "M10.9,3.6h3.2v6.6h6.6v3.2h-6.6v7.4h-3.2v-7.4H4.3v-3.2h6.6z" },
+  // torre almenada, con sus tres merlones y su puerta. La anterior era un
+  // rectángulo con bultos y a tamaño de cabecera salía un borrón negro; la
+  // puerta es lo que la vuelve una torre y no una caja.
+  { d: "M6.8,11h11.4v9.6H6.8zM6.8,8.4h2.3v2.6H6.8zM11.2,8.4h2.6v2.6h-2.6zM15.9,8.4h2.3v2.6h-2.3zM11.2,20.6v-3.9a1.3,1.3 0 0 1 2.6,0v3.9z",
+    par: true },
+  // creciente
+  { d: "M16.8,4.2a8,8 0 1 0 0,14.6 6.4,6.4 0 1 1 0,-14.6z" },
+  // mullete de seis puntas
+  { d: "M12.5,2.6l2.1,5.9 6.2.3-4.8 3.9 1.6 6-5.1-3.5-5.1 3.5 1.6-6L4.2,8.8l6.2-.3z" },
+  // llave
+  { d: "M14.6,3.2a4.3,4.3 0 1 0 -3.1,7.3l-.1 9.6h2v-2.3h2.1v-1.8h-2.1v-1.9h2.4v-1.8h-2.4l.1-1.8a4.3,4.3 0 0 0 1.1-7.3zM13,5.2a1.9,1.9 0 1 1 -1.9,1.9 1.9,1.9 0 0 1 1.9-1.9z",
+    par: true },
+  // espada en palo. Reemplaza al águila, que a este tamaño no era un águila
+  // sino un estallido: un ave con las alas abiertas necesita más píxeles de los
+  // que hay, y una figura que no se reconoce no es una figura.
+  { d: "M12.5,2.6l1.3,2.6v9.3h3v1.8h-3v2.8h-2.6v-2.8h-3v-1.8h3V5.2z"
+       + "M12.5,18.8a1.7,1.7 0 1 0 0.05,0z" },
+  // chevrón. Reemplaza al león, que resumido no era un león. Una pieza
+  // geométrica no finge ser un animal y en heráldica real hay tantas como
+  // bestias.
+  { d: "M12.5,5.4l8.2,9.9h-4.1l-4.1-5-4.1,5H4.3z" },
 ];
+// Del nombre salen las cuatro decisiones. Tres andares distintos para que dos
+// nombres parecidos no den escudos parecidos: con un solo acumulador,
+// «Castilla» y «Castellón» salían casi iguales.
 function emblemaDe(nombre) {
   const t = String(nombre || "reino");
-  let a = 0, b = 0, c = 0;
+  let a = 7, b = 13, c = 29;
   for (let i = 0; i < t.length; i++) {
     const k = t.charCodeAt(i);
-    a = (a * 31 + k) % 9973; b = (b * 17 + k * 7) % 9973; c = (c * 13 + k * 3) % 9973;
+    a = (a * 31 + k) % 65521;
+    b = (b * 131 + k * 7 + i) % 65521;
+    c = (c * 17 + k * 13 + i * 3) % 65521;
   }
-  return { campo: CAMPOS[a % CAMPOS.length],
-           campo2: CAMPOS[(a + 3 + (b % 5)) % CAMPOS.length],
-           particion: PARTICIONES[b % PARTICIONES.length],
-           carga: CARGAS[c % CARGAS.length],
-           tinta: (c % 3 === 0) ? "#E8DCBE" : "#E3B04B" };
+  // Acá se cumple la regla de tintura, y se cumple sola: si el campo es de
+  // color, la carga es de metal; si el campo es de metal, la carga es de color.
+  // No hay un tercer camino, así que no hay escudo posible que la rompa.
+  const campoEsColor = (a % 5) !== 0;              // cuatro de cada cinco, campo de color
+  const campo = campoEsColor ? ESMALTES[a % ESMALTES.length] : METALES[a % METALES.length];
+  // La tintura de la carga y el trazo de la carga son dos cosas distintas y
+  // por llamarlas igual la segunda pisaba a la primera: el escudo terminaba
+  // usando la cadena del trazo como color de relleno, así que la figura salía
+  // negra. Lo cazó la prueba del muro, no el ojo.
+  const tinta = campoEsColor ? METALES[c % METALES.length] : ESMALTES[c % ESMALTES.length];
+  // La partición lleva la tintura contraria al campo, que es justo para lo que
+  // sirve partir un escudo: meter un metal al lado de un color.
+  // Mitad llanos y mitad partidos. Con la tabla a secas salía un llano de cada
+  // seis y, como el campo partido no lleva carga, catorce de cada dieciséis
+  // escudos eran dos tintas y nada más: auténticos pero todos iguales entre sí.
+  // Con la tirada aparte, la mitad llevan figura y la mitad son de pieza.
+  const part = (b % 2 === 0) ? null : PARTICIONES[1 + (b % (PARTICIONES.length - 1))];
+  const campo2 = campoEsColor ? METALES[(b + 1) % METALES.length]
+                              : ESMALTES[(b + 2) % ESMALTES.length];
+  return { campo, campo2, part, tinta, carga: CARGAS[c % CARGAS.length].d,
+           cargaPar: !!CARGAS[c % CARGAS.length].par,
+           // Con el escudo partido, la carga va encima de las dos tinturas y
+           // ahí la regla no aplica —una carga «sobre el todo» puede—, pero
+           // conviene que sea oscura para que se lea también sobre el metal.
+           tintaSobrePart: ESMALTES[3] };
 }
 function Emblema({ nombre, t = 34 }) {
   const e = emblemaDe(nombre);
+  const id = "esc" + Math.abs(nombre ? nombre.length * 7919 : 1) + (e.part ? "p" : "l");
   return (
-    <svg width={t} height={t} viewBox="0 0 24 24" aria-hidden="true"
+    <svg width={t} height={t * 27 / 25} viewBox="0 0 25 27" aria-hidden="true"
       style={{ display: "block", flex: "0 0 auto" }}>
-      <rect x="0" y="0" width="24" height="24" fill={e.campo} />
-      {e.particion && <path d={e.particion} fill={e.campo2} />}
-      <path d={e.carga} fill="none" stroke={e.tinta} strokeWidth="1.7"
-        strokeLinejoin="round" strokeLinecap="round" />
-      <rect x="0.6" y="0.6" width="22.8" height="22.8" fill="none"
-        stroke="rgba(0,0,0,0.55)" strokeWidth="1.2" />
+      <defs>
+        <clipPath id={id}><path d={TARJA} /></clipPath>
+      </defs>
+      <g clipPath={`url(#${id})`}>
+        <rect x="0" y="0" width="25" height="27" fill={e.campo} />
+        {e.part && <path d={e.part} fill={e.campo2} />}
+        {/* Con el campo partido no va carga. Una figura encima de dos tinturas
+            no puede contrastar con las dos a la vez, y en heráldica real un
+            campo partido se basta solo —los palos de Aragón, los cuarteles de
+            Borgoña—. Así quedan dos familias limpias en vez de una turbia. */}
+        {!e.part && <path d={e.carga} fill={e.tinta}
+          fillRule={e.cargaPar ? "evenodd" : "nonzero"} />}
+        {/* La luz de arriba y la sombra de abajo: dos velos muy tenues que le
+            dan al esmalte algo de bulto. Sin esto el escudo es una calcomanía
+            plana; con esto parece pintado sobre una tabla. */}
+        <path d="M0,0h25v9C17,12.5 8,12.5 0,9z" fill="#FFFFFF" opacity="0.07" />
+        <path d="M0,17C8,21 17,21 25,17v10H0z" fill="#000000" opacity="0.16" />
+      </g>
+      {/* El filo. Va oscuro y por fuera del recorte, así el borde queda limpio
+          y el escudo se despega de lo que tenga detrás. */}
+      <path d={TARJA} fill="none" stroke="#0B0D11" strokeWidth="1.6"
+        strokeLinejoin="round" />
+      <path d={TARJA} fill="none" stroke={C.brassDark} strokeWidth="0.7"
+        strokeLinejoin="round" opacity="0.85" />
     </svg>
   );
 }
@@ -23928,10 +24021,7 @@ export default function PaxMundi() {
             país está gobernando. */}
         <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 9,
           maxWidth: estrecho ? 168 : 258, overflow: "hidden", order: estrecho ? 1 : 0 }}>
-          <span style={{ display: "flex", padding: 2, background: "rgba(0,0,0,0.5)",
-            border: `1px solid ${C.brassDark}` }}>
-            <Emblema nombre={s.nacion.nombre} t={estrecho ? 26 : 32} />
-          </span>
+          <Emblema nombre={s.nacion.nombre} t={estrecho ? 26 : 31} />
           <div style={{ minWidth: 0, overflow: "hidden" }}>
           <div style={{ fontSize: 15, lineHeight: 1.1, whiteSpace: "nowrap", color: C.ink,
             fontWeight: 600, letterSpacing: 0.2 }}>

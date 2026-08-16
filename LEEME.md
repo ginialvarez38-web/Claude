@@ -1099,9 +1099,37 @@ qué le falta al nuestro, y son dos cosas concretas:
   tintas son 768 escudos posibles, y en catorce reinos probados salieron catorce
   distintos.
 
-  Las cargas van todas de línea. La primera versión tenía una maciza y a treinta
-  píxeles se leía como un huevo: una mancha de color con silueta blanda no es
-  una figura, es un borrón.
+  Pero eso seguía siendo un cuadrado de color con una figura encima, y la guía
+  de identidad pide evitar justamente lo que parece calculado. Lo que hace que
+  un escudo se lea como escudo son tres cosas, y las tres estaban mal:
+
+  - **La silueta.** Un escudo no es un cuadrado. Ahora es una tarja —lados
+    rectos, hombros cuadrados, base en punta—, y con eso deja de necesitar
+    marco: el escudo es su propio marco.
+  - **La regla de tintura.** En heráldica no va metal sobre metal ni color sobre
+    color: el oro y la plata van sobre gules, azur, sinople, sable o púrpura, y
+    al revés. Es una regla de legibilidad de hace ocho siglos —un escudo tenía
+    que reconocerse a caballo y a distancia— y el ojo la nota aunque no la sepa.
+    Antes se sacaban dos tintas de la misma bolsa al azar y salían escudos
+    turbios que no eran de ningún sitio. Ahora se cumple por construcción.
+  - **Las cargas.** Figuras heráldicas de verdad y macizas, que es como se
+    pintan: flor de lis, cruz, torre almenada, creciente, mullete, llave,
+    espada y chevrón.
+
+  Y campo partido no lleva carga. Una figura encima de dos tinturas no puede
+  contrastar con las dos a la vez, y en heráldica real un campo partido se basta
+  solo. Mitad y mitad: la mitad de los escudos llevan figura, la mitad son de
+  pieza.
+
+  **Lo que enseñó la prueba.** Hay un banco que dibuja dieciséis escudos y una
+  tira con las ocho cargas, y comprueba la regla de tintura sobre cada uno. Cazó
+  tres cosas que el ojo no: que la tintura de la carga y el trazo de la carga se
+  llamaban igual —la segunda pisaba a la primera y el escudo usaba la cadena del
+  trazo como color de relleno, así que la figura salía negra—; que con la
+  primera tabla salía un campo llano de cada seis y catorce de dieciséis escudos
+  eran dos tintas y nada más; y que la flor de lis, la carga más conocida de
+  todas, se leía como una cerradura. Ninguna de las tres se ve mirando un escudo
+  suelto a tamaño de cabecera.
 
 **Lo que no cambió, y es deliberado:** el mapa —terreno, relieve, ríos,
 ciudades, rótulos— está exactamente como estaba; ningún sistema del juego; y
