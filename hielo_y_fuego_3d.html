@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Atlas del Mundo Conocido</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&family=Alegreya+Sans:wght@400;500;700&display=swap">
+<style>
+/* Layout: el mapa ocupa toda la pantalla; título arriba a la izquierda, buscador arriba a la derecha,
+   viajes rápidos abajo, ficha del lugar como panel lateral (hoja inferior en teléfono). */
+:root {
+  color-scheme: dark;
+  --night: #0e1b22;      /* cielo y niebla */
+  --deep: #16303b;       /* superficies */
+  --parch: #ece2c8;      /* texto: pergamino */
+  --parch-dim: #b3a98f;
+  --sea-ink: #a9c7cf;    /* rótulos de mares */
+  --brass: #c9a35a;      /* acento: latón */
+  --panel: rgba(14, 27, 34, .88);
+  --line: rgba(236, 226, 200, .18);
+  --display: "IM Fell English SC", "Iowan Old Style", Georgia, serif;
+  --serif: "IM Fell English", "Iowan Old Style", Georgia, serif;
+  --ui: "Alegreya Sans", "Segoe UI", system-ui, sans-serif;
+}
+html, body { height: 100%; }
+body { background: var(--night); color: var(--parch); font-family: var(--ui); overflow: hidden; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+#labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.lbl { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform, opacity;
+  text-shadow: 0 0 3px rgba(5, 12, 16, .95), 0 1px 2px rgba(5, 12, 16, .9); transition: opacity .25s; }
+.city { pointer-events: auto; background: none; border: 0; padding: 2px 4px 2px 12px; color: var(--parch);
+  font: 14px/1.1 var(--serif); cursor: pointer; }
+.city::before { content: ""; position: absolute; left: 0; top: 50%; width: 7px; height: 7px; margin-top: -3.5px;
+  border-radius: 50%; background: var(--parch); box-shadow: 0 0 0 1.5px rgba(5, 12, 16, .85); }
+.city.t1 { font-size: 15.5px; }
+.city.t1::before { background: var(--brass); width: 8px; height: 8px; margin-top: -4px; }
+.city:hover, .city:focus-visible, .city.sel { color: var(--brass); outline: none; }
+.city:focus-visible span { text-decoration: underline; text-underline-offset: 3px; }
+.region { font: 15px/1 var(--display); letter-spacing: .22em; color: var(--parch); opacity: .85; text-transform: uppercase; }
+.region.big { font-size: 22px; letter-spacing: .3em; }
+.sea { font: italic 15px/1 var(--serif); letter-spacing: .18em; color: var(--sea-ink); }
+.range { font: italic 12.5px/1 var(--serif); letter-spacing: .12em; color: var(--parch-dim); }
+
+header { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); left: max(16px, env(safe-area-inset-left, 0px));
+  pointer-events: none; max-width: min(440px, calc(100vw - 32px)); }
+h1 { margin: 0; font: 26px/1.05 var(--display); letter-spacing: .06em; text-wrap: balance;
+  text-shadow: 0 1px 3px rgba(5, 12, 16, .9); }
+header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--parch-dim); text-shadow: 0 1px 3px rgba(5, 12, 16, .9); }
+
+#search { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 16px); right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; gap: 8px; align-items: center; }
+#q { width: 220px; padding: 8px 12px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--parch); font: 15px var(--ui); }
+#q::placeholder { color: var(--parch-dim); }
+#q:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+#compass { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel);
+  padding: 0; cursor: pointer; display: grid; place-items: center; }
+#compass:focus-visible { outline: 2px solid var(--brass); }
+#compass svg { width: 30px; height: 30px; }
+
+#trips { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: center; pointer-events: none; }
+#trips .row { display: flex; gap: 6px; overflow-x: auto; pointer-events: auto; padding: 4px; max-width: 100%;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; scrollbar-width: none; }
+#trips button { flex: none; border: 0; background: none; color: var(--parch); font: 15px var(--serif); padding: 7px 12px;
+  border-radius: 4px; cursor: pointer; }
+#trips button:hover { background: rgba(236, 226, 200, .08); }
+#trips button[aria-pressed="true"] { background: var(--brass); color: #1b1408; }
+#trips button:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+
+#hint { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 74px);
+  font-size: 13px; color: var(--parch-dim); text-shadow: 0 1px 2px rgba(5, 12, 16, .9); pointer-events: none; }
+
+#panel { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 72px);
+  width: 320px; max-height: calc(100% - 170px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 18px 20px 20px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+#panel .kicker { margin: 0; font: 12px/1.2 var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--brass); }
+#panel h2 { margin: 6px 0 4px; font: 28px/1.05 var(--display); text-wrap: balance; }
+#panel .house { margin: 0 0 10px; font: italic 15px var(--serif); color: var(--parch-dim); }
+#panel .house:empty { display: none; }
+#panel .desc { margin: 0; font-size: 16px; line-height: 1.5; max-width: 60ch; }
+#close { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border: 0; border-radius: 4px; background: none;
+  color: var(--parch-dim); font-size: 22px; line-height: 1; cursor: pointer; }
+#close:hover { color: var(--parch); }
+#close:focus-visible { outline: 2px solid var(--brass); }
+
+#loading { position: fixed; inset: 0; display: grid; place-items: center; font: italic 20px var(--serif); color: var(--parch-dim);
+  background: var(--night); }
+#err { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; font-size: 16px; }
+
+@media (max-width: 700px) {
+  h1 { font-size: 21px; }
+  header p { font-size: 13.5px; }
+  #search { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 72px); }
+  #q { width: 170px; }
+  #hint { display: none; }
+  #panel { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto;
+    top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 124px); max-height: 42%; }
+  .city { font-size: 13px; }
+  .city.t1 { font-size: 14px; }
+  .region.big { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) { .lbl { transition: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="labels"></div>
+
+<header>
+  <h1>Atlas del Mundo Conocido</h1>
+  <p>Poniente, Essos y los mares entre ellos</p>
+</header>
+
+<div id="search">
+  <input id="q" list="lugares" placeholder="Buscar un lugar…" autocomplete="off" aria-label="Buscar un lugar">
+  <datalist id="lugares"></datalist>
+  <button id="compass" title="Volver a orientar al norte" aria-label="Orientar al norte">
+    <svg viewBox="0 0 30 30" aria-hidden="true"><g id="needle">
+      <path d="M15 3 L19 15 L15 13 L11 15 Z" fill="#c9a35a"/>
+      <path d="M15 27 L19 15 L15 17 L11 15 Z" fill="#b3a98f" opacity=".6"/>
+      <text x="15" y="2.6" text-anchor="middle" font-size="5" fill="#ece2c8" font-family="Georgia, serif">N</text>
+    </g></svg>
+  </button>
+</div>
+
+<div id="hint">Arrastrá para girar · rueda o pellizco para acercar · clic derecho para desplazar · tocá un nombre</div>
+
+<nav id="trips" aria-label="Viajes rápidos"><div class="row"></div></nav>
+
+<aside id="panel" hidden aria-live="polite">
+  <button id="close" aria-label="Cerrar">×</button>
+  <p class="kicker" id="pKind"></p>
+  <h2 id="pName"></h2>
+  <p class="house" id="pHouse"></p>
+  <p class="desc" id="pDesc"></p>
+</aside>
+
+<div id="loading">Trazando costas…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+/* ===== Geografía (coordenadas del atlas: x hacia el este, y hacia el sur) ===== */
+const W = 280, H = 135, OFFX = 14, RES = 1.8, MS = 4;
+
+function ell(cx, cy, rx, ry, seed = 1) {
+  const pts = [], n = 16;
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2;
+    const k = 1 + 0.16 * Math.sin(a * 3 + seed) + 0.1 * Math.cos(a * 5 + seed * 2.3);
+    pts.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]);
+  }
+  return pts;
+}
+
+const LANDS = [
+  // Poniente, desde las Tierras del Siempre Invierno hasta Dorne
+  [[8,6],[14,3],[22,4],[30,2],[38,4],[46,3],[52,6],[51,11],[48,16],[47,21],[46,26],[44,30],[45,35],[44,40],[42,44],
+   [38,47],[36,50],[38,53],[42,54],[47,53],[52,55],[51,58],[48,60],[50,63],[49,66],[45,68],[46,71],[42,74],[39,76],
+   [38,78],[42,79],[47,78],[46,81],[44,83],[47,86],[46,90],[42,91],[36,91],[33,93],[40,95],[48,96],[54,97],[53,99],
+   [48,101],[40,104],[32,106],[24,104],[19,101],[16,98],[13,96],[10,92],[11,86],[9,80],[12,74],[10,69],[14,66],
+   [16,62],[13,60],[10,58],[14,56],[19,52],[14,50],[8,46],[6,40],[9,35],[6,30],[8,24],[5,18],[7,12]],
+  // Essos
+  [[60,40],[66,38],[74,40],[80,37],[86,36],[96,33],[110,32],[124,30],[140,31],[156,30],[170,26],[186,24],[200,22],
+   [216,24],[232,22],[250,26],[268,28],[268,140],[246,140],[238,122],[236,114],[238,104],[236,96],[226,92],[212,93],
+   [200,97],[192,104],[188,112],[185,117],[180,113],[172,108],[160,110],[150,112],[144,106],[144,100],[142,96],
+   [136,96],[132,100],[128,106],[126,112],[122,114],[118,110],[114,108],[106,106],[98,108],[90,106],[86,105],[80,102],
+   [74,100],[70,96],[68,90],[66,82],[64,76],[62,70],[61,64],[58,58],[60,52],[57,48],[58,44]],
+  // Sothoryos (sólo su costa norte)
+  [[84,142],[88,131],[98,129],[110,130],[122,128],[136,127],[150,128],[162,131],[168,142]],
+  // Islas
+  ell(50, 30, 2, 3, 1),          // Skagos
+  ell(0.5, 37, 2, 1.5, 2),       // Isla del Oso
+  ell(3, 61, 2.4, 1.6, 3),       // Gran Wyk
+  ell(7, 62, 1.6, 1.1, 4),       // Harlaw
+  ell(5, 65, 1.4, 1, 5),         // Pyke
+  ell(4, 57.5, 1.3, .9, 6),      // Monteorca
+  ell(7, 72, 1, .7, 7),          // Isla Bella
+  ell(49.5, 74, 1.4, 1.1, 8),    // Rocadragón
+  ell(46.5, 75.6, .9, .6, 9),    // Marcaderiva
+  ell(51, 87, 2.2, 1.1, 10),     // Tarth
+  ell(9, 102, 2.8, 1.6, 11),     // El Rejo
+  ell(44, 49.5, 1.4, .7, 12),    // Tres Hermanas
+  ell(54.8, 46, 1.4, 1.2, 13),   // Braavos
+  ell(64, 93, 1.6, 1.2, 14),     // Tyrosh
+  ell(70, 106, 1.8, 1.2, 15),    // Lys
+  ell(56, 100, 1.2, .8, 16), ell(58.5, 102.2, 1, .7, 17), ell(61, 99.6, 1.1, .8, 18), ell(59, 97.8, .7, .5, 19),
+  ell(108, 118, 3.6, 2.4, 20), ell(114, 121, 3, 1.8, 21), ell(110, 123.6, 2.2, 1.2, 22), ell(118, 117.6, 1.4, 1, 23),
+  ell(134, 16, 9, 5, 24), ell(146, 20, 2.5, 1.5, 25),   // Ib
+  ell(34, 118, 6, 3, 26), ell(43, 121, 3, 1.8, 27), ell(27, 122, 2, 1.3, 28), // Islas del Verano
+  ell(98, 124, 2.4, 1.5, 29),    // Naath
+  ell(130, 123, 2, 1.2, 30),     // Islas Basilisco
+  ell(214, 116, 9, 5, 31),       // Leng
+];
+
+const RANGES = [
+  { pts: [[13,7],[17,12],[21,17],[22,20]], h: 5, w: 3.2 },            // Colmillos Helados
+  { pts: [[24,28],[25,33]], h: 1.8, w: 2.2 },
+  { pts: [[38,55],[41,59],[43,63],[44,66]], h: 4.6, w: 2.8 },          // Montañas de la Luna
+  { pts: [[16,65],[18,70],[17,75]], h: 2.2, w: 2.2 },                 // colinas del Oeste
+  { pts: [[18,93],[26,94],[32,95.5],[38,97]], h: 3.4, w: 2 },          // Montañas Rojas
+  { pts: [[86,56],[91,59]], h: 1.6, w: 2.4 },                         // colinas de Norvos
+  { pts: [[105,117],[109,119],[113,120.5],[117,119]], h: 4, w: 1.6 },  // Catorce Llamas
+  { pts: [[180,36],[183,50],[185,64],[187,78],[189,92]], h: 5.2, w: 3.6 }, // Montañas Huesudas
+  { pts: [[168,61],[168.4,61.4]], h: 3.2, w: 2.2 },                   // Madre de las Montañas
+  { pts: [[218,38],[230,44],[244,48]], h: 3, w: 3 },                  // montañas de Yi Ti
+  { pts: [[244,98],[248,106],[252,116]], h: 4.6, w: 3 },              // montañas de la Sombra
+  { pts: [[150,48],[160,44]], h: 1.4, w: 3 },
+];
+
+const RIVERS = [
+  [[30,32],[33,38],[35,43],[38.6,46.6]],                    // Cuchillo Blanco
+  [[24,63],[30,66],[36,68],[42,69.6],[45.6,69.6]],          // Tridente
+  [[24,76],[30,77.5],[35,78],[38.6,77.2]],                  // Aguasnegras
+  [[32,82],[26,85],[18,88],[10.4,88.2]],                    // Mander
+  [[90,50],[92,62],[95,74],[93,88],[89,98],[87,105.6]],     // Rhoyne
+  [[150,82],[146,92],[143.6,98]],                           // Skahazadhan
+];
+
+const TINTS = [
+  [34,100,20,'#c8a467',.85], [47,99,9,'#c8a467',.6], [24,84,16,'#6e9a45',.4], [140,68,36,'#b4ab5a',.9],
+  [162,104,16,'#a4553a',.9], [136,104,14,'#b39360',.6], [152,90,10,'#8e9a58',.4], [248,112,18,'#36383b',.92],
+  [228,66,30,'#4f8a4a',.6], [112,120,9,'#2b2523',.92], [35,120,12,'#3f9a4c',.7], [125,134,44,'#2f6a3a',.78],
+  [138,17,14,'#7d8b80',.5], [90,90,18,'#7e9a4c',.3], [214,116,10,'#2f6e3c',.6], [202,70,16,'#b89a68',.5],
+  [184,112,8,'#b28a5c',.5],
+];
+
+/* ===== Ruido ===== */
+function hash(i, j) {
+  let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function noise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, y, oct) {
+  let s = 0, amp = 1, norm = 0;
+  for (let o = 0; o < oct; o++) { s += amp * noise(x, y); norm += amp; amp *= .5; x *= 2.03; y *= 2.03; }
+  return s / norm;
+}
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+function chaikin(pts, it) {
+  for (let k = 0; k < it; k++) {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      out.push([p[0] * .75 + q[0] * .25, p[1] * .75 + q[1] * .25], [p[0] * .25 + q[0] * .75, p[1] * .25 + q[1] * .75]);
+    }
+    pts = out;
+  }
+  return pts;
+}
+
+function segDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+  let t = l ? ((px - ax) * dx + (py - ay) * dy) / l : 0;
+  t = Math.max(0, Math.min(1, t));
+  const ex = ax + t * dx - px, ey = ay + t * dy - py;
+  return Math.sqrt(ex * ex + ey * ey);
+}
+
+function chamfer(dist, nx, nz) {
+  const D = 1.4142;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i; let d = dist[k];
+    if (i > 0) d = Math.min(d, dist[k - 1] + 1);
+    if (j > 0) { d = Math.min(d, dist[k - nx] + 1); if (i > 0) d = Math.min(d, dist[k - nx - 1] + D); if (i < nx - 1) d = Math.min(d, dist[k - nx + 1] + D); }
+    dist[k] = d;
+  }
+  for (let j = nz - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) {
+    const k = j * nx + i; let d = dist[k];
+    if (i < nx - 1) d = Math.min(d, dist[k + 1] + 1);
+    if (j < nz - 1) { d = Math.min(d, dist[k + nx] + 1); if (i < nx - 1) d = Math.min(d, dist[k + nx + 1] + D); if (i > 0) d = Math.min(d, dist[k + nx - 1] + D); }
+    dist[k] = d;
+  }
+}
+
+/* Genera alturas y colores. Devuelve rejillas planas. */
+function buildWorld(Color) {
+  const cv = document.createElement('canvas');
+  cv.width = W * MS; cv.height = H * MS;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#fff';
+  for (const poly of LANDS) {
+    const p = chaikin(poly, 3);
+    ctx.beginPath();
+    p.forEach(([x, y], i) => i ? ctx.lineTo((x + OFFX) * MS, y * MS) : ctx.moveTo((x + OFFX) * MS, y * MS));
+    ctx.closePath(); ctx.fill();
+  }
+  const img = ctx.getImageData(0, 0, cv.width, cv.height).data, MW = cv.width, MH = cv.height;
+  const mask = (x, y) => {
+    let px = x * MS - .5, py = y * MS - .5;
+    px = Math.max(0, Math.min(MW - 2, px)); py = Math.max(0, Math.min(MH - 2, py));
+    const i = px | 0, j = py | 0, fx = px - i, fy = py - j, at = (a, b) => img[(b * MW + a) * 4] / 255;
+    return (at(i, j) * (1 - fx) + at(i + 1, j) * fx) * (1 - fy) + (at(i, j + 1) * (1 - fx) + at(i + 1, j + 1) * fx) * fy;
+  };
+
+  const NX = Math.round(W * RES) + 1, NZ = Math.round(H * RES) + 1, N = NX * NZ;
+  const land = new Uint8Array(N), dl = new Float32Array(N), ds = new Float32Array(N);
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const x = i / RES, y = j / RES;
+    const wx = x + 2.2 * (fbm(x * .09, y * .09, 3) - .5) + .8 * (fbm(x * .45 + 7, y * .45, 2) - .5);
+    const wy = y + 2.2 * (fbm(x * .09 + 31, y * .09 + 17, 3) - .5) + .8 * (fbm(x * .45, y * .45 + 9, 2) - .5);
+    const k = j * NX + i, L = mask(wx, wy) > .5 && i > 0 && j > 0 && i < NX - 1 && j < NZ - 1;
+    land[k] = L ? 1 : 0;
+    dl[k] = L ? 1e9 : 0; ds[k] = L ? 0 : 1e9;
+  }
+  chamfer(dl, NX, NZ); chamfer(ds, NX, NZ);
+
+  const hgt = new Float32Array(N), col = new Float32Array(N * 3);
+  const latStops = [[0,'#eef2f4'],[9,'#dde4e6'],[18,'#93a29a'],[24,'#566a52'],[50,'#5d7a4a'],[72,'#6c8a45'],[92,'#879449'],[140,'#5e8a43']]
+    .map(([y, c]) => [y, new Color(c).convertSRGBToLinear()]);
+  const tints = TINTS.map(([x, y, r, c, s]) => ({ x, y, r, s, c: new Color(c).convertSRGBToLinear() }));
+  const rock = new Color('#7d746b').convertSRGBToLinear(), snow = new Color('#f2f5f7').convertSRGBToLinear();
+  const beach = new Color('#cdbb8c').convertSRGBToLinear();
+  const shallow = new Color('#3f7179').convertSRGBToLinear(), deep = new Color('#0d2433').convertSRGBToLinear();
+  const c = new Color();
+  const boxes = RANGES.map(r => {
+    const xs = r.pts.map(p => p[0]), ys = r.pts.map(p => p[1]), pad = r.w * 3;
+    return [Math.min(...xs) - pad, Math.max(...xs) + pad, Math.min(...ys) - pad, Math.max(...ys) + pad];
+  });
+
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const k = j * NX + i, x = i / RES, y = j / RES, dx = x - OFFX;
+    let h;
+    if (land[k]) {
+      const d = dl[k] / RES, inl = 1 - Math.exp(-d / 2.5);
+      h = .12 + 1.0 * (1 - Math.exp(-d / 7)) * (.55 + .7 * fbm(x * .06, y * .06, 3));
+      const hl = fbm(x * .07 + 50, y * .07, 4); h += 1.0 * hl * hl * (1 - Math.exp(-d / 4));
+      h += .28 * (fbm(x * .35, y * .35, 3) - .5) * (1 - Math.exp(-d / 2));
+      let ridge = 0;
+      for (let r = 0; r < RANGES.length; r++) {
+        const b = boxes[r]; if (dx < b[0] || dx > b[1] || y < b[2] || y > b[3]) continue;
+        const R = RANGES[r]; let md = 1e9;
+        for (let s = 0; s < R.pts.length - 1; s++) md = Math.min(md, segDist(dx, y, R.pts[s][0], R.pts[s][1], R.pts[s + 1][0], R.pts[s + 1][1]));
+        const rn = 1 - Math.abs(2 * fbm(x * .22 + r * 13, y * .22, 3) - 1);
+        ridge += R.h * Math.exp(-(md / R.w) * (md / R.w)) * (.4 + .75 * rn);
+      }
+      h += ridge * inl;
+      hgt[k] = h;
+
+      // color: latitud → regiones → roca y nieve → playa
+      let s = 0; while (s < latStops.length - 2 && y > latStops[s + 1][0]) s++;
+      const [y0, c0] = latStops[s], [y1, c1] = latStops[s + 1];
+      c.lerpColors(c0, c1, Math.min(1, Math.max(0, (y - y0) / (y1 - y0))));
+      for (const t of tints) {
+        const dd = Math.hypot(dx - t.x, y - t.y); if (dd >= t.r) continue;
+        const u = 1 - dd / t.r; c.lerp(t.c, t.s * u * u * (3 - 2 * u));
+      }
+      c.lerp(rock, smooth(1.7, 3.1, h) * .85);
+      const sl = 4.2 + Math.max(0, y - 80) * .05 - Math.max(0, 30 - y) * .09;
+      c.lerp(snow, smooth(sl, sl + .7, h));
+      if (y < 14) c.lerp(snow, smooth(14, 4, y) * .8);
+      c.lerp(beach, (1 - smooth(.12, .32, h)) * .45);
+      c.multiplyScalar(.9 + .2 * fbm(x * .5 + 3, y * .5 + 3, 2));
+    } else {
+      const d = ds[k] / RES, t = 1 - Math.exp(-d / 6);
+      h = -.12 - 2.4 * t + .3 * (fbm(x * .1, y * .1, 2) - .5) * t;
+      hgt[k] = h;
+      c.lerpColors(shallow, deep, t);
+    }
+    col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+  }
+  return { NX, NZ, hgt, col };
+}
+
+/* ===== Lugares ===== */
+const PLACES = [
+  // nombre, x, y, nivel, región, casa, descripción
+  ['Castillo Negro', 25, 23, 1, 'El Muro', 'Guardia de la Noche', 'El principal castillo de la Guardia de la Noche, al pie del Muro. De aquí salen las patrullas hacia el bosque Encantado.'],
+  ['Guardiaoriente del Mar', 45.3, 23, 2, 'El Muro', 'Guardia de la Noche', 'El extremo oriental del Muro, con puerto propio sobre la bahía de las Focas.'],
+  ['Torre Sombría', 10, 23, 2, 'El Muro', 'Guardia de la Noche', 'Vigila el extremo occidental del Muro, donde bajan los pasos de los Colmillos Helados.'],
+  ['El Puño de los Primeros Hombres', 24, 15, 3, 'Más allá del Muro', '', 'Un antiguo fuerte circular sobre una colina, varios días al norte del Muro.'],
+  ['Invernalia', 27, 36, 1, 'El Norte', 'Casa Stark', 'Sede de la Casa Stark, Guardianes del Norte. Fuentes termales corren bajo sus muros y la mantienen tibia en pleno invierno.'],
+  ['Fuerte Terror', 38, 32, 3, 'El Norte', 'Casa Bolton', 'Castillo de la Casa Bolton, cerca de la costa oriental del Norte.'],
+  ['Último Hogar', 36, 26.5, 3, 'El Norte', 'Casa Umber', 'Fortaleza de los Umber, la última gran casa antes del Muro.'],
+  ['Puerto Blanco', 37, 46, 2, 'El Norte', 'Casa Manderly', 'La ciudad más grande del Norte, en la desembocadura del Cuchillo Blanco.'],
+  ['Isla del Oso', 0.5, 37, 3, 'El Norte', 'Casa Mormont', 'Isla boscosa frente a la costa occidental del Norte, hogar de la Casa Mormont.'],
+  ['Foso Cailin', 28, 53, 2, 'El Norte', '', 'Ruinas de una fortaleza que cierra el paso por el Cuello, entre ciénagas.'],
+  ['Los Gemelos', 28, 58, 2, 'Tierras de los Ríos', 'Casa Frey', 'Dos castillos idénticos unidos por un puente sobre el Forca Verde. Quien quiera cruzar paga peaje.'],
+  ['Aguasdulces', 23, 66, 2, 'Tierras de los Ríos', 'Casa Tully', 'Sede de la Casa Tully, levantada en la confluencia de dos ríos.'],
+  ['Harrenhal', 32, 70, 2, 'Tierras de los Ríos', '', 'El castillo más grande de Poniente. Sus torres se fundieron con el fuego de dragón de Aegon el Conquistador.'],
+  ['Pyke', 5, 65, 2, 'Islas del Hierro', 'Casa Greyjoy', 'Fortaleza de los Greyjoy: torres sobre peñascos en el mar, unidas por puentes colgantes.'],
+  ['Nido de Águilas', 42, 61, 1, 'El Valle de Arryn', 'Casa Arryn', 'Castillo blanco en lo alto de una montaña. Sólo se sube por un sendero de mulas.'],
+  ['Puerto Gaviota', 48.3, 63.4, 3, 'El Valle de Arryn', '', 'El gran puerto del Valle, sobre el mar Angosto.'],
+  ['Roca Casterly', 13.2, 71, 1, 'Tierras del Oeste', 'Casa Lannister', 'Una fortaleza tallada dentro de un peñasco junto al mar, sobre minas de oro.'],
+  ['Desembarco del Rey', 37, 77.5, 1, 'Tierras de la Corona', 'Casa Targaryen · Casa Baratheon', 'Capital de los Siete Reinos. En la Fortaleza Roja está el Trono de Hierro.'],
+  ['Rocadragón', 49.5, 74, 2, 'Tierras de la Corona', 'Casa Targaryen', 'Isla volcánica y antigua fortaleza de los Targaryen, desde donde partió la Conquista.'],
+  ['Bastión de Tormentas', 43.4, 84.5, 2, 'Tierras de la Tormenta', 'Casa Baratheon', 'Castillo de muros gruesos frente a la bahía de los Naufragios. Resistió mil tormentas.'],
+  ['Tarth', 51, 87, 3, 'Tierras de la Tormenta', 'Casa Tarth', 'La Isla Zafiro, llamada así por el azul de sus aguas.'],
+  ['Altojardín', 24, 85, 1, 'El Dominio', 'Casa Tyrell', 'Sede de la Casa Tyrell, entre los campos más fértiles del reino.'],
+  ['Antigua', 16.5, 96, 1, 'El Dominio', 'Casa Hightower', 'La ciudad más antigua de Poniente. Allí están la Ciudadela de los maestres y el Faro.'],
+  ['El Rejo', 9, 102, 3, 'El Dominio', 'Casa Redwyne', 'Isla de viñedos. Su vino es el mejor de los Siete Reinos.'],
+  ['Lanza del Sol', 47, 99.8, 1, 'Dorne', 'Casa Martell', 'Sede de la Casa Martell, en el extremo oriental de Dorne.'],
+  ['Campoestrella', 22, 101.5, 3, 'Dorne', 'Casa Dayne', 'Castillo de la Casa Dayne, guardianes de la espada Albor.'],
+  ['Braavos', 54.8, 46, 1, 'Ciudades Libres', '', 'Ciudad de canales sobre una laguna, custodiada por el Titán. Sede del Banco de Hierro.'],
+  ['Pentos', 64.5, 70, 1, 'Ciudades Libres', '', 'Ciudad Libre de mercaderes y magísteres, frente al mar Angosto.'],
+  ['Myr', 69, 86, 2, 'Ciudades Libres', '', 'Famosa por sus encajes, sus lentes y sus artesanos.'],
+  ['Tyrosh', 64, 93, 2, 'Ciudades Libres', '', 'Isla de tintoreros y mercenarios, junto a los Peldaños de Piedra.'],
+  ['Lys', 70, 106, 2, 'Ciudades Libres', '', 'Isla de jardines y perfumes, a la entrada del mar Estival.'],
+  ['Volantis', 86, 103.5, 1, 'Ciudades Libres', '', 'La más antigua de las Ciudades Libres, en la desembocadura del Rhoyne. La rodea la Muralla Negra.'],
+  ['Norvos', 86, 59, 2, 'Ciudades Libres', '', 'Ciudad Libre de sacerdotes barbudos, entre colinas.'],
+  ['Qohor', 102, 62, 2, 'Ciudades Libres', '', 'Ciudad del bosque. Sus herreros saben reforjar el acero valyrio.'],
+  ['Lorath', 78, 41.5, 3, 'Ciudades Libres', '', 'La más septentrional de las Ciudades Libres, en islas grises frente al mar de los Escalofríos.'],
+  ['Vaes Dothrak', 170, 64, 1, 'Mar Dothraki', '', 'La única ciudad de los dothrakis, al pie de la Madre de las Montañas. Dentro de ella está prohibido derramar sangre.'],
+  ['Meereen', 145, 98.5, 1, 'Bahía de los Esclavos', '', 'La mayor de las ciudades esclavistas, coronada por una gran pirámide.'],
+  ['Yunkai', 131, 99, 2, 'Bahía de los Esclavos', '', 'La Ciudad Amarilla, hecha de ladrillo amarillo.'],
+  ['Astapor', 124, 110, 2, 'Bahía de los Esclavos', '', 'La Ciudad Roja, donde se adiestraba a los Inmaculados.'],
+  ['Qarth', 184, 114, 1, 'Costa del mar de Jade', '', 'Ciudad de murallas triples sobre el estrecho que lleva al mar de Jade.'],
+  ['Valyria', 110, 119, 1, 'Mar Humeante', '', 'Ruinas del Feudo Franco de Valyria, destruido por la Maldición. Las Catorce Llamas todavía arden.'],
+  ['Asshai', 237.5, 112, 1, 'Tierras Sombrías', '', 'Ciudad oscura junto a la Sombra. Allí acuden magos, sacerdotes rojos y nigromantes.'],
+  ['Puerto de Ibben', 130, 18, 2, 'Ib', '', 'Puerto de balleneros en una isla fría del mar de los Escalofríos.'],
+  ['Peldaños de Piedra', 58.5, 100, 3, 'Mar Angosto', '', 'Islas rocosas entre Dorne y Essos, refugio de piratas.'],
+];
+const AREAS = [
+  // texto, x, y, tipo, distancia máxima de visibilidad
+  ['Westeros', 30, 47, 'region big', 900, 160],
+  ['Essos', 130, 50, 'region big', 900, 200],
+  ['Tierras del Siempre Invierno', 28, 8, 'region', 260, 0],
+  ['Más allá del Muro', 30, 18.5, 'region', 200, 0],
+  ['El Norte', 22, 43, 'region', 230, 0],
+  ['Tierras de los Ríos', 26, 62, 'region', 150, 0],
+  ['El Valle', 46, 57.5, 'region', 150, 0],
+  ['Islas del Hierro', 2, 59, 'region', 150, 0],
+  ['Tierras del Oeste', 18, 77, 'region', 150, 0],
+  ['El Dominio', 22, 90, 'region', 150, 0],
+  ['Tierras de la Corona', 37, 72, 'region', 130, 0],
+  ['Tierras de la Tormenta', 40, 88, 'region', 150, 0],
+  ['Dorne', 33, 100, 'region', 230, 0],
+  ['Mar Dothraki', 138, 74, 'region', 400, 0],
+  ['Desierto Rojo', 164, 104, 'region', 300, 0],
+  ['Lhazar', 152, 88, 'region', 250, 0],
+  ['Yi Ti', 226, 66, 'region', 400, 0],
+  ['Tierras Sombrías', 248, 120, 'region', 320, 0],
+  ['Sothoryos', 125, 133, 'region', 450, 0],
+  ['Islas del Verano', 35, 125, 'region', 320, 0],
+  ['Leng', 214, 116, 'region', 250, 0],
+  ['Mar del Ocaso', -7, 84, 'sea', 900, 0],
+  ['Mar Angosto', 55, 66, 'sea', 600, 0],
+  ['Mar de los Escalofríos', 92, 22, 'sea', 900, 0],
+  ['Mar Estival', 72, 120, 'sea', 900, 0],
+  ['Mar de Jade', 214, 102, 'sea', 900, 0],
+  ['Bahía de los Esclavos', 136, 107, 'sea', 200, 0],
+  ['Mar Humeante', 113, 114, 'sea', 160, 0],
+  ['Mar de Dorne', 42, 93, 'sea', 140, 0],
+  ['Bahía de los Naufragios', 49, 82, 'sea', 90, 0],
+  ['Colmillos Helados', 15, 11, 'range', 140, 0],
+  ['Montañas de la Luna', 39, 64.5, 'range', 120, 0],
+  ['Montañas Rojas', 27, 96.5, 'range', 120, 0],
+  ['Montañas Huesudas', 190, 62, 'range', 260, 0],
+  ['Madre de las Montañas', 168, 58.5, 'range', 140, 0],
+  ['Catorce Llamas', 113, 123, 'range', 120, 0],
+];
+
+/* ===== Escena ===== */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+
+function start() {
+  if (!window.THREE || !THREE.OrbitControls) {
+    $('loading').textContent = 'No se pudo cargar el motor 3D. Revisá la conexión y recargá la página.';
+    return;
+  }
+  const { NX, NZ, hgt, col } = buildWorld(THREE.Color);
+  const toX = x => x + OFFX - W / 2, toZ = y => y - H / 2;
+  const heightAt = (x, y) => {   // coordenadas del atlas
+    let gi = (x + OFFX) * RES, gj = y * RES;
+    gi = Math.max(0, Math.min(NX - 1.001, gi)); gj = Math.max(0, Math.min(NZ - 1.001, gj));
+    const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, g = (a, b) => hgt[b * NX + a];
+    return (g(i, j) * (1 - fx) + g(i + 1, j) * fx) * (1 - fy) + (g(i, j + 1) * (1 - fx) + g(i + 1, j + 1) * fx) * fy;
+  };
+
+  const stage = $('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  stage.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0e1b22');
+  scene.fog = new THREE.Fog('#0e1b22', 320, 700);
+  const camera = new THREE.PerspectiveCamera(40, 1, .5, 2000);
+
+  // terreno
+  const pos = new Float32Array(NX * NZ * 3);
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const k = j * NX + i;
+    pos[k * 3] = i / RES - W / 2; pos[k * 3 + 1] = hgt[k]; pos[k * 3 + 2] = j / RES - H / 2;
+  }
+  const idx = new Uint32Array((NX - 1) * (NZ - 1) * 6);
+  let p = 0;
+  for (let j = 0; j < NZ - 1; j++) for (let i = 0; i < NX - 1; i++) {
+    const a = j * NX + i, b = a + 1, c = a + NX, d = c + 1;
+    idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .95, metalness: 0 })));
+
+  // mar
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 4, H * 6),
+    new THREE.MeshStandardMaterial({ color: '#1f4b5d', transparent: true, opacity: .8, roughness: .3, metalness: .15 }));
+  water.rotation.x = -Math.PI / 2; water.position.y = 0;
+  scene.add(water);
+
+  // luz
+  scene.add(new THREE.HemisphereLight('#d6e4ea', '#3a3226', .7));
+  const sun = new THREE.DirectionalLight('#fff0d6', 1.15);
+  sun.position.set(-120, 150, -90);
+  scene.add(sun);
+
+  // el Muro
+  const wallXs = [];
+  for (let x = 7.4; x <= 46.8; x += .25) { const h = heightAt(x, 22); if (h > .05) wallXs.push([x, h]); }
+  const wall = new THREE.InstancedMesh(new THREE.BoxGeometry(.27, 1, .5),
+    new THREE.MeshStandardMaterial({ color: '#dcedf5', emissive: '#5d8fab', emissiveIntensity: .35, roughness: .4 }), wallXs.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), tr = new THREE.Vector3();
+  wallXs.forEach(([x, h], i) => {
+    const top = Math.max(h + 1.4, 1.9), bot = h - .4;
+    sc.set(1, top - bot, 1); tr.set(toX(x), (top + bot) / 2, toZ(22));
+    m4.compose(tr, q, sc); wall.setMatrixAt(i, m4);
+  });
+  scene.add(wall);
+
+  // ríos
+  const riverMat = new THREE.MeshStandardMaterial({ color: '#5aa3bb', roughness: .35, emissive: '#1b4252', emissiveIntensity: .4 });
+  for (const r of RIVERS) {
+    const c2 = new THREE.CatmullRomCurve3(r.map(([x, y]) => new THREE.Vector3(x, 0, y)));
+    const pts = c2.getPoints(r.length * 30).map(v => new THREE.Vector3(toX(v.x), Math.max(heightAt(v.x, v.z), 0) + .07, toZ(v.z)));
+    const c3 = new THREE.CatmullRomCurve3(pts);
+    scene.add(new THREE.Mesh(new THREE.TubeGeometry(c3, pts.length * 2, .13, 5, false), riverMat));
+  }
+
+  // Valyria: brasas de las Catorce Llamas
+  const EMB = 260, ember = new Float32Array(EMB * 3), emberBase = [];
+  const flames = RANGES[6].pts;
+  for (let e = 0; e < EMB; e++) {
+    const a = flames[e % (flames.length - 1)], b = flames[e % (flames.length - 1) + 1], t = Math.random();
+    const x = a[0] + (b[0] - a[0]) * t + (Math.random() - .5) * 2, y = a[1] + (b[1] - a[1]) * t + (Math.random() - .5) * 1.4;
+    const h = Math.max(heightAt(x, y), .3);
+    emberBase.push([toX(x), h, toZ(y), .6 + Math.random() * 1.4]);
+    ember[e * 3] = toX(x); ember[e * 3 + 1] = h + Math.random() * 4; ember[e * 3 + 2] = toZ(y);
+  }
+  const emberGeo = new THREE.BufferGeometry();
+  emberGeo.setAttribute('position', new THREE.BufferAttribute(ember, 3));
+  scene.add(new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .45, transparent: true, opacity: .9,
+    blending: THREE.AdditiveBlending, depthWrite: false })));
+  const fire = new THREE.PointLight('#ff6a2a', 2.2, 26, 1.6);
+  fire.position.set(toX(111), 5, toZ(120));
+  scene.add(fire);
+
+  // controles
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = .08;
+  controls.screenSpacePanning = false;
+  controls.minDistance = 8; controls.maxDistance = 420;
+  controls.maxPolarAngle = 1.38;
+  controls.zoomSpeed = 1.1;
+
+  // rótulos
+  const layer = $('labels'), labels = [];
+  const list = $('lugares');
+  for (const [name, x, y, tier, region, house, desc] of PLACES) {
+    const el = document.createElement('button');
+    el.className = `lbl city t${tier}`; el.type = 'button';
+    el.innerHTML = `<span></span>`; el.firstChild.textContent = name;
+    const L = { el, kind: 'city', tier, name, x, y, region, house, desc,
+      pos: new THREE.Vector3(toX(x), Math.max(heightAt(x, y), 0) + .25, toZ(y)), max: tier === 1 ? 460 : tier === 2 ? 200 : 105, min: 0 };
+    el.addEventListener('click', () => select(L));
+    layer.appendChild(el); labels.push(L);
+    const o = document.createElement('option'); o.value = name; list.appendChild(o);
+  }
+  for (const [text, x, y, kind, max, min] of AREAS) {
+    const el = document.createElement('div');
+    el.className = `lbl ${kind}`; el.textContent = text;
+    layer.appendChild(el);
+    labels.push({ el, kind, pos: new THREE.Vector3(toX(x), kind === 'sea' ? .3 : Math.max(heightAt(x, y), 0) + 1, toZ(y)), max, min });
+  }
+
+  // ficha
+  let selected = null;
+  function select(L, fly = true) {
+    if (selected) selected.el.classList.remove('sel');
+    selected = L; L.el.classList.add('sel');
+    $('pKind').textContent = L.region; $('pName').textContent = L.name;
+    $('pHouse').textContent = L.house; $('pDesc').textContent = L.desc;
+    $('panel').hidden = false;
+    setPressed(null);
+    if (fly) flyTo(L.x, L.y, L.tier === 1 ? 42 : 34, .9, null);
+  }
+  $('close').addEventListener('click', () => { $('panel').hidden = true; if (selected) selected.el.classList.remove('sel'); selected = null; });
+  $('q').addEventListener('change', e => {
+    const v = e.target.value.trim().toLowerCase();
+    const L = labels.find(l => l.kind === 'city' && l.name.toLowerCase() === v)
+      || labels.find(l => l.kind === 'city' && l.name.toLowerCase().includes(v));
+    if (v && L) { select(L); e.target.value = ''; e.target.blur(); }
+  });
+
+  // viajes
+  const TRIPS = [
+    ['Todo el mundo', 124, 76, 250, .82, 0],
+    ['Poniente', 28, 56, 115, .78, 0],
+    ['El Muro', 26, 22, 46, 1.0, 0],
+    ['Mar Angosto', 56, 74, 80, .92, .45],
+    ['Bahía de los Esclavos', 138, 104, 58, .92, 0],
+    ['Valyria', 112, 118, 36, 1.0, .25],
+    ['Asshai y la Sombra', 238, 108, 62, .9, -.3],
+  ];
+  const row = document.querySelector('#trips .row');
+  const tripBtns = TRIPS.map((t, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = t[0]; b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', () => { setPressed(i); flyTo(t[1], t[2], t[3], t[4], t[5]); });
+    row.appendChild(b); return b;
+  });
+  function setPressed(i) { tripBtns.forEach((b, j) => b.setAttribute('aria-pressed', String(i === j))); }
+
+  // vuelo de cámara
+  let tween = null;
+  const sph = new THREE.Spherical(), tmp = new THREE.Vector3();
+  function placeCam(target, r, phi, theta) {
+    controls.target.copy(target);
+    camera.position.copy(target).add(tmp.setFromSphericalCoords(r, phi, theta));
+  }
+  function flyTo(x, y, dist, polar, az) {
+    sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
+    const to = new THREE.Vector3(toX(x), Math.max(heightAt(x, y), 0) * .5, toZ(y));
+    let th1 = az === null ? sph.theta : az, th0 = sph.theta;
+    while (th1 - th0 > Math.PI) th1 -= Math.PI * 2;
+    while (th1 - th0 < -Math.PI) th1 += Math.PI * 2;
+    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 1500, from: controls.target.clone(), to,
+      r0: sph.radius, r1: dist, p0: sph.phi, p1: polar, th0, th1 };
+  }
+  function stepTween(now) {
+    if (!tween) return;
+    const T = tween, k = T.dur ? Math.min(1, (now - T.t0) / T.dur) : 1;
+    const e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    // al alejarse y acercarse en viajes largos, sube un poco a mitad de camino
+    const hop = Math.sin(Math.PI * e) * Math.min(80, T.from.distanceTo(T.to) * .35);
+    placeCam(tmp.lerpVectors(T.from, T.to, e).clone(), T.r0 + (T.r1 - T.r0) * e + hop, T.p0 + (T.p1 - T.p0) * e, T.th0 + (T.th1 - T.th0) * e);
+    if (k >= 1) tween = null;
+  }
+  controls.addEventListener('start', () => { tween = null; setPressed(-1); });
+  $('compass').addEventListener('click', () => {
+    sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
+    const t = controls.target;
+    flyTo(t.x - OFFX + W / 2, t.z + H / 2, sph.radius, sph.phi, 0);
+  });
+
+  placeCam(new THREE.Vector3(toX(124), 0, toZ(76)), 250, .82, 0);
+  setPressed(0);
+
+  function resize() {
+    const w = innerWidth, h = innerHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    if (w < 700 && !tween && tripBtns[0].getAttribute('aria-pressed') === 'true') placeCam(new THREE.Vector3(toX(124), 0, toZ(76)), 400, .7, 0);
+  }
+  addEventListener('resize', resize); resize();
+
+  const v = new THREE.Vector3(), needle = $('needle');
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    stepTween(now);
+    controls.update();
+    // limitar el desplazamiento al mapa
+    const t = controls.target, cx = Math.max(-W / 2, Math.min(W / 2, t.x)), cz = Math.max(-H / 2, Math.min(H / 2, t.z));
+    if (cx !== t.x || cz !== t.z) { camera.position.x += cx - t.x; camera.position.z += cz - t.z; t.x = cx; t.z = cz; }
+
+    if (!reduceMotion) {
+      for (let e = 0; e < EMB; e++) {
+        ember[e * 3 + 1] += emberBase[e][3] * dt;
+        if (ember[e * 3 + 1] > emberBase[e][1] + 4.5) ember[e * 3 + 1] = emberBase[e][1];
+      }
+      emberGeo.attributes.position.needsUpdate = true;
+      fire.intensity = 2 + Math.sin(now * .007) * .4 + Math.sin(now * .019) * .25;
+    }
+    renderer.render(scene, camera);
+
+    const w = innerWidth, h = innerHeight;
+    for (const L of labels) {
+      v.copy(L.pos).project(camera);
+      const d = camera.position.distanceTo(L.pos);
+      let op = 0;
+      if (v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && d < L.max && d > L.min) {
+        op = Math.min(1, (L.max - d) / (L.max * .15));
+        if (L.min) op = Math.min(op, (d - L.min) / (L.min * .2));
+      }
+      if (L === selected) op = 1;
+      const vis = op > .02;
+      if (vis !== L.vis) { L.el.style.visibility = vis ? 'visible' : 'hidden'; L.vis = vis; }
+      if (!vis) continue;
+      const sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
+      L.el.style.transform = L.kind === 'city'
+        ? `translate(${sx - 4}px, ${sy}px) translateY(-50%)`
+        : `translate(${sx}px, ${sy}px) translate(-50%, -50%)`;
+      L.el.style.opacity = op.toFixed(2);
+    }
+    needle.setAttribute('transform', `rotate(${(controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1)} 15 15)`);
+    requestAnimationFrame(frame);
+  }
+  $('loading').remove();
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(() => setTimeout(start, 30));
+</script>
+</body>
+</html>
