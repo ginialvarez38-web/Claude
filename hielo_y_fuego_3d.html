@@ -150,7 +150,7 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
   <div id="search">
     <input id="q" list="lugares" placeholder="Buscar un lugar…" autocomplete="off" aria-label="Buscar un lugar">
     <datalist id="lugares"></datalist>
-    <button id="compass" title="Ver todo el globo" aria-label="Ver todo el globo">
+    <button id="compass" title="Volver a orientar al norte" aria-label="Orientar al norte">
       <svg viewBox="0 0 30 30" aria-hidden="true"><g id="needle">
         <path d="M15 3 L19 15 L15 13 L11 15 Z" fill="#c9a35a"/>
         <path d="M15 27 L19 15 L15 17 L11 15 Z" fill="#b3a98f" opacity=".6"/>
@@ -161,7 +161,7 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
   <div id="layers" role="group" aria-label="Capas del mapa"></div>
 </div>
 
-<div id="hint">Arrastrá para girar el globo · rueda o pellizco para acercarte · tocá un nombre</div>
+<div id="hint">Arrastrá para girar · rueda para acercarte hacia el puntero · clic derecho para desplazar · tocá un nombre</div>
 
 <nav id="trips" aria-label="Viajes rápidos"><div class="row"></div></nav>
 
@@ -691,75 +691,83 @@ async function buildWorld(progress = async () => {}) {
   return { NX, NZ, hgt, land, lake, acc, rcv, shadow: shadowS, ao, slope, col, forest, ftype, desert, farm };
 }
 
-/* Pinta la textura tipo satélite: un texel cada ~0,09 unidades en escritorio */
-async function paintTexture(G, TW, progress = async () => {}) {
-  const TH = Math.round(TW * H / W), { NX, NZ } = G;
-  const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
-  const ctx = cv.getContext('2d'), img = ctx.createImageData(TW, TH), D = img.data;
-  const SHALLOW = hex3('#2f8197'), MID = hex3('#1b5b80'), DEEP = hex3('#0b2b4c'), REEF = hex3('#8ccfc2');
-  const LAKE = hex3('#1a4a6c'), LAKESHORE = hex3('#2c6c88'), LAKEEDGE = hex3('#123349'), SNOW = [.95, .96, .97], SAND = hex3('#d8c391'), BEACH = hex3('#d9cfae');
-  const ROCK = hex3('#7a7066'), ROCK2 = hex3('#5c564f');
-  const FCOL = [hex3('#1d3524'), hex3('#2a4a22'), hex3('#1b4a20')];
-  const FIELDS = [hex3('#a49a5c'), hex3('#6f8a45'), hex3('#8a7650'), hex3('#93a05a')];
+/* ===== Pintura del terreno =====
+   paintRows pinta un rectángulo del mundo en un ImageData. La textura general cubre todo el mapa;
+   al acercarse, cada recuadro cercano se vuelve a pintar con 4 veces más resolución y ruido más fino (hi). */
+const PAL = {
+  SHALLOW: hex3('#2f8197'), MID: hex3('#1b5b80'), DEEP: hex3('#0b2b4c'), REEF: hex3('#8ccfc2'),
+  LAKE: hex3('#1a4a6c'), LAKESHORE: hex3('#2c6c88'), LAKEEDGE: hex3('#123349'), SNOW: [.95, .96, .97], SAND: hex3('#d8c391'), BEACH: hex3('#d9cfae'),
+  ROCK: hex3('#7a7066'), ROCK2: hex3('#5c564f'),
+  FCOL: [hex3('#1d3524'), hex3('#2a4a22'), hex3('#1b4a20')],
+  FIELDS: [hex3('#a49a5c'), hex3('#6f8a45'), hex3('#8a7650'), hex3('#93a05a')],
+};
+function paintRows(G, D, TW, rx0, ry0, sx, sy, r0, r1, hi) {
+  const { NX, NZ } = G, P = PAL;
   const c = [0, 0, 0], t3 = [0, 0, 0];
-  let gi, gj, fx, fy, k0;
+  let fx, fy, k0;
   const S = a => a[k0] * (1 - fx) * (1 - fy) + a[k0 + 1] * fx * (1 - fy) + a[k0 + NX] * (1 - fx) * fy + a[k0 + NX + 1] * fx * fy;
   const S3 = (a, ch) => a[k0 * 3 + ch] * (1 - fx) * (1 - fy) + a[(k0 + 1) * 3 + ch] * fx * (1 - fy) + a[(k0 + NX) * 3 + ch] * (1 - fx) * fy + a[(k0 + NX + 1) * 3 + ch] * fx * fy;
-  for (let ty = 0; ty < TH; ty++) {
-    if ((ty & 63) === 0) await progress(`Pintando el terreno… ${Math.round(ty / TH * 100)} %`);
-    const wy = (ty + .5) / TH * H;
-    gj = Math.min(NZ - 1.001, wy * RES); const j = gj | 0; fy = gj - j;
+  for (let ty = r0; ty < r1; ty++) {
+    const wy = ry0 + (ty + .5) * sy;
+    const gj = Math.max(0, Math.min(NZ - 1.001, wy * RES)), j = gj | 0; fy = gj - j;
     for (let tx = 0; tx < TW; tx++) {
-      const wx = (tx + .5) / TW * W;
-      gi = Math.min(NX - 1.001, wx * RES); const i = gi | 0; fx = gi - i; k0 = j * NX + i;
+      const wx = rx0 + (tx + .5) * sx;
+      const gi = Math.max(0, Math.min(NX - 1.001, wx * RES)), i = gi | 0; fx = gi - i; k0 = j * NX + i;
       const h = S(G.hgt), lk = S(G.lake);
       const n1 = noise(wx * 2.3, wy * 2.3), n2 = noise(wx * 9, wy * 9), n3 = noise(wx * 26, wy * 26);
-      if (lk > .38 && lk < .5 && h >= 0) { const e = smooth(.38, .5, lk); mix3(BEACH, LAKEEDGE, e, c); c[0] *= .8; c[1] *= .8; c[2] *= .8; }
+      const n4 = hi ? noise(wx * 60, wy * 60) : .5, n5 = hi ? noise(wx * 140, wy * 140) : .5;
+      if (lk > .38 && lk < .5 && h >= 0) { const e = smooth(.38, .5, lk); mix3(P.BEACH, P.LAKEEDGE, e, c); c[0] *= .8; c[1] *= .8; c[2] *= .8; }
       else if (h < 0 && lk < .5) {
         const depth = -h, t = Math.sqrt(smooth(0, 2.4, depth));
-        if (t < .5) mix3(SHALLOW, MID, t * 2, c); else mix3(MID, DEEP, (t - .5) * 2, c);
-        mix3(c, REEF, (1 - smooth(0, .22, depth)) * (.25 + .3 * n2), c);
-        const v = .94 + .1 * n1; c[0] *= v; c[1] *= v; c[2] *= v;
+        if (t < .5) mix3(P.SHALLOW, P.MID, t * 2, c); else mix3(P.MID, P.DEEP, (t - .5) * 2, c);
+        mix3(c, P.REEF, (1 - smooth(0, .22, depth)) * (.25 + .3 * n2 + .15 * (n4 - .5)), c);
+        const v = .94 + .1 * n1 + .04 * (n4 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
       } else if (lk >= .5) {
-        mix3(LAKE, LAKESHORE, smooth(.64, .5, lk) * .6, c);
-        const v = .95 + .08 * n2; c[0] *= v; c[1] *= v; c[2] *= v;
+        mix3(P.LAKE, P.LAKESHORE, smooth(.64, .5, lk) * .6, c);
+        const v = .95 + .08 * n2 + .04 * (n4 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
       } else {
         c[0] = S3(G.col, 0); c[1] = S3(G.col, 1); c[2] = S3(G.col, 2);
-        const v = .86 + .2 * n1 + .1 * (n2 - .5) + .06 * (n3 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
+        const v = .86 + .2 * n1 + .1 * (n2 - .5) + .06 * (n3 - .5) + .08 * (n4 - .5) + .06 * (n5 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
         const slope = S(G.slope);
-        // cultivos: parcelas irregulares
+        // cultivos: parcelas irregulares, con lindes visibles de cerca
         const fw = S(G.farm);
         if (fw > .04) {
-          const px = Math.floor(wx * 2.6 + n1 * .8), py = Math.floor(wy * 3.4 + n2 * .5), hv = hash(px, py);
-          const fc = FIELDS[(hv * 4) | 0]; mix3(c, fc, fw * (.35 + .35 * hash(py, px)), c);
+          const ux = wx * 2.6 + n1 * .8, uy = wy * 3.4 + n2 * .5, px = Math.floor(ux), py = Math.floor(uy), hv = hash(px, py);
+          const fc = P.FIELDS[(hv * 4) | 0]; mix3(c, fc, fw * (.35 + .35 * hash(py, px)), c);
+          if (hi) {
+            const ex = Math.min(ux - px, 1 - (ux - px)), ey = Math.min(uy - py, 1 - (uy - py)), border = 1 - smooth(.0, .04, Math.min(ex, ey));
+            const furrow = .5 + .5 * Math.sin((hv > .5 ? ux : uy) * 60);
+            const m = 1 - fw * (border * .25 + furrow * .06); c[0] *= m; c[1] *= m; c[2] *= m;
+          }
         }
         // desiertos con dunas
         const dw = S(G.desert);
         if (dw > .02) {
-          const du = Math.sin((wx * .8 + wy * 1.7) * 5 + fbm(wx * .6, wy * .6, 2) * 9) * .5 + .5;
-          t3[0] = SAND[0] * (.9 + .12 * du); t3[1] = SAND[1] * (.9 + .12 * du); t3[2] = SAND[2] * (.9 + .1 * du);
+          let du = Math.sin((wx * .8 + wy * 1.7) * 5 + fbm(wx * .6, wy * .6, 2) * 9) * .5 + .5;
+          if (hi) du = du * .7 + (Math.sin((wx * 1.3 + wy * 2.9) * 22 + n3 * 6) * .5 + .5) * .3;
+          t3[0] = P.SAND[0] * (.9 + .12 * du); t3[1] = P.SAND[1] * (.9 + .12 * du); t3[2] = P.SAND[2] * (.9 + .1 * du);
           mix3(c, t3, dw * .8, c);
         }
-        // bosques en manchas
+        // bosques en manchas; de cerca se ven las copas
         const fo = S(G.forest);
         if (fo > .03) {
           const clump = smooth(.4, .6, fbm(wx * .8 + n2 * .5, wy * .8 + 3, 3) * .7 + n1 * .3);
-          const ft = G.ftype[k0], fcol = FCOL[ft], fv = .8 + .35 * n3;
+          const ft = G.ftype[k0], fcol = P.FCOL[ft], fv = (.8 + .35 * n3) * (hi ? .7 + .6 * smooth(.35, .7, n5) : 1);
           t3[0] = fcol[0] * fv; t3[1] = fcol[1] * fv; t3[2] = fcol[2] * fv;
           mix3(c, t3, Math.min(1, fo * clump * 1.15), c);
         }
-        // roca en pendientes y cumbres, con estratos
-        const strata = noise(wx * 5 + n2 * 1.5, wy * 5 + n1);
-        mix3(ROCK, ROCK2, strata, t3);
-        const rw = Math.min(1, smooth(.5, 1.15, slope) * .9 + smooth(2.6, 3.8, h) * .55);
+        // roca en pendientes y cumbres, con estratos y grietas
+        const strata = noise(wx * 5 + n2 * 1.5, wy * 5 + n1) * (hi ? .75 : 1) + (hi ? .25 * n4 : 0);
+        mix3(P.ROCK, P.ROCK2, strata, t3);
+        const rw = Math.min(1, smooth(.5, 1.15, slope + (n4 - .5) * .25) * .9 + smooth(2.6, 3.8, h) * .55);
         mix3(c, t3, rw, c);
         // nieve
         const snl = 4.1 + Math.max(0, wy - 80) * .05 - Math.max(0, 30 - wy) * .09;
-        let sw = smooth(snl - .25, snl + .4, h + (n1 - .5) * .7) * (1 - .55 * smooth(1, 1.9, slope));
+        let sw = smooth(snl - .25, snl + .4, h + (n1 - .5) * .7 + (n4 - .5) * .2) * (1 - .55 * smooth(1, 1.9, slope));
         if (wy < 15) sw = Math.max(sw, smooth(15, 5, wy) * (.75 + .25 * n2));
-        mix3(c, SNOW, sw, c);
+        mix3(c, P.SNOW, sw, c);
         // playa
-        mix3(c, BEACH, (1 - smooth(.04, .13, h)) * .5 * (1 - lk), c);
+        mix3(c, P.BEACH, (1 - smooth(.04, .13, h + (n4 - .5) * .03)) * .5 * (1 - lk), c);
         // un poco menos saturado, como una foto aérea
         const gray = (c[0] + c[1] + c[2]) / 3; c[0] = gray + (c[0] - gray) * .8; c[1] = gray + (c[1] - gray) * .8; c[2] = gray + (c[2] - gray) * .8;
         const shade = S(G.ao) * (1 - .45 * S(G.shadow)) * (1 + (n3 - .5) * .08);
@@ -769,37 +777,54 @@ async function paintTexture(G, TW, progress = async () => {}) {
       D[o] = Math.min(255, c[0] * 255); D[o + 1] = Math.min(255, c[1] * 255); D[o + 2] = Math.min(255, c[2] * 255); D[o + 3] = 255;
     }
   }
-  ctx.putImageData(img, 0, 0);
+}
 
-  await progress('Dibujando ríos y caminos…');
-  const sc = TW / W, base = TW / 4096;
-  const jit = k => [(hash(k, 1) - .5) * .7, (hash(k, 2) - .5) * .7];
-  const cell = k => { const i = k % NX, j = (k / NX) | 0, [a, b] = jit(k); return [(i + .5 + a) / RES * sc, (j + .5 + b) / RES * sc]; };
-  const T = SMALL ? 20 : 34;
-  const buckets = [[], [], [], [], []];
+// tramos de río: pares (celda, celda de destino) agrupados por caudal
+let RIVER_SEGS = null;
+function riverSegments(G) {
+  if (RIVER_SEGS) return RIVER_SEGS;
+  const { NX, NZ } = G, T = SMALL ? 20 : 34, buckets = [[], [], [], [], []];
+  const at = k => { const i = k % NX, j = (k / NX) | 0; return [(i + .5 + (hash(k, 1) - .5) * .7) / RES, (j + .5 + (hash(k, 2) - .5) * .7) / RES]; };
   for (let k = 0; k < NX * NZ; k++) {
     if (!G.land[k] || G.lake[k] || G.acc[k] < T) continue;
     const r = G.rcv[k]; if (r < 0) continue;
     const b = Math.min(4, Math.floor(Math.log2(G.acc[k] / T) / 1.4));
-    buckets[b].push(k, r);
+    buckets[b].push([...at(k), ...at(r)]);
   }
+  return RIVER_SEGS = buckets;
+}
+// ríos y caminos encima de la pintura; las medidas van en unidades del mundo
+function strokeOverlays(ctx, G, rx0, ry0, rx1, ry1, scale, riverW, roadW) {
+  ctx.setTransform(scale, 0, 0, scale, -rx0 * scale, -ry0 * scale);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  buckets.forEach((list, b) => {
+  const m = 1, inside = (x, y) => x > rx0 - m && x < rx1 + m && y > ry0 - m && y < ry1 + m;
+  riverSegments(G).forEach((list, b) => {
     ctx.strokeStyle = b < 2 ? 'rgba(52,96,118,.85)' : '#2f6a86';
-    ctx.lineWidth = (.6 + b * .4) * base * 2;
+    ctx.lineWidth = riverW(b);
     ctx.beginPath();
-    for (let q = 0; q < list.length; q += 2) {
-      const [x0, y0] = cell(list[q]), [x1, y1] = cell(list[q + 1]);
-      ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
-    }
+    for (const [x0, y0, x1, y1] of list) if (inside(x0, y0) || inside(x1, y1)) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
     ctx.stroke();
   });
-  // caminos
-  ctx.strokeStyle = 'rgba(196,174,128,.75)'; ctx.lineWidth = 1.6 * base * 2;
+  ctx.strokeStyle = 'rgba(196,174,128,.8)'; ctx.lineWidth = roadW;
   for (const r of ROADS) {
-    const p = chaikinOpen(r, 2);
-    ctx.beginPath(); p.forEach(([x, y], q) => q ? ctx.lineTo(x * sc, y * sc) : ctx.moveTo(x * sc, y * sc)); ctx.stroke();
+    const p = chaikinOpen(r, 3);
+    ctx.beginPath(); p.forEach(([x, y], q) => q ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
   }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/* Textura general: un texel cada ~0,09 unidades en escritorio */
+async function paintTexture(G, TW, progress = async () => {}) {
+  const TH = Math.round(TW * H / W);
+  const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(TW, TH);
+  for (let r = 0; r < TH; r += 64) {
+    await progress(`Pintando el terreno… ${Math.round(r / TH * 100)} %`);
+    paintRows(G, img.data, TW, 0, 0, W / TW, H / TH, r, Math.min(TH, r + 64), false);
+  }
+  ctx.putImageData(img, 0, 0);
+  await progress('Dibujando ríos y caminos…');
+  strokeOverlays(ctx, G, 0, 0, W, H, TW / W, b => (.6 + b * .4) * .18, .26);
   return cv;
 }
 
@@ -1081,29 +1106,10 @@ async function start() {
   await progress('Armando el globo…');
 
   const V3 = THREE.Vector3, Y = new V3(0, 1, 0);
-  // El mapa plano se envuelve en la esfera como una proyección sinusoidal:
-  // las distancias este-oeste del mapa se conservan y las costas no se estiran.
-  const RG = 190, LAT0 = .38;
-  const latOf = y => LAT0 + (H / 2 - y) / RG, lonOf = (x, lat) => (x - W / 2) / (RG * Math.cos(lat));
-  const geoPos = (x, y, h, out = new V3()) => {
-    const lat = latOf(y), lon = lonOf(x, lat), r = RG + h;
-    return out.set(r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat), r * Math.cos(lat) * Math.cos(lon));
-  };
-  const toAtlas = p => {
-    const r = p.length(), lat = Math.asin(p.y / r), lon = Math.atan2(p.x, p.z);
-    return [W / 2 + lon * RG * Math.cos(lat), H / 2 - (lat - LAT0) * RG];
-  };
-  // base local: X al este, Y hacia arriba, Z al sur (como en el mapa plano)
-  const _e = new V3(), _u = new V3(), _s = new V3(), _m = new THREE.Matrix4(), _qr = new THREE.Quaternion();
-  const frameAt = (x, y, out, rot = 0) => {
-    const lat = latOf(y), lon = lonOf(x, lat);
-    _u.set(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
-    _e.set(Math.cos(lon), 0, -Math.sin(lon));
-    _s.crossVectors(_e, _u);
-    _m.makeBasis(_e, _u, _s); out.setFromRotationMatrix(_m);
-    if (rot) out.multiply(_qr.setFromAxisAngle(Y, rot));
-    return out;
-  };
+  // coordenadas del mundo: x al este, y hacia arriba, z al sur, con el centro del mapa en el origen
+  const geoPos = (x, y, h, out = new V3()) => out.set(x - W / 2, h, y - H / 2);
+  const toAtlas = p => [p.x + W / 2, p.z + H / 2];
+  const frameAt = (x, y, out, rot = 0) => out.setFromAxisAngle(Y, rot);
 
   const stage = $('stage');
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -1111,49 +1117,122 @@ async function start() {
   renderer.outputEncoding = THREE.sRGBEncoding;
   stage.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#02050a');
-  const camera = new THREE.PerspectiveCamera(40, 1, .05, 8000);
-  scene.add(camera);
+  // cielo de día: degradé de cenit a horizonte, con bruma del color del horizonte
+  const skyCv = document.createElement('canvas'); skyCv.width = 2; skyCv.height = 256;
+  const skyCtx = skyCv.getContext('2d'), grad = skyCtx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#3d6f9e'); grad.addColorStop(.55, '#86aecb'); grad.addColorStop(1, '#c9d9e3');
+  skyCtx.fillStyle = grad; skyCtx.fillRect(0, 0, 2, 256);
+  const skyTex = new THREE.CanvasTexture(skyCv); skyTex.encoding = THREE.sRGBEncoding;
+  scene.background = skyTex;
+  scene.fog = new THREE.Fog('#c3d4df', 380, 1150);
+  const camera = new THREE.PerspectiveCamera(40, 1, .03, 2400);
 
-  // terreno con textura tipo satélite
-  const pos = new Float32Array(NX * NZ * 3), uv = new Float32Array(NX * NZ * 2), tv = new V3();
+  // normales del terreno calculadas sobre la grilla completa: sin costuras entre recuadros
+  const NRM = new Float32Array(NX * NZ * 3);
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
-    const k = j * NX + i;
-    geoPos(i / RES, j / RES, hgt[k], tv);
-    pos[k * 3] = tv.x; pos[k * 3 + 1] = tv.y; pos[k * 3 + 2] = tv.z;
-    uv[k * 2] = (i / RES) / W; uv[k * 2 + 1] = 1 - (j / RES) / H;
+    const k = j * NX + i, l = hgt[j * NX + Math.max(0, i - 1)], r = hgt[j * NX + Math.min(NX - 1, i + 1)];
+    const u = hgt[Math.max(0, j - 1) * NX + i], d = hgt[Math.min(NZ - 1, j + 1) * NX + i];
+    const nx = -(r - l) * RES / 2, nz = -(d - u) * RES / 2, len = Math.hypot(nx, 1, nz);
+    NRM[k * 3] = nx / len; NRM[k * 3 + 1] = 1 / len; NRM[k * 3 + 2] = nz / len;
   }
-  const idx = new Uint32Array((NX - 1) * (NZ - 1) * 6);
-  let p = 0;
-  for (let j = 0; j < NZ - 1; j++) for (let i = 0; i < NX - 1; i++) {
-    const a = j * NX + i, b = a + 1, c = a + NX, d = c + 1;
-    idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
-  const tex = new THREE.CanvasTexture(texCanvas);
-  tex.encoding = THREE.sRGBEncoding;
-  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: .96, metalness: 0 })));
+  const baseTex = new THREE.CanvasTexture(texCanvas);
+  baseTex.encoding = THREE.sRGBEncoding;
+  baseTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const baseMat = new THREE.MeshStandardMaterial({ map: baseTex, roughness: .96, metalness: 0 });
 
-  // océano del resto del planeta: fondo profundo, casquetes polares y superficie con oleaje
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG - 2.65, 160, 80), new THREE.MeshStandardMaterial({ color: '#0d2c4b', roughness: 1 })));
-  const iceCv = document.createElement('canvas'); iceCv.width = 1024; iceCv.height = 512;
-  const iceCtx = iceCv.getContext('2d'), iceImg = iceCtx.createImageData(1024, 512);
-  for (let y = 0; y < 512; y++) for (let x = 0; x < 1024; x++) {
-    const lat = 90 - (y + .5) / 512 * 180, n = fbm(x / 1024 * 24, y / 512 * 12, 4);
-    const edge = lat > 0 ? lat - (74 + (n - .5) * 9) : -lat - (68 + (n - .5) * 9);
-    const a = Math.max(0, Math.min(1, edge * .6)), o = (y * 1024 + x) * 4, v = 225 + n * 30;
-    iceImg.data[o] = v; iceImg.data[o + 1] = v + 4; iceImg.data[o + 2] = v + 8; iceImg.data[o + 3] = a * 255;
+  // el terreno va en recuadros: lejos se usa la textura general; cerca, cada recuadro
+  // se reemplaza por una versión con 3 veces más vértices y 4 veces más resolución de textura
+  const TS = 24, tiles = [];
+  for (let ty = 0; ty * TS < H; ty++) for (let tx = 0; tx * TS < W; tx++) {
+    const i0 = Math.round(tx * TS * RES), i1 = Math.min(NX - 1, Math.round((tx + 1) * TS * RES));
+    const j0 = Math.round(ty * TS * RES), j1 = Math.min(NZ - 1, Math.round((ty + 1) * TS * RES));
+    const nx = i1 - i0 + 1, nz = j1 - j0 + 1;
+    const pos = new Float32Array(nx * nz * 3), nor = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2);
+    let hmin = 0, hmax = 0;
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const v = j * nx + i, k = (j0 + j) * NX + i0 + i, h = hgt[k];
+      pos[v * 3] = (i0 + i) / RES - W / 2; pos[v * 3 + 1] = h; pos[v * 3 + 2] = (j0 + j) / RES - H / 2;
+      nor[v * 3] = NRM[k * 3]; nor[v * 3 + 1] = NRM[k * 3 + 1]; nor[v * 3 + 2] = NRM[k * 3 + 2];
+      uv[v * 2] = (i0 + i) / RES / W; uv[v * 2 + 1] = 1 - (j0 + j) / RES / H;
+      hmin = Math.min(hmin, h); hmax = Math.max(hmax, h);
+    }
+    const idx = [];
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1; idx.push(a, c, b, b, c, d);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
+    const lo = new THREE.Mesh(g, baseMat); scene.add(lo);
+    const x0 = i0 / RES, x1 = i1 / RES, y0 = j0 / RES, y1 = j1 / RES;
+    tiles.push({ lo, x0, x1, y0, y1, hi: null, job: null, used: 0,
+      box: new THREE.Box3(new V3(x0 - W / 2, hmin - .5, y0 - H / 2), new V3(x1 - W / 2, hmax + .5, y1 - H / 2)) });
   }
-  iceCtx.putImageData(iceImg, 0, 0);
-  const iceTex = new THREE.CanvasTexture(iceCv); iceTex.encoding = THREE.sRGBEncoding;
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG + .08, 160, 80), new THREE.MeshStandardMaterial({ map: iceTex, transparent: true, alphaTest: .3, roughness: .7 })));
 
+  // relieve fino para los recuadros cercanos: se apaga en los bordes para empalmar con los vecinos
+  const bil = (arr, x, y) => {
+    const gi = Math.max(0, Math.min(NX - 1.001, x * RES)), gj = Math.max(0, Math.min(NZ - 1.001, y * RES));
+    const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, k = j * NX + i;
+    return arr[k] * (1 - fx) * (1 - fy) + arr[k + 1] * fx * (1 - fy) + arr[k + NX] * (1 - fx) * fy + arr[k + NX + 1] * fx * fy;
+  };
+  const hiHeight = (x, y, t) => {
+    const h = heightAt(x, y);
+    if (h < .1 || bil(G.lake, x, y) > .02) return h;
+    const sl = bil(G.slope, x, y), ac = bil(G.acc, x, y);
+    let amp = (.03 + .22 * smooth(.35, 1.3, sl)) * smooth(.1, .4, h) * (1 - smooth(12, 34, ac));
+    amp *= smooth(0, 1.6, Math.min(x - t.x0, t.x1 - x, y - t.y0, t.y1 - y));
+    if (amp < 1e-4) return h;
+    const r = 1 - Math.abs(2 * fbm(x * 2.2 + 11, y * 2.2, 3) - 1);
+    return h + amp * ((fbm(x * 4.5, y * 4.5, 4) - .5) * 1.3 + (r * r - .3) * .9);
+  };
+  const HR = SMALL ? 4 : 6, TEXHI = SMALL ? 512 : 1024, MAXHI = SMALL ? 8 : 18;
+  const buildHi = t => {
+    const nx = Math.round((t.x1 - t.x0) * HR) + 1, nz = Math.round((t.y1 - t.y0) * HR) + 1, sx = (t.x1 - t.x0) / (nx - 1), sz = (t.y1 - t.y0) / (nz - 1);
+    const hb = new Float32Array((nx + 2) * (nz + 2));
+    for (let j = -1; j <= nz; j++) for (let i = -1; i <= nx; i++) hb[(j + 1) * (nx + 2) + i + 1] = hiHeight(t.x0 + i * sx, t.y0 + j * sz, t);
+    const pos = new Float32Array(nx * nz * 3), nor = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const v = j * nx + i, c = (j + 1) * (nx + 2) + i + 1;
+      pos[v * 3] = t.x0 + i * sx - W / 2; pos[v * 3 + 1] = hb[c]; pos[v * 3 + 2] = t.y0 + j * sz - H / 2;
+      const ddx = (hb[c + 1] - hb[c - 1]) / (2 * sx), ddz = (hb[c + nx + 2] - hb[c - nx - 2]) / (2 * sz), len = Math.hypot(ddx, 1, ddz);
+      nor[v * 3] = -ddx / len; nor[v * 3 + 1] = 1 / len; nor[v * 3 + 2] = -ddz / len;
+      uv[v * 2] = i / (nx - 1); uv[v * 2 + 1] = 1 - j / (nz - 1);
+    }
+    const idx = new Uint32Array((nx - 1) * (nz - 1) * 6); let p = 0;
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1; idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+    return g;
+  };
+  const startJob = t => {
+    const tw = Math.max(64, Math.round(TEXHI * (t.x1 - t.x0) / TS)), th = Math.max(64, Math.round(TEXHI * (t.y1 - t.y0) / TS));
+    const cv = document.createElement('canvas'); cv.width = tw; cv.height = th;
+    const ctx = cv.getContext('2d');
+    t.job = { cv, ctx, img: ctx.createImageData(tw, th), tw, th, row: 0 };
+  };
+  const stepJob = t => {
+    const J = t.job, rows = SMALL ? 16 : 32;
+    paintRows(G, J.img.data, J.tw, t.x0, t.y0, (t.x1 - t.x0) / J.tw, (t.y1 - t.y0) / J.th, J.row, Math.min(J.th, J.row + rows), true);
+    J.row += rows;
+    if (J.row < J.th) return;
+    J.ctx.putImageData(J.img, 0, 0);
+    strokeOverlays(J.ctx, G, t.x0, t.y0, t.x1, t.y1, J.tw / (t.x1 - t.x0), b => (.045 + .045 * b) * 1.6, .11);
+    const tex = new THREE.CanvasTexture(J.cv);
+    tex.encoding = THREE.sRGBEncoding; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    t.hi = new THREE.Mesh(buildHi(t), new THREE.MeshStandardMaterial({ map: tex, roughness: .96, metalness: 0 }));
+    t.hi.visible = false; scene.add(t.hi); t.job = null;
+  };
+  const dropHi = t => { scene.remove(t.hi); t.hi.geometry.dispose(); t.hi.material.map.dispose(); t.hi.material.dispose(); t.hi = null; t.lo.visible = true; };
+
+  // fondo oceánico fuera del mapa
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8), new THREE.MeshBasicMaterial({ color: '#0d2c4b' }));
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -2.7; scene.add(floor);
+
+  // mar: superficie transparente con oleaje y brillo del sol
   const NS = 128, ncv = document.createElement('canvas'); ncv.width = ncv.height = NS;
   const nctx = ncv.getContext('2d'), nimg = nctx.createImageData(NS, NS);
   const wave = (x, y) => fbm(x / NS * 8, y / NS * 8, 3);
@@ -1164,31 +1243,18 @@ async function start() {
   }
   nctx.putImageData(nimg, 0, 0);
   const normalTex = new THREE.CanvasTexture(ncv);
-  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(220, 110);
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG, 220, 110),
-    new THREE.MeshStandardMaterial({ color: '#174f73', transparent: true, opacity: .4, roughness: .18, metalness: .1,
-      normalMap: normalTex, normalScale: new THREE.Vector2(.25, .25), depthWrite: false })));
+  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(260, 170);
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8),
+    new THREE.MeshStandardMaterial({ color: '#174f73', transparent: true, opacity: .38, roughness: .16, metalness: .1,
+      normalMap: normalTex, normalScale: new THREE.Vector2(.25, .25), depthWrite: false }));
+  water.rotation.x = -Math.PI / 2;
+  scene.add(water);
 
-  // atmósfera: halo azul en el borde del globo
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG * 1.07, 96, 48), new THREE.ShaderMaterial({
-    vertexShader: 'varying vec3 vN; void main() { vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: 'varying vec3 vN; void main() { float i = pow(max(0.0, 0.72 - dot(vN, vec3(0.0, 0.0, 1.0))), 3.0); gl_FragColor = vec4(0.36, 0.64, 1.0, 1.0) * i * 1.4; }',
-    side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
-  })));
-  // estrellas
-  const starPos = new Float32Array(2400 * 3);
-  for (let s = 0; s < 2400; s++) {
-    const u = hash(s, 1) * 2 - 1, a = hash(s, 2) * Math.PI * 2, r = 3500, q2 = Math.sqrt(1 - u * u);
-    starPos[s * 3] = r * q2 * Math.cos(a); starPos[s * 3 + 1] = r * u; starPos[s * 3 + 2] = r * q2 * Math.sin(a);
-  }
-  const starGeo = new THREE.BufferGeometry(); starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#dfe8ff', size: 1.4, sizeAttenuation: false, transparent: true, opacity: .8 })));
-
-  // luz: un sol que acompaña a la cámara desde arriba a la izquierda, como en los globos virtuales
-  scene.add(new THREE.AmbientLight('#cfd9e6', .5));
-  const sun = new THREE.DirectionalLight('#fff4e2', 1.35);
-  sun.position.set(-1, 1.1, .6); camera.add(sun);
-  const sunTarget = new THREE.Object3D(); sunTarget.position.set(0, 0, -10); camera.add(sunTarget); sun.target = sunTarget;
+  // luz: el mismo sol bajo del noroeste con el que se calcularon las sombras
+  scene.add(new THREE.HemisphereLight('#d4e6f4', '#5a4a38', .55));
+  const sun = new THREE.DirectionalLight('#fff4e2', 1.5);
+  sun.position.set(-150, 110, -110);
+  scene.add(sun);
 
   const groups = {};
   const group = name => (groups[name] = groups[name] || (() => { const g = new THREE.Group(); scene.add(g); return g; })());
@@ -1204,9 +1270,9 @@ async function start() {
       const r = G.rcv[k]; if (r < 0) continue;
       const b = Math.min(4, Math.floor(Math.log2(G.acc[k] / T) / 1.4)), w = .045 + .045 * b;
       const [x0, y0] = at(k), [x1, y1] = at(r);
-      geoPos(x0, y0, Math.max(heightAt(x0, y0), 0) + .05, pa); geoPos(x1, y1, Math.max(heightAt(x1, y1), 0) + .05, pb);
+      geoPos(x0, y0, Math.max(heightAt(x0, y0), 0) + .07, pa); geoPos(x1, y1, Math.max(heightAt(x1, y1), 0) + .07, pb);
       dir.subVectors(pb, pa); const len = dir.length(); if (len < 1e-4) continue; dir.divideScalar(len);
-      upv.copy(pa).normalize(); side.crossVectors(dir, upv).normalize().multiplyScalar(w / 2);
+      upv.copy(Y); side.crossVectors(dir, upv).normalize().multiplyScalar(w / 2);
       pa.addScaledVector(dir, -w * .45); pb.addScaledVector(dir, w * .45);
       const o = P.length / 3;
       P.push(pa.x - side.x, pa.y - side.y, pa.z - side.z, pa.x + side.x, pa.y + side.y, pa.z + side.z,
@@ -1357,7 +1423,7 @@ async function start() {
     const s = e % (flames.length - 1), a = flames[s], b = flames[s + 1], t = Math.random();
     const x = a[0] + (b[0] - a[0]) * t + (Math.random() - .5) * 2, y = a[1] + (b[1] - a[1]) * t + (Math.random() - .5) * 1.4;
     const h = Math.max(heightAt(x, y), .3), base = geoPos(x, y, h);
-    emberBase.push([base, base.clone().normalize(), .6 + Math.random() * 1.4, Math.random() * 4.5]);
+    emberBase.push([base, Y.clone(), .6 + Math.random() * 1.4, Math.random() * 4.5]);
   }
   const emberGeo = new THREE.BufferGeometry();
   emberGeo.setAttribute('position', new THREE.BufferAttribute(ember, 3));
@@ -1369,12 +1435,12 @@ async function start() {
   geoPos(142, 118, 5, fire.position);
   scene.add(fire);
 
-  // controles: se gira alrededor del centro del globo; cerca del suelo todo se vuelve más lento y fino
+  // controles
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = .08;
-  controls.enablePan = false;
-  controls.minDistance = RG + 2.5; controls.maxDistance = RG * 5;
-  controls.target.set(0, 0, 0);
+  controls.screenSpacePanning = false;
+  controls.minDistance = 1.2; controls.maxDistance = 560;
+  controls.maxPolarAngle = 1.42;
 
   // rótulos
   const layer = $('labels'), labels = [];
@@ -1432,7 +1498,10 @@ async function start() {
     }
     $('panel').hidden = false;
     setPressed(-1);
-    if (fly) flyTo(L.x, L.y, L.area ? Math.min(camera.position.length() - RG, L.max * .5) : L.tier === 1 ? 24 : 16);
+    if (fly) {
+      if (L.area) { sph.setFromVector3(tmp.copy(camera.position).sub(controls.target)); flyTo(L.x, L.y, Math.min(sph.radius, L.max * .55), .9, null); }
+      else flyTo(L.x, L.y, L.tier === 1 ? 20 : 13, .95, null);
+    }
   }
   $('close').addEventListener('click', () => { $('panel').hidden = true; if (selected) selected.el.classList.remove('sel'); selected = null; });
   $('q').addEventListener('change', e => {
@@ -1455,50 +1524,91 @@ async function start() {
     $('layers').appendChild(b);
   }
 
-  // viajes: lugar y altura de la cámara sobre el suelo
-  const WORLD_ALT = SMALL ? 520 : 340;
+  // viajes: lugar, distancia, inclinación y rumbo de la cámara
   const TRIPS = [
-    ['Todo el mundo', 186, 100, WORLD_ALT],
-    ['Poniente', 75, 58, 120],
-    ['El Muro', 75, 24, 28],
-    ['Desembarco del Rey', 80.5, 76.5, 14],
-    ['Mar Angosto', 100, 76, 60],
-    ['Bahía de los Esclavos', 159, 105, 38],
-    ['Valyria', 143, 118, 24],
-    ['Qarth y el mar de Jade', 212, 138, 60],
-    ['Asshai y la Sombra', 250, 136, 45],
+    ['Todo el mundo', 186, 108, SMALL ? 520 : 330, SMALL ? .7 : .8, 0],
+    ['Poniente', 75, 56, 125, .78, 0],
+    ['El Muro', 75, 22, 30, 1.05, 0],
+    ['Desembarco del Rey', 80.5, 76.5, 12, 1.05, .5],
+    ['Mar Angosto', 100, 76, 80, .92, .45],
+    ['Bahía de los Esclavos', 159, 105, 40, .95, 0],
+    ['Valyria', 143, 118, 22, 1.05, .25],
+    ['Qarth y el mar de Jade', 212, 138, 70, .9, 0],
+    ['Asshai y la Sombra', 250, 136, 45, .98, -.3],
   ];
   const row = document.querySelector('#trips .row');
   const tripBtns = TRIPS.map((t, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = t[0]; b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => { setPressed(i); flyTo(t[1], t[2], t[3]); });
+    b.addEventListener('click', () => { setPressed(i); flyTo(t[1], t[2], t[3], t[4], t[5]); });
     row.appendChild(b); return b;
   });
   function setPressed(i) { tripBtns.forEach((b, j) => b.setAttribute('aria-pressed', String(i === j))); }
 
-  // vuelo de cámara sobre el globo: gira la dirección y ajusta la altura, subiendo en los viajes largos
-  let tween = null;
-  const d0 = new V3(), d1 = new V3(), dq = new THREE.Quaternion(), dqa = new THREE.Quaternion();
-  function flyTo(x, y, alt) {
-    d0.copy(camera.position).normalize(); geoPos(x, y, 0, d1).normalize();
-    const ang = d0.angleTo(d1);
-    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 1400 + ang * 900, from: d0.clone(), q: new THREE.Quaternion().setFromUnitVectors(d0, d1),
-      a0: camera.position.length() - RG, a1: alt, hop: Math.min(RG * 1.2, ang * RG * .7) };
+  // vuelo de cámara
+  let tween = null, zoomLog = 0, zoomAt = null;
+  const sph = new THREE.Spherical(), tmp = new V3();
+  function placeCam(target, r, phi, theta) {
+    controls.target.copy(target);
+    camera.position.copy(target).add(tmp.setFromSphericalCoords(r, phi, theta));
+  }
+  function flyTo(x, y, dist, polar, az) {
+    sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
+    const to = geoPos(x, y, Math.max(heightAt(x, y), 0) * .5);
+    let th1 = az === null ? sph.theta : az, th0 = sph.theta;
+    while (th1 - th0 > Math.PI) th1 -= Math.PI * 2;
+    while (th1 - th0 < -Math.PI) th1 += Math.PI * 2;
+    zoomLog = 0;
+    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 1600, from: controls.target.clone(), to,
+      r0: sph.radius, r1: dist, p0: sph.phi, p1: polar, th0, th1 };
   }
   function stepTween(now) {
     if (!tween) return;
     const T = tween, k = T.dur ? Math.min(1, (now - T.t0) / T.dur) : 1;
     const e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
-    dqa.identity().slerp(T.q, e);
-    const alt = T.a0 + (T.a1 - T.a0) * e + Math.sin(Math.PI * e) * T.hop;
-    camera.position.copy(T.from).applyQuaternion(dqa).multiplyScalar(RG + alt);
+    // en viajes largos la cámara sube a mitad de camino
+    const hop = Math.sin(Math.PI * e) * Math.min(80, T.from.distanceTo(T.to) * .35);
+    placeCam(tmp.lerpVectors(T.from, T.to, e).clone(), T.r0 + (T.r1 - T.r0) * e + hop, T.p0 + (T.p1 - T.p0) * e, T.th0 + (T.th1 - T.th0) * e);
     if (k >= 1) tween = null;
   }
   controls.addEventListener('start', () => { tween = null; setPressed(-1); });
-  $('compass').addEventListener('click', () => { setPressed(0); flyTo(TRIPS[0][1], TRIPS[0][2], TRIPS[0][3]); });
+  $('compass').addEventListener('click', () => {
+    sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
+    const t = controls.target;
+    flyTo(t.x + W / 2, t.z + H / 2, sph.radius, sph.phi, 0);
+  });
 
-  geoPos(186, 100, WORLD_ALT, camera.position);
+  // zoom con la rueda hacia el punto del terreno que está bajo el puntero
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const groundUnder = (cx, cy) => {
+    ndc.set(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+    const o = ray.ray.origin, d = ray.ray.direction;
+    if (d.y > -1e-3) return null;
+    const tMax = (o.y + .2) / -d.y, steps = 600, dt = tMax / steps;
+    for (let s = 0; s <= steps; s++) {
+      const t = s * dt, x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, ax = x + W / 2, ay = z + H / 2;
+      const g = ax > 0 && ax < W && ay > 0 && ay < H ? Math.max(heightAt(ax, ay), 0) : 0;
+      if (y <= g) return new V3(x, g, z);
+    }
+    return new V3(o.x + d.x * tMax, 0, o.z + d.z * tMax);
+  };
+  stage.addEventListener('wheel', e => {
+    e.preventDefault(); e.stopPropagation();
+    const P = groundUnder(e.clientX, e.clientY); if (!P) return;
+    tween = null; setPressed(-1);
+    zoomAt = P; zoomLog += Math.max(-.5, Math.min(.5, e.deltaY * (e.deltaMode ? .06 : .0016)));
+  }, { capture: true, passive: false });
+  const stepZoom = dt => {
+    if (!zoomAt || Math.abs(zoomLog) < 1e-4) return;
+    const part = zoomLog * Math.min(1, dt * 14); zoomLog -= part;
+    let f = Math.exp(part);
+    const dist = camera.position.distanceTo(controls.target);
+    f = Math.max(controls.minDistance / dist, Math.min(controls.maxDistance / dist, f));
+    camera.position.sub(zoomAt).multiplyScalar(f).add(zoomAt);
+    controls.target.sub(zoomAt).multiplyScalar(f).add(zoomAt);
+  };
+
+  placeCam(geoPos(186, 108, 0), SMALL ? 520 : 330, SMALL ? .7 : .8, 0);
   setPressed(0);
 
   function resize() {
@@ -1507,26 +1617,56 @@ async function start() {
   }
   addEventListener('resize', resize); resize();
 
-  const v = new V3(), v2 = new V3(), toCam = new V3(), nrm = new V3();
+  // nivel de detalle: qué recuadros merecen versión de alta resolución
+  const frustum = new THREE.Frustum(), pm = new THREE.Matrix4();
+  let job = null, lodTick = 0;
+  function updateLOD() {
+    pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(pm);
+    const cx = camera.position.x + W / 2, cz = camera.position.z + H / 2, cy = Math.max(.5, camera.position.y);
+    const want = [];
+    let nHi = 0;
+    for (const t of tiles) {
+      const dx = Math.max(t.x0 - cx, 0, cx - t.x1), dz = Math.max(t.y0 - cz, 0, cz - t.y1);
+      t.d = Math.hypot(dx, dz, cy);
+      const seen = frustum.intersectsBox(t.box), near = seen && t.d < (SMALL ? 26 : 38);
+      if (t.hi) {
+        nHi++;
+        const show = seen && t.d < (SMALL ? 32 : 46);
+        t.hi.visible = show; t.lo.visible = !show;
+        if (show) t.used = performance.now();
+      } else if (near && !t.job) want.push(t);
+    }
+    if (!job && want.length) { want.sort((a, b) => a.d - b.d); job = want[0]; startJob(job); }
+    if (nHi > MAXHI) {
+      const idle = tiles.filter(t => t.hi && !t.hi.visible).sort((a, b) => a.used - b.used);
+      for (let q = 0; q < nHi - MAXHI && q < idle.length; q++) dropHi(idle[q]);
+    }
+  }
+
+  const v = new V3(), v2 = new V3(), needle = $('needle');
   let last = performance.now();
   function frame(now) {
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     stepTween(now);
-    // velocidad según la altura: lejos gira rápido, cerca del suelo despacio
-    const dist = camera.position.length(), alt = dist - RG;
-    controls.rotateSpeed = Math.max(.015, Math.min(1, alt / (RG * 1.1)));
-    controls.zoomSpeed = Math.max(.05, Math.min(1.6, 3 * alt / dist));
+    stepZoom(dt);
     controls.update();
+    // limitar el desplazamiento al mapa
+    const t = controls.target, cx = Math.max(-W / 2, Math.min(W / 2, t.x)), cz = Math.max(-H / 2, Math.min(H / 2, t.z));
+    if (cx !== t.x || cz !== t.z) { camera.position.x += cx - t.x; camera.position.z += cz - t.z; t.x = cx; t.z = cz; }
     // no meter la cámara bajo tierra
     const [ax, ay] = toAtlas(camera.position);
     const ground = ax > 0 && ax < W && ay > 0 && ay < H ? Math.max(heightAt(ax, ay), 0) : 0;
-    if (camera.position.length() < RG + ground + 1.2) camera.position.setLength(RG + ground + 1.2);
+    if (camera.position.y < ground + .35) camera.position.y = ground + .35;
+
+    // detalle cercano: un poco de pintura por cuadro, para no trabar la vista
+    if (job) { stepJob(job); if (!job.job) job = null; }
+    if ((lodTick++ & 3) === 0) updateLOD();
 
     if (!reduceMotion) {
       for (const eb of emberBase) { eb[3] += eb[2] * dt; if (eb[3] > 4.5) eb[3] = 0; }
       placeEmbers(); emberGeo.attributes.position.needsUpdate = true;
       fire.intensity = 2 + Math.sin(now * .007) * .4 + Math.sin(now * .019) * .25;
-      normalTex.offset.x += dt * .004; normalTex.offset.y += dt * .002;
+      normalTex.offset.x += dt * .006; normalTex.offset.y += dt * .003;
       if (groups.barcos.visible) moveBoats(dt);
     }
     renderer.render(scene, camera);
@@ -1534,17 +1674,14 @@ async function start() {
     if (!layer.classList.contains('off')) {
       const w = innerWidth, h = innerHeight;
       for (const L of labels) {
-        // del otro lado del globo no se ve
-        nrm.copy(L.pos).normalize(); toCam.subVectors(camera.position, L.pos);
-        const facing = nrm.dot(toCam) / toCam.length();
         v.copy(L.pos).project(camera);
-        const d = toCam.length();
+        const d = camera.position.distanceTo(L.pos);
         let op = 0;
-        if (facing > .02 && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && d < L.max && d > L.min) {
-          op = Math.min(1, (L.max - d) / (L.max * .15), facing * 6);
+        if (v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && d < L.max && d > L.min) {
+          op = Math.min(1, (L.max - d) / (L.max * .15));
           if (L.min) op = Math.min(op, (d - L.min) / (L.min * .2));
         }
-        if (L === selected && v.z < 1 && facing > 0) op = 1;
+        if (L === selected && v.z < 1) op = 1;
         const vis = op > .02;
         if (vis !== L.vis) { L.el.style.visibility = vis ? 'visible' : 'hidden'; L.vis = vis; }
         if (!vis) continue;
@@ -1562,6 +1699,7 @@ async function start() {
         L.el.style.opacity = op.toFixed(2);
       }
     }
+    needle.setAttribute('transform', `rotate(${(controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1)} 15 15)`);
     requestAnimationFrame(frame);
   }
   $('loading').remove();
