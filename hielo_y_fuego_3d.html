@@ -19,6 +19,7 @@
   --ruin: #a39d92;
   --sea-ink: #a9c7cf;    /* rótulos de mares */
   --wood-ink: #a8c095;   /* rótulos de bosques */
+  --river-ink: #9fd3f0;  /* rótulos de ríos y lagos */
   --brass: #c9a35a;      /* acento: latón */
   --panel: rgba(14, 27, 34, .9);
   --line: rgba(236, 226, 200, .18);
@@ -53,6 +54,9 @@ button.lbl:focus-visible span { text-decoration: underline; text-underline-offse
 .sea.small { font-size: 12.5px; letter-spacing: .1em; }
 .range { font: italic 12.5px/1 var(--serif); letter-spacing: .12em; color: var(--parch-dim); }
 .forest { font: italic 12.5px/1 var(--serif); letter-spacing: .12em; color: var(--wood-ink); }
+.river { font: italic 13px/1 var(--serif); letter-spacing: .1em; color: var(--river-ink); transform-origin: 0 0; }
+.lake { font: italic 13.5px/1 var(--serif); letter-spacing: .1em; color: var(--river-ink); }
+.region.small { font-size: 12px; letter-spacing: .16em; opacity: .9; }
 
 header { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); left: max(16px, env(safe-area-inset-left, 0px));
   pointer-events: none; max-width: min(420px, calc(100vw - 32px)); }
@@ -146,7 +150,7 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
   <div id="search">
     <input id="q" list="lugares" placeholder="Buscar un lugar…" autocomplete="off" aria-label="Buscar un lugar">
     <datalist id="lugares"></datalist>
-    <button id="compass" title="Volver a orientar al norte" aria-label="Orientar al norte">
+    <button id="compass" title="Ver todo el globo" aria-label="Ver todo el globo">
       <svg viewBox="0 0 30 30" aria-hidden="true"><g id="needle">
         <path d="M15 3 L19 15 L15 13 L11 15 Z" fill="#c9a35a"/>
         <path d="M15 27 L19 15 L15 17 L11 15 Z" fill="#b3a98f" opacity=".6"/>
@@ -157,7 +161,7 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
   <div id="layers" role="group" aria-label="Capas del mapa"></div>
 </div>
 
-<div id="hint">Arrastrá para girar · rueda o pellizco para acercar · clic derecho para desplazar · tocá un nombre</div>
+<div id="hint">Arrastrá para girar el globo · rueda o pellizco para acercarte · tocá un nombre</div>
 
 <nav id="trips" aria-label="Viajes rápidos"><div class="row"></div></nav>
 
@@ -464,7 +468,7 @@ async function buildWorld(progress = async () => {}) {
       ctx.closePath(); ctx.fill();
     }
   };
-  fillPolys(ISLES, '#fff'); fillPolys(LAKES, '#000'); fillPolys(LAKE_ISLES, '#fff');
+  fillPolys(ISLES, '#fff'); fillPolys(LAKES, '#00f'); fillPolys(LAKE_ISLES, '#fff');
   const over = ctx.getImageData(0, 0, cv.width, cv.height).data;
   // desenfoque de caja en dos pasadas: redondea el escalonado de los píxeles de la máscara
   let img = new Float32Array(MW * MH), tmpb = new Float32Array(MW * MH);
@@ -488,7 +492,11 @@ async function buildWorld(progress = async () => {}) {
       }
     }
   }
-  for (let i = 0; i < MW * MH; i++) { const a = over[i * 4 + 3] / 255; if (a) img[i] = img[i] * (1 - a) + (over[i * 4] / 255) * a; }
+  for (let i = 0; i < MW * MH; i++) {
+    const a = over[i * 4 + 3] / 255; if (!a) continue;
+    // los lagos (azules) siguen siendo tierra: se marcan aparte como lagos forzados
+    if (over[i * 4] < 128 && over[i * 4 + 2] > 128) img[i] = Math.max(img[i], a); else img[i] = img[i] * (1 - a) + (over[i * 4] / 255) * a;
+  }
   const mask = (x, y) => {
     let px = x * MS - .5, py = y * MS - .5;
     px = Math.max(0, Math.min(MW - 2, px)); py = Math.max(0, Math.min(MH - 2, py));
@@ -502,7 +510,7 @@ async function buildWorld(progress = async () => {}) {
     const x = i / RES, y = j / RES;
     const wx = x + 1.8 * (fbm(x * .09, y * .09, 3) - .5) + .9 * (fbm(x * .45 + 7, y * .45, 3) - .5);
     const wy = y + 1.8 * (fbm(x * .09 + 31, y * .09 + 17, 3) - .5) + .9 * (fbm(x * .45, y * .45 + 9, 3) - .5);
-    const k = j * NX + i, L = mask(wx, wy) > .5 && i > 0 && j > 0 && i < NX - 1 && j < NZ - 1;
+    const edge = Math.min(x, W - x, y, H - y), k = j * NX + i, L = mask(wx, wy) > .5 + .7 * smooth(6, 1, edge + (fbm(x * .2, y * .2, 2) - .5) * 3) && i > 0 && j > 0 && i < NX - 1 && j < NZ - 1;
     land[k] = L ? 1 : 0;
     dl[k] = L ? 1e9 : 0; ds[k] = L ? 0 : 1e9;
   }
@@ -512,7 +520,7 @@ async function buildWorld(progress = async () => {}) {
   // ríos y lagos dibujados en el mapa de referencia, llevados a la grilla
   const refR = decodeSparse(REF_RIVERS, MW0 * MH0), refL = decodeSparse(REF_LAKES, MW0 * MH0);
   const refAt = (arr, i, j) => arr[Math.min(MH0 - 1, Math.round(j / RES / PX)) * MW0 + Math.min(MW0 - 1, Math.round(i / RES / PX))];
-  const lakeOverAt = (i, j) => { const o = (Math.min(MH - 1, Math.round(j / RES * MS)) * MW + Math.min(MW - 1, Math.round(i / RES * MS))) * 4; return over[o + 3] > 128 && over[o] < 128; };
+  const lakeOverAt = (i, j) => { const o = (Math.min(MH - 1, Math.round(j / RES * MS)) * MW + Math.min(MW - 1, Math.round(i / RES * MS))) * 4; return over[o + 3] > 128 && over[o] < 128 && over[o + 2] > 128; };
   const rd = new Float32Array(N), forced = new Uint8Array(N);
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
     const k = j * NX + i;
@@ -565,6 +573,20 @@ async function buildWorld(progress = async () => {}) {
   erode(h0, land, NX, NZ, Math.round(N * (SMALL ? .3 : .45)));
 
   await progress('Trazando ríos y lagos…');
+  // los lagos marcados se hunden por debajo de su borde más bajo: así la inundación los llena sí o sí
+  {
+    const seenF = new Uint8Array(N), N8b = [-1, 1, -NX, NX, -NX - 1, -NX + 1, NX - 1, NX + 1];
+    for (let k = 0; k < N; k++) if (forced[k] && !seenF[k]) {
+      const comp = [k]; seenF[k] = 1; let rim = Infinity;
+      for (let q = 0; q < comp.length; q++) for (const o of N8b) {
+        const n = comp[q] + o; if (n < 0 || n >= N) continue;
+        if (forced[n]) { if (!seenF[n]) { seenF[n] = 1; comp.push(n); } }
+        else if (land[n]) rim = Math.min(rim, h0[n]);
+      }
+      if (rim === Infinity) rim = .3;
+      for (const c of comp) h0[c] = Math.max(.01, Math.min(h0[c], rim - .25));
+    }
+  }
   // inundación por prioridad: llena cada hondonada hasta su desborde y deja un árbol de drenaje hacia el mar
   const f = new Float32Array(N), seen = new Uint8Array(N), order = new Int32Array(N), rcv = new Int32Array(N).fill(-1);
   const heap = new Heap(N), N8 = [-1, 1, -NX, NX, -NX - 1, -NX + 1, NX - 1, NX + 1];
@@ -592,6 +614,16 @@ async function buildWorld(progress = async () => {}) {
       for (const o of N8.slice(0, 4)) { const n = c + o; if (n >= 0 && n < N && land[n] && !mark[n] && f[n] - h0[n] > .02) { mark[n] = 1; comp.push(n); } }
     }
     if (hasForced || (comp.length >= 30 && comp.length <= 700)) for (const c of comp) lake[c] = 1;
+  }
+  // cerrar huecos y bordes dentados de los lagos: superficies continuas, al nivel de sus vecinas
+  for (let pass = 0; pass < 3; pass++) {
+    const add = [];
+    for (let k = NX + 1; k < N - NX - 1; k++) {
+      if (lake[k] || !land[k]) continue;
+      let c = 0, lv = 0; for (const o of N8) if (lake[k + o]) { c++; lv = Math.max(lv, f[k + o]); }
+      if (c >= 5) add.push(k, lv);
+    }
+    for (let q = 0; q < add.length; q += 2) { lake[add[q]] = 1; f[add[q]] = add[q + 1]; }
   }
   const hgt = new Float32Array(N);
   for (let k = 0; k < N; k++) hgt[k] = lake[k] ? f[k] : h0[k];
@@ -665,7 +697,7 @@ async function paintTexture(G, TW, progress = async () => {}) {
   const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
   const ctx = cv.getContext('2d'), img = ctx.createImageData(TW, TH), D = img.data;
   const SHALLOW = hex3('#2f8197'), MID = hex3('#1b5b80'), DEEP = hex3('#0b2b4c'), REEF = hex3('#8ccfc2');
-  const LAKE = hex3('#1f4f6b'), LAKESHORE = hex3('#3f7f8c'), SNOW = [.95, .96, .97], SAND = hex3('#d8c391'), BEACH = hex3('#d9cfae');
+  const LAKE = hex3('#1a4a6c'), LAKESHORE = hex3('#2c6c88'), LAKEEDGE = hex3('#123349'), SNOW = [.95, .96, .97], SAND = hex3('#d8c391'), BEACH = hex3('#d9cfae');
   const ROCK = hex3('#7a7066'), ROCK2 = hex3('#5c564f');
   const FCOL = [hex3('#1d3524'), hex3('#2a4a22'), hex3('#1b4a20')];
   const FIELDS = [hex3('#a49a5c'), hex3('#6f8a45'), hex3('#8a7650'), hex3('#93a05a')];
@@ -682,13 +714,15 @@ async function paintTexture(G, TW, progress = async () => {}) {
       gi = Math.min(NX - 1.001, wx * RES); const i = gi | 0; fx = gi - i; k0 = j * NX + i;
       const h = S(G.hgt), lk = S(G.lake);
       const n1 = noise(wx * 2.3, wy * 2.3), n2 = noise(wx * 9, wy * 9), n3 = noise(wx * 26, wy * 26);
-      if (h < 0 && lk < .5) {
+      if (lk > .38 && lk < .5 && h >= 0) { const e = smooth(.38, .5, lk); mix3(BEACH, LAKEEDGE, e, c); c[0] *= .8; c[1] *= .8; c[2] *= .8; }
+      else if (h < 0 && lk < .5) {
         const depth = -h, t = Math.sqrt(smooth(0, 2.4, depth));
         if (t < .5) mix3(SHALLOW, MID, t * 2, c); else mix3(MID, DEEP, (t - .5) * 2, c);
         mix3(c, REEF, (1 - smooth(0, .22, depth)) * (.25 + .3 * n2), c);
         const v = .94 + .1 * n1; c[0] *= v; c[1] *= v; c[2] *= v;
       } else if (lk >= .5) {
-        mix3(LAKE, LAKESHORE, smooth(.85, .5, lk) * .8, c);
+        mix3(LAKE, LAKESHORE, smooth(.64, .5, lk) * .6, c);
+        const v = .95 + .08 * n2; c[0] *= v; c[1] *= v; c[2] *= v;
       } else {
         c[0] = S3(G.col, 0); c[1] = S3(G.col, 1); c[2] = S3(G.col, 2);
         const v = .86 + .2 * n1 + .1 * (n2 - .5) + .06 * (n3 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
@@ -752,7 +786,7 @@ async function paintTexture(G, TW, progress = async () => {}) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   buckets.forEach((list, b) => {
     ctx.strokeStyle = b < 2 ? 'rgba(52,96,118,.85)' : '#2f6a86';
-    ctx.lineWidth = (.75 + b * .5) * base * 2;
+    ctx.lineWidth = (.6 + b * .4) * base * 2;
     ctx.beginPath();
     for (let q = 0; q < list.length; q += 2) {
       const [x0, y0] = cell(list[q]), [x1, y1] = cell(list[q + 1]);
@@ -974,7 +1008,39 @@ const AREAS = [
   ['Bosque Lluvioso', 182, 177.6, 'forest', 80, 0, ''],
   ['Bosque de Qohor', 288, 138, 'forest', 120, 0, 'El bosque más grande de las Ciudades Libres, que rodea Qohor.'],
 ];
-[...PLACES, ...AREAS].forEach(p => { p[1] *= PX; p[2] *= PX; });
+// ríos: nombre, x, y aproximados (se ajustan al cauce real al cargar), descripción
+const RIVER_NAMES = [
+  ['Tridente', 168, 136, 'El gran río de las Tierras de los Ríos, formado por las Forcas Verde, Roja y Azul. Desemboca en la bahía de los Cangrejos.'],
+  ['Forca Verde', 151, 121, 'Brazo norte del Tridente; Los Gemelos custodian su único puente en muchas leguas.'],
+  ['Forca Roja', 142, 135, 'Brazo occidental del Tridente, que pasa por Aguasdulces.'],
+  ['Forca Azul', 165, 124, 'Brazo oriental del Tridente.'],
+  ['Aguasnegras', 150, 153, 'Río rápido y profundo que desemboca junto a Desembarco del Rey.'],
+  ['Mander', 132, 171, 'El río más largo del Dominio, que cruza Altojardín y desemboca frente a las Islas Escudo.'],
+  ['Cuchillo Blanco', 154, 88, 'Río del Norte que desemboca en Puerto Blanco.'],
+  ['Último Río', 168, 50, 'Corre por las tierras de los Umber hacia la bahía de las Focas.'],
+  ['Vino Dulce', 124, 189, 'Río que pasa por Antigua antes de llegar al mar.'],
+  ['Sangreverde', 163, 200, 'El único gran río de Dorne; en su desembocadura flota Ciudad Tablón.'],
+  ['Rhoyne', 247, 168, 'El gran río de Essos occidental, madre de los rhoynar. Desemboca en Volantis.'],
+  ['Qhoyne', 268, 150, 'Afluente del Rhoyne que baja desde las tierras de Qohor.'],
+  ['Skahazadhan', 334, 184, 'Río que desemboca en la Bahía de los Esclavos junto a Meereen.'],
+  ['Zamoyos', 330, 318, 'Río de las selvas de Sothoryos.'],
+];
+AREAS.push(
+  ['Colinas de Terciopelo', 228, 163, 'range', 120, 0, 'Colinas suaves entre Pentos y el Rhoyne.'],
+  ['Colinas de Norvos', 252, 138, 'range', 120, 0, ''],
+  ['Montañas de la Mañana', 585, 126, 'range', 260, 0, 'Cordillera del norte de Yi Ti.'],
+  ['Montañas de la Sombra', 516, 248, 'range', 200, 0, 'Montañas oscuras que encierran Asshai y las Tierras Sombrías.'],
+  ['El Cuello', 150, 106, 'region small', 110, 0, 'Estrechez pantanosa que separa el Norte del resto de Poniente.'],
+  ['Los Dedos', 187, 110, 'region small', 100, 0, 'Penínsulas rocosas del norte del Valle.'],
+  ['Cabo de la Ira', 186, 180, 'region small', 100, 0, ''],
+  ['Brazo Roto', 192, 197, 'region small', 110, 0, 'El extremo oriental de Dorne, que antes unía Poniente con Essos.'],
+  ['Las Penas', 241, 178, 'region small', 100, 0, 'Tramo del Rhoyne envuelto en niebla, cerca de Chroyane.'],
+  ['Desierto Gris', 565, 104, 'region', 300, 0, 'Páramo yermo al norte de Yi Ti.'],
+  ['Jogos Nhai', 620, 112, 'region', 300, 0, 'Llanuras del norte de Yi Ti, donde viven jinetes nómadas.'],
+);
+AREAS.forEach(a => { if (['Ojo de Dioses', 'Vientre del Mundo'].includes(a[0])) a[3] = 'lake'; });
+AREAS.push(['Lago Largo', 166, 60, 'lake', 100, 0, 'Lago alargado del Norte, en tierras de los Umber.']);
+[...PLACES, ...AREAS, ...RIVER_NAMES].forEach(p => { p[1] *= PX; p[2] *= PX; });
 
 // mueve a tierra firme los lugares que caen al agua por la resolución de la máscara
 function snapPlaces(heightAt) {
@@ -1002,9 +1068,8 @@ async function start() {
   const progress = msg => { $('loading').textContent = msg; return new Promise(r => setTimeout(r, 0)); };
   const G = await buildWorld(progress);
   const { NX, NZ, hgt } = G;
-  const toX = x => x + OFFX - W / 2, toZ = y => y - H / 2;
   const heightAt = (x, y) => {   // coordenadas del atlas
-    let gi = (x + OFFX) * RES, gj = y * RES;
+    let gi = x * RES, gj = y * RES;
     gi = Math.max(0, Math.min(NX - 1.001, gi)); gj = Math.max(0, Math.min(NZ - 1.001, gj));
     const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, g = (a, b) => hgt[b * NX + a];
     return (g(i, j) * (1 - fx) + g(i + 1, j) * fx) * (1 - fy) + (g(i, j + 1) * (1 - fx) + g(i + 1, j + 1) * fx) * fy;
@@ -1013,7 +1078,32 @@ async function start() {
   const lin = hex => new THREE.Color(hex).convertSRGBToLinear();
   snapPlaces(heightAt);
   const texCanvas = await paintTexture(G, SMALL ? 2048 : 4096, progress);
-  await progress('Preparando la vista…');
+  await progress('Armando el globo…');
+
+  const V3 = THREE.Vector3, Y = new V3(0, 1, 0);
+  // El mapa plano se envuelve en la esfera como una proyección sinusoidal:
+  // las distancias este-oeste del mapa se conservan y las costas no se estiran.
+  const RG = 190, LAT0 = .38;
+  const latOf = y => LAT0 + (H / 2 - y) / RG, lonOf = (x, lat) => (x - W / 2) / (RG * Math.cos(lat));
+  const geoPos = (x, y, h, out = new V3()) => {
+    const lat = latOf(y), lon = lonOf(x, lat), r = RG + h;
+    return out.set(r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat), r * Math.cos(lat) * Math.cos(lon));
+  };
+  const toAtlas = p => {
+    const r = p.length(), lat = Math.asin(p.y / r), lon = Math.atan2(p.x, p.z);
+    return [W / 2 + lon * RG * Math.cos(lat), H / 2 - (lat - LAT0) * RG];
+  };
+  // base local: X al este, Y hacia arriba, Z al sur (como en el mapa plano)
+  const _e = new V3(), _u = new V3(), _s = new V3(), _m = new THREE.Matrix4(), _qr = new THREE.Quaternion();
+  const frameAt = (x, y, out, rot = 0) => {
+    const lat = latOf(y), lon = lonOf(x, lat);
+    _u.set(Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon));
+    _e.set(Math.cos(lon), 0, -Math.sin(lon));
+    _s.crossVectors(_e, _u);
+    _m.makeBasis(_e, _u, _s); out.setFromRotationMatrix(_m);
+    if (rot) out.multiply(_qr.setFromAxisAngle(Y, rot));
+    return out;
+  };
 
   const stage = $('stage');
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -1021,21 +1111,16 @@ async function start() {
   renderer.outputEncoding = THREE.sRGBEncoding;
   stage.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
-  // cielo de día: degradé de cenit a horizonte, con bruma del color del horizonte
-  const skyCv = document.createElement('canvas'); skyCv.width = 2; skyCv.height = 256;
-  const skyCtx = skyCv.getContext('2d'), grad = skyCtx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#3d6f9e'); grad.addColorStop(.55, '#86aecb'); grad.addColorStop(1, '#c9d9e3');
-  skyCtx.fillStyle = grad; skyCtx.fillRect(0, 0, 2, 256);
-  const skyTex = new THREE.CanvasTexture(skyCv); skyTex.encoding = THREE.sRGBEncoding;
-  scene.background = skyTex;
-  scene.fog = new THREE.Fog('#c3d4df', 380, 1150);
-  const camera = new THREE.PerspectiveCamera(40, 1, .2, 2400);
+  scene.background = new THREE.Color('#02050a');
+  const camera = new THREE.PerspectiveCamera(40, 1, .05, 8000);
+  scene.add(camera);
 
   // terreno con textura tipo satélite
-  const pos = new Float32Array(NX * NZ * 3), uv = new Float32Array(NX * NZ * 2);
+  const pos = new Float32Array(NX * NZ * 3), uv = new Float32Array(NX * NZ * 2), tv = new V3();
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
     const k = j * NX + i;
-    pos[k * 3] = i / RES - W / 2; pos[k * 3 + 1] = hgt[k]; pos[k * 3 + 2] = j / RES - H / 2;
+    geoPos(i / RES, j / RES, hgt[k], tv);
+    pos[k * 3] = tv.x; pos[k * 3 + 1] = tv.y; pos[k * 3 + 2] = tv.z;
     uv[k * 2] = (i / RES) / W; uv[k * 2 + 1] = 1 - (j / RES) / H;
   }
   const idx = new Uint32Array((NX - 1) * (NZ - 1) * 6);
@@ -1055,11 +1140,20 @@ async function start() {
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: .96, metalness: 0 })));
 
-  // fondo oceánico fuera del mapa
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8), new THREE.MeshBasicMaterial({ color: '#0d2c4b' }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = -2.7; scene.add(floor);
+  // océano del resto del planeta: fondo profundo, casquetes polares y superficie con oleaje
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG - 2.65, 160, 80), new THREE.MeshStandardMaterial({ color: '#0d2c4b', roughness: 1 })));
+  const iceCv = document.createElement('canvas'); iceCv.width = 1024; iceCv.height = 512;
+  const iceCtx = iceCv.getContext('2d'), iceImg = iceCtx.createImageData(1024, 512);
+  for (let y = 0; y < 512; y++) for (let x = 0; x < 1024; x++) {
+    const lat = 90 - (y + .5) / 512 * 180, n = fbm(x / 1024 * 24, y / 512 * 12, 4);
+    const edge = lat > 0 ? lat - (74 + (n - .5) * 9) : -lat - (68 + (n - .5) * 9);
+    const a = Math.max(0, Math.min(1, edge * .6)), o = (y * 1024 + x) * 4, v = 225 + n * 30;
+    iceImg.data[o] = v; iceImg.data[o + 1] = v + 4; iceImg.data[o + 2] = v + 8; iceImg.data[o + 3] = a * 255;
+  }
+  iceCtx.putImageData(iceImg, 0, 0);
+  const iceTex = new THREE.CanvasTexture(iceCv); iceTex.encoding = THREE.sRGBEncoding;
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG + .08, 160, 80), new THREE.MeshStandardMaterial({ map: iceTex, transparent: true, alphaTest: .3, roughness: .7 })));
 
-  // mar: superficie transparente con oleaje y brillo del sol
   const NS = 128, ncv = document.createElement('canvas'); ncv.width = ncv.height = NS;
   const nctx = ncv.getContext('2d'), nimg = nctx.createImageData(NS, NS);
   const wave = (x, y) => fbm(x / NS * 8, y / NS * 8, 3);
@@ -1070,22 +1164,60 @@ async function start() {
   }
   nctx.putImageData(nimg, 0, 0);
   const normalTex = new THREE.CanvasTexture(ncv);
-  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(260, 170);
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8),
-    new THREE.MeshStandardMaterial({ color: '#174f73', transparent: true, opacity: .38, roughness: .16, metalness: .1,
-      normalMap: normalTex, normalScale: new THREE.Vector2(.25, .25), depthWrite: false }));
-  water.rotation.x = -Math.PI / 2;
-  scene.add(water);
+  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(220, 110);
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG, 220, 110),
+    new THREE.MeshStandardMaterial({ color: '#174f73', transparent: true, opacity: .4, roughness: .18, metalness: .1,
+      normalMap: normalTex, normalScale: new THREE.Vector2(.25, .25), depthWrite: false })));
 
-  // luz: el mismo sol bajo del noroeste con el que se calcularon las sombras
-  scene.add(new THREE.HemisphereLight('#d4e6f4', '#5a4a38', .55));
-  const sun = new THREE.DirectionalLight('#fff4e2', 1.5);
-  sun.position.set(-150, 110, -110);
-  scene.add(sun);
+  // atmósfera: halo azul en el borde del globo
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(RG * 1.07, 96, 48), new THREE.ShaderMaterial({
+    vertexShader: 'varying vec3 vN; void main() { vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying vec3 vN; void main() { float i = pow(max(0.0, 0.72 - dot(vN, vec3(0.0, 0.0, 1.0))), 3.0); gl_FragColor = vec4(0.36, 0.64, 1.0, 1.0) * i * 1.4; }',
+    side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  })));
+  // estrellas
+  const starPos = new Float32Array(2400 * 3);
+  for (let s = 0; s < 2400; s++) {
+    const u = hash(s, 1) * 2 - 1, a = hash(s, 2) * Math.PI * 2, r = 3500, q2 = Math.sqrt(1 - u * u);
+    starPos[s * 3] = r * q2 * Math.cos(a); starPos[s * 3 + 1] = r * u; starPos[s * 3 + 2] = r * q2 * Math.sin(a);
+  }
+  const starGeo = new THREE.BufferGeometry(); starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#dfe8ff', size: 1.4, sizeAttenuation: false, transparent: true, opacity: .8 })));
+
+  // luz: un sol que acompaña a la cámara desde arriba a la izquierda, como en los globos virtuales
+  scene.add(new THREE.AmbientLight('#cfd9e6', .5));
+  const sun = new THREE.DirectionalLight('#fff4e2', 1.35);
+  sun.position.set(-1, 1.1, .6); camera.add(sun);
+  const sunTarget = new THREE.Object3D(); sunTarget.position.set(0, 0, -10); camera.add(sunTarget); sun.target = sunTarget;
 
   const groups = {};
   const group = name => (groups[name] = groups[name] || (() => { const g = new THREE.Group(); scene.add(g); return g; })());
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), tr = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new V3(), tr = new V3();
+
+  // ríos como cintas 3D sobre el terreno: nítidos a cualquier distancia
+  {
+    const T = SMALL ? 20 : 34, P = [], I = [], pa = new V3(), pb = new V3(), dir = new V3(), side = new V3(), upv = new V3();
+    const jit = k => [(hash(k, 1) - .5) * .7, (hash(k, 2) - .5) * .7];
+    const at = k => { const i = k % NX, j = (k / NX) | 0, [a, b] = jit(k); return [(i + .5 + a) / RES, (j + .5 + b) / RES]; };
+    for (let k = 0; k < NX * NZ; k++) {
+      if (!G.land[k] || G.lake[k] || G.acc[k] < T) continue;
+      const r = G.rcv[k]; if (r < 0) continue;
+      const b = Math.min(4, Math.floor(Math.log2(G.acc[k] / T) / 1.4)), w = .045 + .045 * b;
+      const [x0, y0] = at(k), [x1, y1] = at(r);
+      geoPos(x0, y0, Math.max(heightAt(x0, y0), 0) + .05, pa); geoPos(x1, y1, Math.max(heightAt(x1, y1), 0) + .05, pb);
+      dir.subVectors(pb, pa); const len = dir.length(); if (len < 1e-4) continue; dir.divideScalar(len);
+      upv.copy(pa).normalize(); side.crossVectors(dir, upv).normalize().multiplyScalar(w / 2);
+      pa.addScaledVector(dir, -w * .45); pb.addScaledVector(dir, w * .45);
+      const o = P.length / 3;
+      P.push(pa.x - side.x, pa.y - side.y, pa.z - side.z, pa.x + side.x, pa.y + side.y, pa.z + side.z,
+             pb.x - side.x, pb.y - side.y, pb.z - side.z, pb.x + side.x, pb.y + side.y, pb.z + side.z);
+      I.push(o, o + 2, o + 1, o + 1, o + 2, o + 3);
+    }
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); rg.setIndex(I);
+    group('rios').add(new THREE.Mesh(rg, new THREE.MeshBasicMaterial({ color: '#2a6a90', side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+  }
 
   // el Muro: cara de hielo
   const wallXs = [];
@@ -1095,15 +1227,15 @@ async function start() {
   let wallTop = 0; wallXs.forEach(([, h]) => wallTop = Math.max(wallTop, h));
   wallXs.forEach(([x, h], i) => {
     const top = Math.max(h + 1.1, Math.min(wallTop + .7, h + 2.2)), bot = h - .4;
-    sc.set(1, top - bot, 1); tr.set(toX(x), (top + bot) / 2, toZ(22));
+    frameAt(x, 22, q); geoPos(x, 22, (top + bot) / 2, tr); sc.set(1, top - bot, 1);
     m4.compose(tr, q, sc); wall.setMatrixAt(i, m4);
   });
   scene.add(wall);
 
-  // bosques
+  // árboles 3D (capa opcional)
   const treePts = [], step = SMALL ? .75 : .5, cap = SMALL ? 14000 : 36000;
   const tcol = { pino: lin('#2b4630'), hoja: lin('#45692c'), selva: lin('#2c5e29') }, tsnow = lin('#dfe8ea');
-  for (let y = 2; y < H - 1 && treePts.length < cap; y += step) for (let x = -OFFX + 1; x < W - OFFX - 1; x += step) {
+  for (let y = 2; y < H - 1 && treePts.length < cap; y += step) for (let x = 1; x < W - 1; x += step) {
     let dens = 0, type = 'hoja';
     for (const [fx, fy, fr, fd, ft] of FORESTS) {
       const d = Math.hypot(x - fx, y - fy); if (d >= fr) continue;
@@ -1123,7 +1255,7 @@ async function start() {
     treePts.forEach(([x, y, h, type], i) => {
       const r = hash(i, 7);
       const s = type === 'pino' ? [.09 + r * .05, .36 + r * .22] : type === 'selva' ? [.15 + r * .06, .28 + r * .16] : [.13 + r * .06, .24 + r * .14];
-      sc.set(s[0], s[1], s[0]); tr.set(toX(x), h - .03, toZ(y));
+      sc.set(s[0], s[1], s[0]); frameAt(x, y, q); geoPos(x, y, h - .03, tr);
       m4.compose(tr, q, sc); trees.setMatrixAt(i, m4);
       tc.copy(tcol[type]).multiplyScalar(.75 + hash(i, 3) * .5);
       if (y < 30) tc.lerp(tsnow, smooth(30, 8, y) * .65);
@@ -1147,103 +1279,102 @@ async function start() {
     const at = (dx, dz) => heightAt(x + dx, y + dz);
     const tower = (dx, dz, r, h, roofed = true) => {
       const b = at(dx, dz); if (b < .02) return;
-      towersT.push([x + dx, y + dz, b - .1, r, h + .1, stone]);
-      if (roofed && roof) roofsT.push([x + dx, y + dz, b + h, r * 1.3, r * 2.4, roof]);
+      towersT.push([x + dx, y + dz, b - .1, r, h + .1, 0, stone]);
+      if (roofed && roof) roofsT.push([x + dx, y + dz, b + h, r * 1.3, r * 2.4, 0, roof]);
     };
-    const ruin = type === 'ruina';
-    const big = tier === 1 ? 1.25 : tier === 2 ? 1 : .8;
+    const big = tier === 1 ? 1.1 : tier === 2 ? .9 : .7;
     if (type === 'castillo' || type === 'fuerte') {
-      const n = type === 'fuerte' ? 1 : tier === 1 ? 6 : tier === 2 ? 4 : 3, ring = type === 'fuerte' ? 0 : .42 * big;
-      tower(0, 0, .17 * big, (look === 'blanca' ? 1.2 : .95) * big);
-      for (let t = 0; t < n - 1; t++) { const a = t / (n - 1) * Math.PI * 2 + R(); tower(Math.cos(a) * ring, Math.sin(a) * ring, .1 * big, .55 * big + R() * .2); }
-      if (look === 'faro') tower(.3, -.2, .14, 3.4);
+      const n = type === 'fuerte' ? 1 : tier === 1 ? 6 : tier === 2 ? 4 : 3, ring = type === 'fuerte' ? 0 : .4 * big;
+      tower(0, 0, .15 * big, (look === 'blanca' ? 1.1 : .85) * big);
+      for (let t = 0; t < n - 1; t++) { const a = t / (n - 1) * Math.PI * 2 + R(); tower(Math.cos(a) * ring, Math.sin(a) * ring, .09 * big, .5 * big + R() * .2); }
+      if (look === 'faro') tower(.3, -.2, .12, 3);
     } else if (type === 'ciudad') {
-      const nh = tier === 1 ? 70 : tier === 2 ? 36 : 14, spread = tier === 1 ? 1.5 : tier === 2 ? 1.05 : .7;
+      const nh = tier === 1 ? 70 : tier === 2 ? 36 : 14, spread = tier === 1 ? 1.4 : tier === 2 ? 1 : .65;
       for (let k = 0; k < nh; k++) {
         const a = R() * Math.PI * 2, rr = Math.sqrt(R()) * spread, dx = Math.cos(a) * rr, dz = Math.sin(a) * rr * .8;
         const b = at(dx, dz); if (b < .04) continue;
-        housesT.push([x + dx, y + dz, b, .1 + R() * .14, .08 + R() * .16, .1 + R() * .14, R() * Math.PI, stone]);
+        housesT.push([x + dx, y + dz, b - .03, .09 + R() * .12, .07 + R() * .14, .09 + R() * .12, R() * Math.PI, stone]);
       }
       const nt = tier === 1 ? 4 : tier === 2 ? 2 : 1;
-      for (let t = 0; t < nt; t++) { const a = R() * Math.PI * 2, rr = R() * spread * .6; tower(Math.cos(a) * rr, Math.sin(a) * rr * .8, .09 * big, .6 * big + R() * .4); }
-      if (look === 'roja') { tower(.3, -.25, .16, 1.1); tower(.55, -.1, .12, .9); tower(.15, -.5, .12, .9); }
-      if (look === 'faro') tower(-.3, .25, .15, 3.4);
+      for (let t = 0; t < nt; t++) { const a = R() * Math.PI * 2, rr = R() * spread * .6; tower(Math.cos(a) * rr, Math.sin(a) * rr * .8, .08 * big, .55 * big + R() * .35); }
+      if (look === 'roja') { tower(.3, -.25, .14, 1); tower(.55, -.1, .11, .8); tower(.15, -.5, .11, .8); }
+      if (look === 'faro') tower(-.3, .25, .13, 3);
       if (look === 'piramide') {
-        const b = at(0, 0); if (b > .02) pyramidsT.push([x, y, b, tier === 1 ? .75 : .55, tier === 1 ? 1.5 : 1.0, stone]);
-        for (let t = 0; t < 4; t++) { const a = R() * Math.PI * 2, rr = .5 + R() * .6, bb = at(Math.cos(a) * rr, Math.sin(a) * rr); if (bb > .02) pyramidsT.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr, bb, .25, .45, stone]); }
+        const b = at(0, 0); if (b > .02) pyramidsT.push([x, y, b - .05, tier === 1 ? .7 : .5, tier === 1 ? 1.4 : .9, 0, stone]);
+        for (let t = 0; t < 4; t++) { const a = R() * Math.PI * 2, rr = .5 + R() * .6, bb = at(Math.cos(a) * rr, Math.sin(a) * rr); if (bb > .02) pyramidsT.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr, bb - .05, .22, .4, 0, stone]); }
       }
-      if (look === 'titan') statuesT.push([x + 1.6, y + .6, 0, .16, 1.9, '#9c7b4a']);
-    } else if (ruin) {
-      const n = tier === 1 ? 9 : 5, spread = tier === 1 ? 1.4 : .6;
-      for (let t = 0; t < n; t++) { const a = R() * Math.PI * 2, rr = R() * spread; tower(Math.cos(a) * rr, Math.sin(a) * rr, (.07 + R() * .08) * big, .15 + R() * (look === 'negra' ? 1.1 : .5), false); }
-      if (look === 'negra') for (let t = 0; t < 5; t++) { const a = t / 5 * Math.PI * 2; tower(Math.cos(a) * .55, Math.sin(a) * .55, .16, .7 + R() * .5, false); }
+      if (look === 'titan') statuesT.push([x + 1.6, y + .6, 0, .14, 1.7, 0, '#9c7b4a']);
+    } else if (type === 'ruina') {
+      const n = tier === 1 ? 9 : 5, spread = tier === 1 ? 1.3 : .6;
+      for (let t = 0; t < n; t++) { const a = R() * Math.PI * 2, rr = R() * spread; tower(Math.cos(a) * rr, Math.sin(a) * rr, (.06 + R() * .07) * big, .15 + R() * (look === 'negra' ? 1 : .45), false); }
+      if (look === 'negra') for (let t = 0; t < 5; t++) { const a = t / 5 * Math.PI * 2; tower(Math.cos(a) * .5, Math.sin(a) * .5, .14, .6 + R() * .45, false); }
     }
   }
-  const instanced = (geom, list, place) => {
-    if (!list.length) return null;
+  // cada elemento: x, y, base, ancho, alto, [fondo], giro, color
+  const instanced = (geom, list, boxy) => {
+    if (!list.length) return;
     const mesh = new THREE.InstancedMesh(geom, new THREE.MeshStandardMaterial({ roughness: .85 }), list.length);
     const cc = new THREE.Color();
-    list.forEach((it, i) => { place(it); m4.compose(tr, q, sc); mesh.setMatrixAt(i, m4); mesh.setColorAt(i, cc.set(it[it.length - 1]).convertSRGBToLinear()); });
-    q.identity();
-    group('castillos').add(mesh); return mesh;
+    list.forEach((it, i) => {
+      const [x, y, b, w, h] = it, d = boxy ? it[5] : w, rot = boxy ? it[6] : it[5];
+      frameAt(x, y, q, rot); geoPos(x, y, b, tr); sc.set(w, h, d);
+      m4.compose(tr, q, sc); mesh.setMatrixAt(i, m4); mesh.setColorAt(i, cc.set(it[it.length - 1]).convertSRGBToLinear());
+    });
+    group('castillos').add(mesh);
   };
   const cyl = new THREE.CylinderGeometry(1, 1, 1, 7); cyl.translate(0, .5, 0);
   const cone = new THREE.ConeGeometry(1, 1, 7); cone.translate(0, .5, 0);
   const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, .5, 0);
   const pyr = new THREE.ConeGeometry(1, 1, 4); pyr.translate(0, .5, 0); pyr.rotateY(Math.PI / 4);
-  instanced(cyl, towersT, ([x, y, b, r, h]) => { q.identity(); tr.set(toX(x), b, toZ(y)); sc.set(r, h, r); });
-  instanced(cone, roofsT, ([x, y, b, r, h]) => { q.identity(); tr.set(toX(x), b, toZ(y)); sc.set(r, h, r); });
-  instanced(box, housesT, ([x, y, b, w, h, d, rot]) => { q.setFromAxisAngle(up, rot); tr.set(toX(x), b - .03, toZ(y)); sc.set(w, h, d); });
-  instanced(pyr, pyramidsT, ([x, y, b, r, h]) => { q.identity(); tr.set(toX(x), b - .05, toZ(y)); sc.set(r, h, r); });
-  instanced(cyl, statuesT, ([x, y, b, r, h]) => { q.identity(); tr.set(toX(x), b, toZ(y)); sc.set(r, h, r); });
+  instanced(cyl, towersT); instanced(cone, roofsT); instanced(box, housesT, true); instanced(pyr, pyramidsT); instanced(cyl, statuesT);
 
   // barcos
   const boats = [];
-  const hullG = new THREE.BoxGeometry(.7, .14, .22), sailG = new THREE.BoxGeometry(.03, .5, .34); sailG.translate(.05, .33, 0);
-  const routes = SEA_ROUTES.map(r => new THREE.CatmullRomCurve3(r.map(([x, y]) => new THREE.Vector3(toX(x), .05, toZ(y)))));
+  const hullG = new THREE.BoxGeometry(.6, .12, .19), sailG = new THREE.BoxGeometry(.03, .42, .3); sailG.translate(.05, .28, 0);
+  const routes = SEA_ROUTES.map(r => new THREE.CatmullRomCurve3(r.map(([x, y]) => new V3(x, 0, y))));
   routes.forEach((c, i) => { const n = c.getLength() > 60 ? 3 : 2; for (let k = 0; k < n; k++) boats.push({ c, t: (k / n + hash(i, k) * .2) % 1, dir: k % 2 ? -1 : 1, speed: 1.4 / c.getLength() }); });
   const hulls = new THREE.InstancedMesh(hullG, new THREE.MeshStandardMaterial({ color: '#5a3f2a', roughness: .8 }), boats.length);
   const sails = new THREE.InstancedMesh(sailG, new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: .9 }), boats.length);
   group('barcos').add(hulls, sails);
-  const bp = new THREE.Vector3(), bt = new THREE.Vector3();
+  const bp = new V3(), bt = new V3();
   function moveBoats(dt) {
     boats.forEach((b, i) => {
       b.t += b.dir * b.speed * dt;
       if (b.t > 1) { b.t = 1; b.dir = -1; } else if (b.t < 0) { b.t = 0; b.dir = 1; }
       b.c.getPointAt(b.t, bp); b.c.getTangentAt(b.t, bt);
-      q.setFromAxisAngle(up, Math.atan2(-bt.z * b.dir, bt.x * b.dir));
-      sc.set(1, 1, 1); bp.y = .06 + Math.sin(performance.now() * .002 + i) * .02;
-      m4.compose(bp, q, sc); hulls.setMatrixAt(i, m4); sails.setMatrixAt(i, m4);
+      frameAt(bp.x, bp.z, q, Math.atan2(-bt.z * b.dir, bt.x * b.dir));
+      geoPos(bp.x, bp.z, .06 + Math.sin(performance.now() * .002 + i) * .02, tr); sc.set(1, 1, 1);
+      m4.compose(tr, q, sc); hulls.setMatrixAt(i, m4); sails.setMatrixAt(i, m4);
     });
     hulls.instanceMatrix.needsUpdate = sails.instanceMatrix.needsUpdate = true;
   }
   moveBoats(0);
 
-  // Valyria: brasas de las Catorce Llamas
+  // Valyria: brasas de las Catorce Llamas, que suben en vertical respecto del suelo
   const EMB = 300, ember = new Float32Array(EMB * 3), emberBase = [];
   const flames = RANGES.find(r => r.fire).pts;
   for (let e = 0; e < EMB; e++) {
     const s = e % (flames.length - 1), a = flames[s], b = flames[s + 1], t = Math.random();
     const x = a[0] + (b[0] - a[0]) * t + (Math.random() - .5) * 2, y = a[1] + (b[1] - a[1]) * t + (Math.random() - .5) * 1.4;
-    const h = Math.max(heightAt(x, y), .3);
-    emberBase.push([toX(x), h, toZ(y), .6 + Math.random() * 1.4]);
-    ember[e * 3] = toX(x); ember[e * 3 + 1] = h + Math.random() * 4; ember[e * 3 + 2] = toZ(y);
+    const h = Math.max(heightAt(x, y), .3), base = geoPos(x, y, h);
+    emberBase.push([base, base.clone().normalize(), .6 + Math.random() * 1.4, Math.random() * 4.5]);
   }
   const emberGeo = new THREE.BufferGeometry();
   emberGeo.setAttribute('position', new THREE.BufferAttribute(ember, 3));
-  scene.add(new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .45, transparent: true, opacity: .9,
+  scene.add(new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .4, transparent: true, opacity: .9,
     blending: THREE.AdditiveBlending, depthWrite: false })));
+  const placeEmbers = () => emberBase.forEach(([b, n, , off], e) => { ember[e * 3] = b.x + n.x * off; ember[e * 3 + 1] = b.y + n.y * off; ember[e * 3 + 2] = b.z + n.z * off; });
+  placeEmbers();
   const fire = new THREE.PointLight('#ff6a2a', 2.2, 26, 1.6);
-  fire.position.set(toX(142), 5, toZ(118));
+  geoPos(142, 118, 5, fire.position);
   scene.add(fire);
 
-  // controles
+  // controles: se gira alrededor del centro del globo; cerca del suelo todo se vuelve más lento y fino
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = .08;
-  controls.screenSpacePanning = false;
-  controls.minDistance = 4; controls.maxDistance = 560;
-  controls.maxPolarAngle = 1.4;
-  controls.zoomSpeed = 1.1;
+  controls.enablePan = false;
+  controls.minDistance = RG + 2.5; controls.maxDistance = RG * 5;
+  controls.target.set(0, 0, 0);
 
   // rótulos
   const layer = $('labels'), labels = [];
@@ -1254,20 +1385,37 @@ async function start() {
     el.className = `lbl city t${tier} ${type}`; el.type = 'button';
     el.innerHTML = '<span></span>'; el.firstChild.textContent = name;
     const L = { el, kind: 'city', tier, name, x, y, desc, house, kicker: `${KIND[type]} · ${region}`,
-      pos: new THREE.Vector3(toX(x), Math.max(heightAt(x, y), 0) + .4, toZ(y)), max: tier === 1 ? 460 : tier === 2 ? 200 : 95, min: 0 };
+      pos: geoPos(x, y, Math.max(heightAt(x, y), 0) + .4), max: tier === 1 ? 460 : tier === 2 ? 200 : 95, min: 0 };
     el.addEventListener('click', () => select(L));
     layer.appendChild(el); labels.push(L);
     const o = document.createElement('option'); o.value = name; list.appendChild(o);
   }
-  const AKIND = { region: 'Región', 'region big': 'Continente', sea: 'Mar', 'sea small': 'Aguas', range: 'Cordillera', forest: 'Bosque' };
-  for (const [text, x, y, kind, max, min, desc] of AREAS) {
+  const AKIND = { region: 'Región', 'region big': 'Continente', 'region small': 'Accidente geográfico', sea: 'Mar', 'sea small': 'Aguas', lake: 'Lago', range: 'Cordillera', forest: 'Bosque', river: 'Río' };
+  const addArea = (text, x, y, kind, max, min, desc, pos, pos2) => {
     const el = document.createElement(desc ? 'button' : 'div');
     el.className = `lbl ${kind}`;
     if (desc) { el.type = 'button'; el.innerHTML = '<span></span>'; el.firstChild.textContent = text; } else el.textContent = text;
-    const L = { el, kind, name: text, x, y, desc, house: '', kicker: AKIND[kind], tier: 0, area: true,
-      pos: new THREE.Vector3(toX(x), kind.startsWith('sea') ? .3 : Math.max(heightAt(x, y), 0) + 1, toZ(y)), max, min };
+    const L = { el, kind, name: text, x, y, desc, house: '', kicker: AKIND[kind], tier: 0, area: true, max, min,
+      pos: pos || geoPos(x, y, kind.startsWith('sea') ? .3 : Math.max(heightAt(x, y), 0) + 1), pos2 };
     if (desc) el.addEventListener('click', () => select(L));
     layer.appendChild(el); labels.push(L);
+    if (desc) { const o = document.createElement('option'); o.value = text; list.appendChild(o); }
+  };
+  for (const [text, x, y, kind, max, min, desc] of AREAS) addArea(text, x, y, kind, max, min, desc);
+  // ríos: cada nombre se apoya en el cauce más caudaloso cercano y se orienta según la corriente
+  for (const [text, x, y, desc] of RIVER_NAMES) {
+    let best = -1, bestScore = 0;
+    const r0 = 8 * RES, ci = Math.round(x * RES), cj = Math.round(y * RES);
+    for (let dj = -r0; dj <= r0; dj++) for (let di = -r0; di <= r0; di++) {
+      const i = ci + di, j = cj + dj; if (i < 1 || j < 1 || i >= NX - 1 || j >= NZ - 1) continue;
+      const k = j * NX + i; if (!G.land[k] || G.lake[k] || G.acc[k] < 60) continue;
+      const score = Math.log(G.acc[k]) * Math.exp(-(di * di + dj * dj) / (r0 * r0 * .35));
+      if (score > bestScore) { bestScore = score; best = k; }
+    }
+    if (best < 0) continue;
+    let down = best; for (let s = 0; s < 4 && G.rcv[down] >= 0 && G.land[G.rcv[down]]; s++) down = G.rcv[down];
+    const bx = (best % NX) / RES, by = ((best / NX) | 0) / RES, dx2 = (down % NX) / RES, dy2 = ((down / NX) | 0) / RES;
+    addArea(text, bx, by, 'river', 140, 0, desc, geoPos(bx, by, Math.max(heightAt(bx, by), 0) + .3), geoPos(dx2, dy2, Math.max(heightAt(dx2, dy2), 0) + .3));
   }
 
   // ficha
@@ -1284,12 +1432,7 @@ async function start() {
     }
     $('panel').hidden = false;
     setPressed(-1);
-    if (fly) {
-      if (L.area) {
-        sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
-        flyTo(L.x, L.y, Math.min(sph.radius, L.max * .55), .9, null);
-      } else flyTo(L.x, L.y, L.tier === 1 ? 26 : 18, .95, null);
-    }
+    if (fly) flyTo(L.x, L.y, L.area ? Math.min(camera.position.length() - RG, L.max * .5) : L.tier === 1 ? 24 : 16);
   }
   $('close').addEventListener('click', () => { $('panel').hidden = true; if (selected) selected.el.classList.remove('sel'); selected = null; });
   $('q').addEventListener('change', e => {
@@ -1299,7 +1442,7 @@ async function start() {
   });
 
   // capas
-  const LAYERS = [['Nombres', 'nombres', true], ['Castillos', 'castillos', true], ['Árboles 3D', 'bosques', false], ['Barcos', 'barcos', true]];
+  const LAYERS = [['Nombres', 'nombres', true], ['Ríos', 'rios', true], ['Castillos', 'castillos', true], ['Árboles 3D', 'bosques', false], ['Barcos', 'barcos', true]];
   for (const [label, key, def] of LAYERS) {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label; b.setAttribute('aria-pressed', String(def));
@@ -1312,60 +1455,50 @@ async function start() {
     $('layers').appendChild(b);
   }
 
-  // viajes
+  // viajes: lugar y altura de la cámara sobre el suelo
+  const WORLD_ALT = SMALL ? 520 : 340;
   const TRIPS = [
-    ['Todo el mundo', 186, 108, 330, .8, 0],
-    ['Poniente', 75, 56, 125, .78, 0],
-    ['El Muro', 75, 22, 34, 1.05, 0],
-    ['Desembarco del Rey', 80.5, 76.5, 20, 1.0, .5],
-    ['Mar Angosto', 100, 76, 80, .92, .45],
-    ['Bahía de los Esclavos', 159, 105, 45, .95, 0],
-    ['Valyria', 143, 118, 30, 1.0, .25],
-    ['Qarth y el mar de Jade', 212, 138, 75, .9, 0],
-    ['Asshai y la Sombra', 250, 136, 55, .95, -.3],
+    ['Todo el mundo', 186, 100, WORLD_ALT],
+    ['Poniente', 75, 58, 120],
+    ['El Muro', 75, 24, 28],
+    ['Desembarco del Rey', 80.5, 76.5, 14],
+    ['Mar Angosto', 100, 76, 60],
+    ['Bahía de los Esclavos', 159, 105, 38],
+    ['Valyria', 143, 118, 24],
+    ['Qarth y el mar de Jade', 212, 138, 60],
+    ['Asshai y la Sombra', 250, 136, 45],
   ];
   const row = document.querySelector('#trips .row');
   const tripBtns = TRIPS.map((t, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = t[0]; b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => { setPressed(i); flyTo(t[1], t[2], t[3], t[4], t[5]); });
+    b.addEventListener('click', () => { setPressed(i); flyTo(t[1], t[2], t[3]); });
     row.appendChild(b); return b;
   });
   function setPressed(i) { tripBtns.forEach((b, j) => b.setAttribute('aria-pressed', String(i === j))); }
 
-  // vuelo de cámara
+  // vuelo de cámara sobre el globo: gira la dirección y ajusta la altura, subiendo en los viajes largos
   let tween = null;
-  const sph = new THREE.Spherical(), tmp = new THREE.Vector3();
-  function placeCam(target, r, phi, theta) {
-    controls.target.copy(target);
-    camera.position.copy(target).add(tmp.setFromSphericalCoords(r, phi, theta));
-  }
-  function flyTo(x, y, dist, polar, az) {
-    sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
-    const to = new THREE.Vector3(toX(x), Math.max(heightAt(x, y), 0) * .5, toZ(y));
-    let th1 = az === null ? sph.theta : az, th0 = sph.theta;
-    while (th1 - th0 > Math.PI) th1 -= Math.PI * 2;
-    while (th1 - th0 < -Math.PI) th1 += Math.PI * 2;
-    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 1600, from: controls.target.clone(), to,
-      r0: sph.radius, r1: dist, p0: sph.phi, p1: polar, th0, th1 };
+  const d0 = new V3(), d1 = new V3(), dq = new THREE.Quaternion(), dqa = new THREE.Quaternion();
+  function flyTo(x, y, alt) {
+    d0.copy(camera.position).normalize(); geoPos(x, y, 0, d1).normalize();
+    const ang = d0.angleTo(d1);
+    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 1400 + ang * 900, from: d0.clone(), q: new THREE.Quaternion().setFromUnitVectors(d0, d1),
+      a0: camera.position.length() - RG, a1: alt, hop: Math.min(RG * 1.2, ang * RG * .7) };
   }
   function stepTween(now) {
     if (!tween) return;
     const T = tween, k = T.dur ? Math.min(1, (now - T.t0) / T.dur) : 1;
     const e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
-    // en viajes largos la cámara sube a mitad de camino
-    const hop = Math.sin(Math.PI * e) * Math.min(80, T.from.distanceTo(T.to) * .35);
-    placeCam(tmp.lerpVectors(T.from, T.to, e).clone(), T.r0 + (T.r1 - T.r0) * e + hop, T.p0 + (T.p1 - T.p0) * e, T.th0 + (T.th1 - T.th0) * e);
+    dqa.identity().slerp(T.q, e);
+    const alt = T.a0 + (T.a1 - T.a0) * e + Math.sin(Math.PI * e) * T.hop;
+    camera.position.copy(T.from).applyQuaternion(dqa).multiplyScalar(RG + alt);
     if (k >= 1) tween = null;
   }
   controls.addEventListener('start', () => { tween = null; setPressed(-1); });
-  $('compass').addEventListener('click', () => {
-    sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
-    const t = controls.target;
-    flyTo(t.x - OFFX + W / 2, t.z + H / 2, sph.radius, sph.phi, 0);
-  });
+  $('compass').addEventListener('click', () => { setPressed(0); flyTo(TRIPS[0][1], TRIPS[0][2], TRIPS[0][3]); });
 
-  placeCam(new THREE.Vector3(toX(186), 0, toZ(108)), SMALL ? 520 : 330, SMALL ? .7 : .8, 0);
+  geoPos(186, 100, WORLD_ALT, camera.position);
   setPressed(0);
 
   function resize() {
@@ -1374,27 +1507,26 @@ async function start() {
   }
   addEventListener('resize', resize); resize();
 
-  const v = new THREE.Vector3(), needle = $('needle');
+  const v = new V3(), v2 = new V3(), toCam = new V3(), nrm = new V3();
   let last = performance.now();
   function frame(now) {
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     stepTween(now);
+    // velocidad según la altura: lejos gira rápido, cerca del suelo despacio
+    const dist = camera.position.length(), alt = dist - RG;
+    controls.rotateSpeed = Math.max(.015, Math.min(1, alt / (RG * 1.1)));
+    controls.zoomSpeed = Math.max(.05, Math.min(1.6, 3 * alt / dist));
     controls.update();
-    // limitar el desplazamiento al mapa
-    const t = controls.target, cx = Math.max(-W / 2, Math.min(W / 2, t.x)), cz = Math.max(-H / 2, Math.min(H / 2, t.z));
-    if (cx !== t.x || cz !== t.z) { camera.position.x += cx - t.x; camera.position.z += cz - t.z; t.x = cx; t.z = cz; }
     // no meter la cámara bajo tierra
-    const ground = heightAt(camera.position.x - OFFX + W / 2, camera.position.z + H / 2);
-    if (camera.position.y < Math.max(ground, 0) + .8) camera.position.y = Math.max(ground, 0) + .8;
+    const [ax, ay] = toAtlas(camera.position);
+    const ground = ax > 0 && ax < W && ay > 0 && ay < H ? Math.max(heightAt(ax, ay), 0) : 0;
+    if (camera.position.length() < RG + ground + 1.2) camera.position.setLength(RG + ground + 1.2);
 
     if (!reduceMotion) {
-      for (let e = 0; e < EMB; e++) {
-        ember[e * 3 + 1] += emberBase[e][3] * dt;
-        if (ember[e * 3 + 1] > emberBase[e][1] + 4.5) ember[e * 3 + 1] = emberBase[e][1];
-      }
-      emberGeo.attributes.position.needsUpdate = true;
+      for (const eb of emberBase) { eb[3] += eb[2] * dt; if (eb[3] > 4.5) eb[3] = 0; }
+      placeEmbers(); emberGeo.attributes.position.needsUpdate = true;
       fire.intensity = 2 + Math.sin(now * .007) * .4 + Math.sin(now * .019) * .25;
-      normalTex.offset.x += dt * .006; normalTex.offset.y += dt * .003;
+      normalTex.offset.x += dt * .004; normalTex.offset.y += dt * .002;
       if (groups.barcos.visible) moveBoats(dt);
     }
     renderer.render(scene, camera);
@@ -1402,25 +1534,34 @@ async function start() {
     if (!layer.classList.contains('off')) {
       const w = innerWidth, h = innerHeight;
       for (const L of labels) {
+        // del otro lado del globo no se ve
+        nrm.copy(L.pos).normalize(); toCam.subVectors(camera.position, L.pos);
+        const facing = nrm.dot(toCam) / toCam.length();
         v.copy(L.pos).project(camera);
-        const d = camera.position.distanceTo(L.pos);
+        const d = toCam.length();
         let op = 0;
-        if (v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && d < L.max && d > L.min) {
-          op = Math.min(1, (L.max - d) / (L.max * .15));
+        if (facing > .02 && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && d < L.max && d > L.min) {
+          op = Math.min(1, (L.max - d) / (L.max * .15), facing * 6);
           if (L.min) op = Math.min(op, (d - L.min) / (L.min * .2));
         }
-        if (L === selected && v.z < 1) op = 1;
+        if (L === selected && v.z < 1 && facing > 0) op = 1;
         const vis = op > .02;
         if (vis !== L.vis) { L.el.style.visibility = vis ? 'visible' : 'hidden'; L.vis = vis; }
         if (!vis) continue;
         const sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
+        let rot = '';
+        if (L.pos2) {
+          v2.copy(L.pos2).project(camera);
+          let a = Math.atan2(-(v2.y - v.y) * h, (v2.x - v.x) * w) * 180 / Math.PI;
+          if (a > 90) a -= 180; else if (a < -90) a += 180;
+          rot = ` rotate(${a.toFixed(1)}deg)`;
+        }
         L.el.style.transform = L.kind === 'city'
           ? `translate(${sx - 4}px, ${sy}px) translateY(-50%)`
-          : `translate(${sx}px, ${sy}px) translate(-50%, -50%)`;
+          : `translate(${sx}px, ${sy}px) translate(-50%, -50%)${rot}`;
         L.el.style.opacity = op.toFixed(2);
       }
     }
-    needle.setAttribute('transform', `rotate(${(controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1)} 15 15)`);
     requestAnimationFrame(frame);
   }
   $('loading').remove();
