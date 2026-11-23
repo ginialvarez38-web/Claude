@@ -82,6 +82,16 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
 #layers button[aria-pressed="true"]::before { content: "● "; color: var(--brass); font-size: 10px; }
 #layers button:focus-visible { outline: 2px solid var(--brass); }
 
+#exagBox { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel); font: 13px var(--ui); color: var(--parch); }
+#exag { width: 110px; accent-color: var(--brass); }
+#exag:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+#exagOut { min-width: 54px; color: var(--brass); font-variant-numeric: tabular-nums; }
+#scale { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  pointer-events: none; display: grid; gap: 4px; justify-items: start; text-shadow: 0 1px 2px rgba(5, 12, 16, .9); }
+#sbBar { height: 6px; border: 2px solid var(--parch); border-top: 0; min-width: 20px; }
+#sbText, #readout { font: 13px var(--ui); color: var(--parch); font-variant-numeric: tabular-nums; }
+#readout { color: var(--parch-dim); max-width: calc(100vw - 32px); }
 #trips { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   display: flex; justify-content: center; pointer-events: none; }
@@ -126,6 +136,8 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
   #q { flex: 1; width: auto; min-width: 0; }
   #layers { max-width: none; justify-content: flex-start; }
   #hint { display: none; }
+  #scale { bottom: calc(env(safe-area-inset-bottom, 0px) + 200px); }
+  #exag { width: 80px; }
   #panel { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: auto;
     top: calc(env(safe-area-inset-top, 0px) + 74px); max-height: 40%; }
   .city { font-size: 13px; }
@@ -159,9 +171,14 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
     </button>
   </div>
   <div id="layers" role="group" aria-label="Capas del mapa"></div>
+  <label id="exagBox" for="exag">Relieve
+    <input type="range" id="exag" min="1" max="10" step="0.5" value="1">
+    <output id="exagOut" for="exag">1× (real)</output>
+  </label>
 </div>
 
-<div id="hint">Arrastrá para girar · rueda para acercarte hacia el puntero · clic derecho para desplazar · tocá un nombre</div>
+<div id="scale" aria-live="off"><div id="sbBar"></div><span id="sbText"></span><div id="readout"></div></div>
+<div id="hint">Arrastrá para girar · rueda para acercarte hacia el puntero · clic derecho para desplazar · tocá un nombre · el mundo está a escala: 1 legua ≈ 4,8 km</div>
 
 <nav id="trips" aria-label="Viajes rápidos"><div class="row"></div></nav>
 
@@ -691,22 +708,100 @@ async function buildWorld(progress = async () => {}) {
   return { NX, NZ, hgt, land, lake, acc, rcv, shadow: shadowS, ao, slope, col, forest, ftype, desert, farm };
 }
 
-/* ===== Pintura del terreno =====
-   paintRows pinta un rectángulo del mundo en un ImageData. La textura general cubre todo el mapa;
-   al acercarse, cada recuadro cercano se vuelve a pintar con 4 veces más resolución y ruido más fino (hi). */
+/* ===== Escala =====
+   1 unidad del mapa = 15,5 km. Sale de los libros: el Muro va de costa a costa y mide unas 300 millas (≈ 480 km),
+   y en este mapa ocupa 31 unidades. Las alturas se guardan en km y se dibujan a escala real (VZ),
+   multiplicadas por la exageración que elija quien mira. */
+const KM = 15.5, VZ = 1 / KM, UK = 1 / KM;
+const LEAGUE_KM = 4.83;   // una legua: unas tres millas
+// la grilla del generador está en «unidades de relieve»; esto la pasa a km (llanuras de 0 a 260 m, cumbres de unos 6 km) y de vuelta
+function kmOf(h) {
+  if (h < 0) return h * 1.6;
+  if (h < 1.2) return h * .22;
+  const k = .264 + (h - 1.2) * 1.02;
+  return k < 3 ? k : 3 + (k - 3) * .5;   // las cumbres se comprimen: ninguna pasa de unos 5,5 km
+}
+function oldOf(km) {
+  if (km < 0) return km / 1.6;
+  if (km < .264) return km / .22;
+  const k = km < 3 ? km : 3 + (km - 3) / .5;
+  return 1.2 + (k - .264) / 1.02;
+}
+
+/* ===== Paleta del terreno ===== */
 const PAL = {
   SHALLOW: hex3('#2f8197'), MID: hex3('#1b5b80'), DEEP: hex3('#0b2b4c'), REEF: hex3('#8ccfc2'),
   LAKE: hex3('#1a4a6c'), LAKESHORE: hex3('#2c6c88'), LAKEEDGE: hex3('#123349'), SNOW: [.95, .96, .97], SAND: hex3('#d8c391'), BEACH: hex3('#d9cfae'),
-  ROCK: hex3('#7a7066'), ROCK2: hex3('#5c564f'),
+  ROCK: hex3('#7a7066'), ROCK2: hex3('#5c564f'), CLIFF: hex3('#4f4a44'),
   FCOL: [hex3('#1d3524'), hex3('#2a4a22'), hex3('#1b4a20')],
-  FIELDS: [hex3('#a49a5c'), hex3('#6f8a45'), hex3('#8a7650'), hex3('#93a05a')],
+  FIELDS: [hex3('#a49a5c'), hex3('#6f8a45'), hex3('#8a7650'), hex3('#93a05a'), hex3('#b4a565'), hex3('#5f7a3c')],
+  URBAN: hex3('#8a8175'), STREET: hex3('#57524c'),
+  ROOFS: [hex3('#9a5a43'), hex3('#8d877e'), hex3('#a89a82'), hex3('#6e6a66'), hex3('#b07a55'), hex3('#7d7369')],
+  STONE: hex3('#8f8a82'), RUIN: hex3('#6d6860'),
 };
-function paintRows(G, D, TW, rx0, ry0, sx, sy, r0, r1, hi) {
-  const { NX, NZ } = G, P = PAL;
-  const c = [0, 0, 0], t3 = [0, 0, 0];
+
+// interpolación bicúbica de la grilla de relieve: sin las aristas de la bilineal al acercarse
+function cubicH(G, gi, gj) {
+  const NX = G.NX, NZ = G.NZ, hg = G.hgt, i = Math.floor(gi), j = Math.floor(gj), fx = gi - i, fy = gj - j;
+  const cr = (p0, p1, p2, p3, t) => p1 + .5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+  const row = jj => {
+    const r = Math.max(0, Math.min(NZ - 1, jj)) * NX, c = ii => hg[r + Math.max(0, Math.min(NX - 1, ii))];
+    return cr(c(i - 1), c(i), c(i + 1), c(i + 2), fx);
+  };
+  return cr(row(j - 1), row(j), row(j + 1), row(j + 2), fy);
+}
+
+// elevación en km con detalle fractal: cada octava suma relieve más fino; el nivel de acercamiento decide cuántas
+function elevKm(G, x, y, oct) {
+  const NX = G.NX, NZ = G.NZ;
+  const gi = Math.max(0, Math.min(NX - 1.001, x * RES)), gj = Math.max(0, Math.min(NZ - 1.001, y * RES));
+  const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, k = j * NX + i;
+  const bl = a => a[k] * (1 - fx) * (1 - fy) + a[k + 1] * fx * (1 - fy) + a[k + NX] * (1 - fx) * fy + a[k + NX + 1] * fx * fy;
+  let h = bl(G.hgt); const lk = bl(G.lake);
+  if (h > .15 && lk < .01) h = cubicH(G, gi, gj);
+  const base = kmOf(h);
+  if (h < .06 || lk > .01 || x < 0 || y < 0 || x > W || y > H) return base;
+  const sl = bl(G.slope), ac = bl(G.acc);
+  const rough = (.05 + .55 * smooth(.3, 1.3, sl) + .25 * smooth(1.5, 4, h)) * smooth(.06, .3, h) * (1 - .85 * smooth(10, 40, ac));
+  let s = 0, amp = .45, f = .9;
+  for (let o = 0; o < oct; o++) {
+    const n = noise(x * f + o * 7.3, y * f - o * 3.1);
+    if (o < 2) s += amp * (n - .5) * 2; else { const r = 1 - Math.abs(2 * n - 1); s += amp * (r * r - .35) * 1.6; }
+    amp *= .5; f *= 2.05;
+  }
+  return base + s * rough;
+}
+
+// grilla de alturas (km) y pendiente real de un recuadro, con un borde extra para las normales
+function fineGrid(G, x0, y0, size, NV, oct) {
+  const n = NV + 2, step = size / (NV - 1), hk = new Float32Array(n * n), sl = new Float32Array(n * n), gx = new Float32Array(n * n), gy = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) hk[j * n + i] = elevKm(G, x0 + (i - 1) * step, y0 + (j - 1) * step, oct);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const ii = Math.max(1, Math.min(n - 2, i)), jj = Math.max(1, Math.min(n - 2, j)), k = jj * n + ii;
+    const a = (hk[k + 1] - hk[k - 1]) / (2 * step) / KM, b = (hk[k + n] - hk[k - n]) / (2 * step) / KM;
+    gx[j * n + i] = a; gy[j * n + i] = b; sl[j * n + i] = Math.hypot(a, b);
+  }
+  return { hk, sl, gx, gy, n, x0, y0, step };
+}
+
+/* Pinta un rectángulo del mundo. level 0 es la textura general; cada nivel más hondo
+   suma ruido más fino, parcelas, manzanas de ciudad y roca según la pendiente real (fine). */
+function paintChunk(G, D, TW, rx0, ry0, sx, sy, r0, r1, level, fine, towns) {
+  const NX = G.NX, NZ = G.NZ, P = PAL;
+  const c = [0, 0, 0], t3 = [0, 0, 0], texel = Math.max(sx, sy);
+  // octavas extra de ruido que caben en el tamaño del texel
+  const XF = [60, 140, 320, 700, 1500, 3200], XW = [.08, .06, .05, .04, .035, .03], xf = [];
+  for (let q = 0; q < XF.length; q++) if (XF[q] * texel < .5) xf.push(q);
+  const hiN = xf.length > 0;
+  const fieldsFine = texel < .012, blocksFine = texel < .0016;
   let fx, fy, k0;
   const S = a => a[k0] * (1 - fx) * (1 - fy) + a[k0 + 1] * fx * (1 - fy) + a[k0 + NX] * (1 - fx) * fy + a[k0 + NX + 1] * fx * fy;
   const S3 = (a, ch) => a[k0 * 3 + ch] * (1 - fx) * (1 - fy) + a[(k0 + 1) * 3 + ch] * fx * (1 - fy) + a[(k0 + NX) * 3 + ch] * (1 - fx) * fy + a[(k0 + NX + 1) * 3 + ch] * fx * fy;
+  const FSm = (arr, wx, wy) => {
+    const n = fine.n, a = Math.max(0, Math.min(n - 1.001, (wx - fine.x0) / fine.step + 1)), b = Math.max(0, Math.min(n - 1.001, (wy - fine.y0) / fine.step + 1));
+    const i = a | 0, j = b | 0, u = a - i, v = b - j, k = j * n + i;
+    return arr[k] * (1 - u) * (1 - v) + arr[k + 1] * u * (1 - v) + arr[k + n] * (1 - u) * v + arr[k + n + 1] * u * v;
+  };
   for (let ty = r0; ty < r1; ty++) {
     const wy = ry0 + (ty + .5) * sy;
     const gj = Math.max(0, Math.min(NZ - 1.001, wy * RES)), j = gj | 0; fy = gj - j;
@@ -715,62 +810,100 @@ function paintRows(G, D, TW, rx0, ry0, sx, sy, r0, r1, hi) {
       const gi = Math.max(0, Math.min(NX - 1.001, wx * RES)), i = gi | 0; fx = gi - i; k0 = j * NX + i;
       const h = S(G.hgt), lk = S(G.lake);
       const n1 = noise(wx * 2.3, wy * 2.3), n2 = noise(wx * 9, wy * 9), n3 = noise(wx * 26, wy * 26);
-      const n4 = hi ? noise(wx * 60, wy * 60) : .5, n5 = hi ? noise(wx * 140, wy * 140) : .5;
+      let fn = 0; for (const q of xf) fn += XW[q] * (noise(wx * XF[q] + q * 3.7, wy * XF[q]) - .5);
+      const n4 = hiN ? noise(wx * 60, wy * 60) : .5;
       if (lk > .38 && lk < .5 && h >= 0) { const e = smooth(.38, .5, lk); mix3(P.BEACH, P.LAKEEDGE, e, c); c[0] *= .8; c[1] *= .8; c[2] *= .8; }
       else if (h < 0 && lk < .5) {
         const depth = -h, t = Math.sqrt(smooth(0, 2.4, depth));
         if (t < .5) mix3(P.SHALLOW, P.MID, t * 2, c); else mix3(P.MID, P.DEEP, (t - .5) * 2, c);
-        mix3(c, P.REEF, (1 - smooth(0, .22, depth)) * (.25 + .3 * n2 + .15 * (n4 - .5)), c);
-        const v = .94 + .1 * n1 + .04 * (n4 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
+        mix3(c, P.REEF, (1 - smooth(0, .22, depth)) * (.25 + .3 * n2 + .3 * fn), c);
+        const v = .94 + .1 * n1 + .5 * fn; c[0] *= v; c[1] *= v; c[2] *= v;
       } else if (lk >= .5) {
         mix3(P.LAKE, P.LAKESHORE, smooth(.64, .5, lk) * .6, c);
-        const v = .95 + .08 * n2 + .04 * (n4 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
+        const v = .95 + .08 * n2 + .4 * fn; c[0] *= v; c[1] *= v; c[2] *= v;
       } else {
+        // relieve: el fino del recuadro si lo hay; si no, el de la grilla
+        const hkm = fine ? FSm(fine.hk, wx, wy) : kmOf(h), hl = oldOf(hkm);
+        const realSlope = fine ? FSm(fine.sl, wx, wy) : 0, macroSlope = S(G.slope);
         c[0] = S3(G.col, 0); c[1] = S3(G.col, 1); c[2] = S3(G.col, 2);
-        const v = .86 + .2 * n1 + .1 * (n2 - .5) + .06 * (n3 - .5) + .08 * (n4 - .5) + .06 * (n5 - .5); c[0] *= v; c[1] *= v; c[2] *= v;
-        const slope = S(G.slope);
-        // cultivos: parcelas irregulares, con lindes visibles de cerca
+        const v = .86 + .2 * n1 + .1 * (n2 - .5) + .06 * (n3 - .5) + fn; c[0] *= v; c[1] *= v; c[2] *= v;
+        // cultivos: comarcas de parcelas y, de cerca, campos con lindes y surcos
         const fw = S(G.farm);
         if (fw > .04) {
           const ux = wx * 2.6 + n1 * .8, uy = wy * 3.4 + n2 * .5, px = Math.floor(ux), py = Math.floor(uy), hv = hash(px, py);
-          const fc = P.FIELDS[(hv * 4) | 0]; mix3(c, fc, fw * (.35 + .35 * hash(py, px)), c);
-          if (hi) {
-            const ex = Math.min(ux - px, 1 - (ux - px)), ey = Math.min(uy - py, 1 - (uy - py)), border = 1 - smooth(.0, .04, Math.min(ex, ey));
-            const furrow = .5 + .5 * Math.sin((hv > .5 ? ux : uy) * 60);
-            const m = 1 - fw * (border * .25 + furrow * .06); c[0] *= m; c[1] *= m; c[2] *= m;
+          mix3(c, P.FIELDS[(hv * 4) | 0], fw * (.35 + .35 * hash(py, px)), c);
+          if (fieldsFine) {
+            const vx = wx * 38 + n3 * 1.2, vy = wy * 47 + n2 * 1.5, qx = Math.floor(vx), qy = Math.floor(vy), hf = hash(qx + 911, qy);
+            const fc = P.FIELDS[(hf * P.FIELDS.length) | 0], fade = smooth(.012, .006, texel);
+            mix3(c, fc, fw * .55 * fade, c);
+            const ex = Math.min(vx - qx, 1 - (vx - qx)), ey = Math.min(vy - qy, 1 - (vy - qy));
+            const border = 1 - smooth(0, .05, Math.min(ex, ey)), furrow = .5 + .5 * Math.sin((hf > .5 ? vx : vy) * 40);
+            const m = 1 - fw * fade * (border * .3 + furrow * .07 * smooth(.004, .002, texel)); c[0] *= m; c[1] *= m; c[2] *= m;
           }
         }
         // desiertos con dunas
         const dw = S(G.desert);
         if (dw > .02) {
           let du = Math.sin((wx * .8 + wy * 1.7) * 5 + fbm(wx * .6, wy * .6, 2) * 9) * .5 + .5;
-          if (hi) du = du * .7 + (Math.sin((wx * 1.3 + wy * 2.9) * 22 + n3 * 6) * .5 + .5) * .3;
+          if (hiN) du = du * .6 + (Math.sin((wx * 1.3 + wy * 2.9) * 22 + n3 * 6) * .5 + .5) * .25 + (Math.sin((wx * 3.1 + wy * 5.3) * 70 + n4 * 5) * .5 + .5) * .15;
           t3[0] = P.SAND[0] * (.9 + .12 * du); t3[1] = P.SAND[1] * (.9 + .12 * du); t3[2] = P.SAND[2] * (.9 + .1 * du);
           mix3(c, t3, dw * .8, c);
         }
-        // bosques en manchas; de cerca se ven las copas
+        // bosques en manchas; de cerca, copas y claros
         const fo = S(G.forest);
         if (fo > .03) {
-          const clump = smooth(.4, .6, fbm(wx * .8 + n2 * .5, wy * .8 + 3, 3) * .7 + n1 * .3);
-          const ft = G.ftype[k0], fcol = P.FCOL[ft], fv = (.8 + .35 * n3) * (hi ? .7 + .6 * smooth(.35, .7, n5) : 1);
+          const clump = smooth(.4, .6, fbm(wx * .8 + n2 * .5, wy * .8 + 3, 3) * .7 + n1 * .3 + fn * .5);
+          const fcol = P.FCOL[G.ftype[k0]], fv = (.8 + .35 * n3) * (hiN ? .75 + .5 * smooth(.3, .7, n4 + fn * 2) : 1);
           t3[0] = fcol[0] * fv; t3[1] = fcol[1] * fv; t3[2] = fcol[2] * fv;
           mix3(c, t3, Math.min(1, fo * clump * 1.15), c);
         }
-        // roca en pendientes y cumbres, con estratos y grietas
-        const strata = noise(wx * 5 + n2 * 1.5, wy * 5 + n1) * (hi ? .75 : 1) + (hi ? .25 * n4 : 0);
+        // roca: en las sierras (escala grande) y donde la pendiente real pasa de unos 25°
+        const strata = noise(wx * 5 + n2 * 1.5, wy * 5 + n1) * .75 + (hiN ? .25 * n4 : .12);
         mix3(P.ROCK, P.ROCK2, strata, t3);
-        const rw = Math.min(1, smooth(.5, 1.15, slope + (n4 - .5) * .25) * .9 + smooth(2.6, 3.8, h) * .55);
+        let rw = Math.min(1, smooth(.5, 1.15, macroSlope + (n4 - .5) * .25) * .9 + smooth(2.6, 3.8, hl) * .55);
+        if (fine) { const cliff = smooth(.45, .95, realSlope + fn); rw = Math.max(rw, cliff); if (cliff > .5) mix3(t3, P.CLIFF, (cliff - .5), t3); }
+        { const rv = 1 + fn * 3.5 + (n3 - .5) * .15; t3[0] *= rv; t3[1] *= rv; t3[2] *= rv; }
         mix3(c, t3, rw, c);
-        // nieve
+        // nieve: la línea de nieves baja hacia el norte
         const snl = 4.1 + Math.max(0, wy - 80) * .05 - Math.max(0, 30 - wy) * .09;
-        let sw = smooth(snl - .25, snl + .4, h + (n1 - .5) * .7 + (n4 - .5) * .2) * (1 - .55 * smooth(1, 1.9, slope));
+        let sw = smooth(snl - .25, snl + .4, hl + (n1 - .5) * .7 + fn * 3) * (1 - .55 * smooth(1, 1.9, macroSlope)) * (fine ? 1 - .6 * smooth(.6, 1, realSlope) : 1);
         if (wy < 15) sw = Math.max(sw, smooth(15, 5, wy) * (.75 + .25 * n2));
         mix3(c, P.SNOW, sw, c);
         // playa
-        mix3(c, P.BEACH, (1 - smooth(.04, .13, h + (n4 - .5) * .03)) * .5 * (1 - lk), c);
+        mix3(c, P.BEACH, (1 - smooth(.04, .13, h + fn * .1)) * .5 * (1 - lk), c);
+        // ciudades y castillos vistos desde arriba
+        for (const [tx0, ty0, tr, kind, seed] of towns) {
+          const dx = wx - tx0, dy = wy - ty0; if (Math.abs(dx) > tr * 1.3 || Math.abs(dy) > tr * 1.3) continue;
+          const d = Math.hypot(dx, dy) / (tr * (1 + .3 * (noise(wx * 40 + seed, wy * 40) - .5)));
+          if (d > 1) continue;
+          if (kind === 0) {
+            const dens = smooth(1, .55, d);
+            if (blocksFine) {
+              const ang = Math.atan2(dy, dx), dist = Math.hypot(dx, dy), u6 = (ang + Math.PI) / (Math.PI * 2) * 6 + seed;
+              const sector = ((Math.floor(u6) % 6) + 6) % 6, th = sector * .55 + seed, ca = Math.cos(th), sa = Math.sin(th);
+              const cs = .0085 * (.75 + .5 * hash(sector, seed | 0));
+              const bx = (dx * ca + dy * sa) / cs, by = (-dx * sa + dy * ca) / cs, ix = Math.floor(bx), iy = Math.floor(by), lx = bx - ix, ly = by - iy;
+              const avenue = Math.min(u6 % 1, 1 - u6 % 1) * Math.PI / 3 * dist < .0009 && dist > tr * .08;
+              const plaza = dist < tr * .06, hb = hash(ix + sector * 101, iy + seed);
+              if (avenue || plaza) mix3(c, P.STREET, .9, c);
+              else if (lx < .14 || ly < .14) mix3(c, P.STREET, dens * .8, c);
+              else if (hb < .08) mix3(c, P.FIELDS[5], .6 * dens, c);           // patios y huertas
+              else if (hb < .3 + .7 * dens) {
+                const sx2 = lx < .57 ? 0 : 1, sy2 = ly < .57 ? 0 : 1, rc = P.ROOFS[(hash(ix * 2 + sx2, iy * 2 + sy2 + sector) * P.ROOFS.length) | 0];
+                const gable = ((hb > .5 ? lx : ly) * 2) % 1 < .5 ? .9 : 1.06;   // techos a dos aguas
+                t3[0] = rc[0] * gable; t3[1] = rc[1] * gable; t3[2] = rc[2] * gable; mix3(c, t3, .9, c);
+              } else mix3(c, P.URBAN, dens * .4, c);
+            } else mix3(c, P.URBAN, dens * (.75 + .3 * n3), c);
+          } else mix3(c, kind === 1 ? P.STONE : P.RUIN, smooth(1, .7, d) * .85, c);
+        }
         // un poco menos saturado, como una foto aérea
         const gray = (c[0] + c[1] + c[2]) / 3; c[0] = gray + (c[0] - gray) * .8; c[1] = gray + (c[1] - gray) * .8; c[2] = gray + (c[2] - gray) * .8;
-        const shade = S(G.ao) * (1 - .45 * S(G.shadow)) * (1 + (n3 - .5) * .08);
+        let shade = S(G.ao) * (1 - .45 * S(G.shadow)) * (1 + (n3 - .5) * .08);
+        if (fine) {
+          const ax = FSm(fine.gx, wx, wy), ay = FSm(fine.gy, wx, wy), l = Math.hypot(ax, 1, ay);
+          const dot = (ax * .656 + .574 + ay * .492) / l;   // luz (−0,8·0,82; 0,57; −0,6·0,82)
+          shade *= Math.pow(Math.max(.35, Math.min(1.6, dot / .574)), .7);
+        }
         c[0] *= shade; c[1] *= shade; c[2] *= shade;
       }
       const o = (ty * TW + tx) * 4;
@@ -779,52 +912,114 @@ function paintRows(G, D, TW, rx0, ry0, sx, sy, r0, r1, hi) {
   }
 }
 
-// tramos de río: pares (celda, celda de destino) agrupados por caudal
-let RIVER_SEGS = null;
-function riverSegments(G) {
-  if (RIVER_SEGS) return RIVER_SEGS;
-  const { NX, NZ } = G, T = SMALL ? 20 : 34, buckets = [[], [], [], [], []];
-  const at = k => { const i = k % NX, j = (k / NX) | 0; return [(i + .5 + (hash(k, 1) - .5) * .7) / RES, (j + .5 + (hash(k, 2) - .5) * .7) / RES]; };
-  for (let k = 0; k < NX * NZ; k++) {
-    if (!G.land[k] || G.lake[k] || G.acc[k] < T) continue;
-    const r = G.rcv[k]; if (r < 0) continue;
-    const b = Math.min(4, Math.floor(Math.log2(G.acc[k] / T) / 1.4));
-    buckets[b].push([...at(k), ...at(r)]);
-  }
-  return RIVER_SEGS = buckets;
+// un recuadro completo: alturas para la malla y pintura para la textura (corre en un hilo aparte)
+function buildChunk(G, TOWNS, m) {
+  const fine = fineGrid(G, m.x0, m.y0, m.size, m.NV, m.oct);
+  const px = new Uint8ClampedArray(m.TW * m.TW * 4), pad = .05;
+  const towns = TOWNS.filter(([x, y, r]) => x + r * 1.3 > m.x0 - pad && x - r * 1.3 < m.x0 + m.size + pad && y + r * 1.3 > m.y0 - pad && y - r * 1.3 < m.y0 + m.size + pad);
+  paintChunk(G, px, m.TW, m.x0, m.y0, m.size / m.TW, m.size / m.TW, 0, m.TW, m.level, fine, towns);
+  return { id: m.id, hk: fine.hk, px };
 }
-// ríos y caminos encima de la pintura; las medidas van en unidades del mundo
-function strokeOverlays(ctx, G, rx0, ry0, rx1, ry1, scale, riverW, roadW) {
+
+// código de los hilos de pintura: las mismas funciones, copiadas como texto
+function workerSource() {
+  return `const W=${W},H=${H},RES=${RES},KM=${KM};
+${hash.toString()}
+const GRAD=new Float32Array(512);
+for(let i=0;i<256;i++){const a=hash(i,9173)*Math.PI*2;GRAD[i*2]=Math.cos(a);GRAD[i*2+1]=Math.sin(a);}
+const smooth=${smooth.toString()};
+const PAL=${JSON.stringify(PAL)};
+${[noise, fbm, mix3, kmOf, oldOf, cubicH, elevKm, fineGrid, paintChunk, buildChunk].map(f => f.toString()).join('\n')}
+let G=null,TOWNS=null;
+onmessage=e=>{const m=e.data;if(m.G){G=m.G;TOWNS=m.towns;return;}const r=buildChunk(G,TOWNS,m);postMessage(r,[r.hk.buffer,r.px.buffer]);};`;
+}
+
+// caminos de los ríos: se encadenan las celdas de la red, se suavizan y se les da meandros
+let RIVER_PATHS = null;
+function riverPaths(G) {
+  if (RIVER_PATHS) return RIVER_PATHS;
+  const { NX, NZ } = G, T = SMALL ? 20 : 34, N = NX * NZ;
+  const isR = k => G.land[k] && !G.lake[k] && G.acc[k] >= T && G.rcv[k] >= 0;
+  const up = new Uint8Array(N);
+  for (let k = 0; k < N; k++) if (isR(k)) up[G.rcv[k]] = 1;
+  const at = k => { const i = k % NX, j = (k / NX) | 0; return [(i + .5 + (hash(k, 1) - .5) * .7) / RES, (j + .5 + (hash(k, 2) - .5) * .7) / RES]; };
+  const wKm = k => Math.min(.9, .04 * Math.sqrt(G.acc[k] / T));
+  const done = new Uint8Array(N), paths = [];
+  for (let k = 0; k < N; k++) {
+    if (!isR(k) || up[k]) continue;   // empieza en las nacientes
+    const pts = []; let c = k;
+    while (c >= 0) {
+      pts.push([...at(c), isR(c) ? wKm(c) : pts.length ? pts[pts.length - 1][2] : wKm(k)]);
+      if (!isR(c) || done[c]) break;
+      done[c] = 1; c = G.rcv[c];
+    }
+    if (pts.length < 2) continue;
+    // suavizado y meandros perpendiculares al cauce
+    let p = chaikinOpen(pts.map(q => [q[0], q[1]]), 3);
+    const wAt = s => pts[Math.min(pts.length - 1, Math.round(s * (pts.length - 1)))][2];
+    let len = 0;
+    p = p.map((q, idx) => {
+      const a = p[Math.max(0, idx - 1)], b = p[Math.min(p.length - 1, idx + 1)];
+      if (idx) len += Math.hypot(q[0] - p[idx - 1][0], q[1] - p[idx - 1][1]);
+      let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const edge = Math.min(idx, p.length - 1 - idx) / 3;
+      const m = Math.min(1, edge) * (.09 * (noise(len * .9 + k * .01, 3.3) - .5) + .025 * (noise(len * 6, k * .02) - .5));
+      return [q[0] - ty * m, q[1] + tx * m, wAt(idx / (p.length - 1))];
+    });
+    paths.push(p);
+  }
+  return RIVER_PATHS = paths;
+}
+
+// ríos, caminos y el Muro sobre la pintura; las medidas reales tienen un mínimo de un texel para que no desaparezcan
+let WALL_SPAN = null;
+function strokeOverlays(ctx, G, rx0, ry0, rx1, ry1, scale) {
+  const texel = 1 / scale, m = .6;
   ctx.setTransform(scale, 0, 0, scale, -rx0 * scale, -ry0 * scale);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  const m = 1, inside = (x, y) => x > rx0 - m && x < rx1 + m && y > ry0 - m && y < ry1 + m;
-  riverSegments(G).forEach((list, b) => {
-    ctx.strokeStyle = b < 2 ? 'rgba(52,96,118,.85)' : '#2f6a86';
-    ctx.lineWidth = riverW(b);
-    ctx.beginPath();
-    for (const [x0, y0, x1, y1] of list) if (inside(x0, y0) || inside(x1, y1)) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
-    ctx.stroke();
-  });
-  ctx.strokeStyle = 'rgba(196,174,128,.8)'; ctx.lineWidth = roadW;
+  const inBox = (x, y) => x > rx0 - m && x < rx1 + m && y > ry0 - m && y < ry1 + m;
+  for (const p of riverPaths(G)) {
+    let any = false; for (let q = 0; q < p.length; q += 4) if (inBox(p[q][0], p[q][1])) { any = true; break; }
+    if (!any && !inBox(p[p.length - 1][0], p[p.length - 1][1])) continue;
+    for (let q = 1; q < p.length; q++) {
+      const w = Math.max(p[q][2] * UK, texel * 1.1);
+      ctx.strokeStyle = w > texel * 2.5 ? '#2c6585' : 'rgba(46,96,124,.9)';
+      ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(p[q - 1][0], p[q - 1][1]); ctx.lineTo(p[q][0], p[q][1]); ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = 'rgba(196,174,128,.85)'; ctx.lineWidth = Math.max(.012 * UK * 5, texel * 1.05);
   for (const r of ROADS) {
     const p = chaikinOpen(r, 3);
     ctx.beginPath(); p.forEach(([x, y], q) => q ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
   }
+  if (WALL_SPAN && ry0 - m < 22 && ry1 + m > 22) {
+    ctx.strokeStyle = '#eef6fa'; ctx.lineWidth = Math.max(.08 * UK, texel * 1.4); ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(WALL_SPAN[0], 22); ctx.lineTo(WALL_SPAN[1], 22); ctx.stroke();
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-/* Textura general: un texel cada ~0,09 unidades en escritorio */
+// ciudades y castillos para la pintura: x, y, radio (unidades), tipo (0 ciudad, 1 castillo, 2 ruina), semilla
+function townList() {
+  return PLACES.filter(p => p[4] !== 'isla' && p[4] !== 'paso').map((p, i) => {
+    const [, x, y, tier, type] = p;
+    const rKm = type === 'ciudad' ? (tier === 1 ? 3.4 : tier === 2 ? 2.1 : 1.1) : type === 'ruina' ? (tier === 1 ? 2.2 : .4) : type === 'fuerte' ? .12 : tier === 1 ? .35 : .25;
+    return [x, y, rKm * UK, type === 'ciudad' ? 0 : type === 'ruina' ? 2 : 1, i * 7.1];
+  });
+}
+
+/* Textura general: un texel cada ~0,09 unidades (1,4 km) en escritorio */
 async function paintTexture(G, TW, progress = async () => {}) {
-  const TH = Math.round(TW * H / W);
+  const TH = Math.round(TW * H / W), towns = townList();
   const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
   const ctx = cv.getContext('2d'), img = ctx.createImageData(TW, TH);
   for (let r = 0; r < TH; r += 64) {
     await progress(`Pintando el terreno… ${Math.round(r / TH * 100)} %`);
-    paintRows(G, img.data, TW, 0, 0, W / TW, H / TH, r, Math.min(TH, r + 64), false);
+    paintChunk(G, img.data, TW, 0, 0, W / TW, H / TH, r, Math.min(TH, r + 64), 0, null, towns);
   }
   ctx.putImageData(img, 0, 0);
   await progress('Dibujando ríos y caminos…');
-  strokeOverlays(ctx, G, 0, 0, W, H, TW / W, b => (.6 + b * .4) * .18, .26);
+  strokeOverlays(ctx, G, 0, 0, W, H, TW / W);
   return cv;
 }
 
@@ -1067,6 +1262,25 @@ AREAS.forEach(a => { if (['Ojo de Dioses', 'Vientre del Mundo'].includes(a[0])) 
 AREAS.push(['Lago Largo', 166, 60, 'lake', 100, 0, 'Lago alargado del Norte, en tierras de los Umber.']);
 [...PLACES, ...AREAS, ...RIVER_NAMES].forEach(p => { p[1] *= PX; p[2] *= PX; });
 
+// los puertos se acercan a la costa más cercana (la máscara suaviza bahías y estuarios)
+const PORTS = ['Desembarco del Rey', 'Puerto Blanco', 'Lannisport', 'Puerto Gaviota', 'Antigua', 'Braavos', 'Pentos', 'Myr', 'Volantis', 'Meereen',
+  'Yunkai', 'Astapor', 'Qarth', 'Asshai', 'Lys', 'Tyrosh', 'Puerto de Ibben', 'Ciudad Tablón', 'Lanza del Sol', 'Salinas', 'Poza de la Doncella',
+  'El Valle Oscuro', 'Varamar', 'Guardiaoriente del Mar', 'Casa Austera', 'Árboles Altos', 'Saath', 'Tolos', 'Lorath', 'Nueva Ghis',
+  'Bastión de Tormentas', 'Pyke', 'Roca Casterly', 'Jardines del Agua', 'Nido del Grifo', 'Diez Torres', 'Piedra Rúnica'];
+function snapCoast(heightAt) {
+  for (const P of PLACES) {
+    if (!PORTS.includes(P[0])) continue;
+    const coastal = (x, y) => heightAt(x, y) > .06 && [[.35, 0], [-.35, 0], [0, .35], [0, -.35]].some(([a, b]) => heightAt(x + a, y + b) < 0);
+    if (coastal(P[1], P[2])) continue;
+    let best = null;
+    for (let r = .2; r <= 5 && !best; r += .2)
+      for (let a = 0; a < 32; a++) {
+        const x = P[1] + Math.cos(a / 32 * Math.PI * 2) * r, y = P[2] + Math.sin(a / 32 * Math.PI * 2) * r;
+        if (coastal(x, y)) { best = [x, y]; break; }
+      }
+    if (best) { P[1] = best[0]; P[2] = best[1]; }
+  }
+}
 // mueve a tierra firme los lugares que caen al agua por la resolución de la máscara
 function snapPlaces(heightAt) {
   for (const P of PLACES) {
@@ -1093,31 +1307,31 @@ async function start() {
   const progress = msg => { $('loading').textContent = msg; return new Promise(r => setTimeout(r, 0)); };
   const G = await buildWorld(progress);
   const { NX, NZ, hgt } = G;
-  const heightAt = (x, y) => {   // coordenadas del atlas
+  const heightAt = (x, y) => {   // grilla del generador (unidades de relieve), coordenadas del atlas
     let gi = x * RES, gj = y * RES;
     gi = Math.max(0, Math.min(NX - 1.001, gi)); gj = Math.max(0, Math.min(NZ - 1.001, gj));
     const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, g = (a, b) => hgt[b * NX + a];
     return (g(i, j) * (1 - fx) + g(i + 1, j) * fx) * (1 - fy) + (g(i, j + 1) * (1 - fx) + g(i + 1, j + 1) * fx) * fy;
   };
-  const lakeAt = (x, y) => G.lake[Math.min(NZ - 1, Math.round(y * RES)) * NX + Math.min(NX - 1, Math.round(x * RES))];
-  const lin = hex => new THREE.Color(hex).convertSRGBToLinear();
-  snapPlaces(heightAt);
+  snapPlaces(heightAt); snapCoast(heightAt);
+  // el Muro va de costa a costa
+  { let a = null, b = null; for (let x = 50; x <= 100; x += .05) if (heightAt(x, 22) > .03) { if (a === null) a = x; b = x; } WALL_SPAN = [a, b]; }
+  const TOWNS = townList();
   const texCanvas = await paintTexture(G, SMALL ? 2048 : 4096, progress);
-  await progress('Armando el globo…');
+  await progress('Preparando la vista…');
 
   const V3 = THREE.Vector3, Y = new V3(0, 1, 0);
-  // coordenadas del mundo: x al este, y hacia arriba, z al sur, con el centro del mapa en el origen
-  const geoPos = (x, y, h, out = new V3()) => out.set(x - W / 2, h, y - H / 2);
-  const toAtlas = p => [p.x + W / 2, p.z + H / 2];
-  const frameAt = (x, y, out, rot = 0) => out.setFromAxisAngle(Y, rot);
+  const KMAX = 11;                                   // octavas del relieve más fino
+  const elev = (x, y, oct = KMAX) => elevKm(G, x, y, oct);
+  let EXAG = 1;
+  const worldY = km => km * VZ * EXAG;
 
   const stage = $('stage');
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputEncoding = THREE.sRGBEncoding;
   stage.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
-  // cielo de día: degradé de cenit a horizonte, con bruma del color del horizonte
   const skyCv = document.createElement('canvas'); skyCv.width = 2; skyCv.height = 256;
   const skyCtx = skyCv.getContext('2d'), grad = skyCtx.createLinearGradient(0, 0, 0, 256);
   grad.addColorStop(0, '#3d6f9e'); grad.addColorStop(.55, '#86aecb'); grad.addColorStop(1, '#c9d9e3');
@@ -1125,114 +1339,138 @@ async function start() {
   const skyTex = new THREE.CanvasTexture(skyCv); skyTex.encoding = THREE.sRGBEncoding;
   scene.background = skyTex;
   scene.fog = new THREE.Fog('#c3d4df', 380, 1150);
-  const camera = new THREE.PerspectiveCamera(40, 1, .03, 2400);
+  const camera = new THREE.PerspectiveCamera(40, 1, .001, 3000);
+  const ANISO = renderer.capabilities.getMaxAnisotropy();
 
-  // normales del terreno calculadas sobre la grilla completa: sin costuras entre recuadros
-  const NRM = new Float32Array(NX * NZ * 3);
-  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
-    const k = j * NX + i, l = hgt[j * NX + Math.max(0, i - 1)], r = hgt[j * NX + Math.min(NX - 1, i + 1)];
-    const u = hgt[Math.max(0, j - 1) * NX + i], d = hgt[Math.min(NZ - 1, j + 1) * NX + i];
-    const nx = -(r - l) * RES / 2, nz = -(d - u) * RES / 2, len = Math.hypot(nx, 1, nz);
-    NRM[k * 3] = nx / len; NRM[k * 3 + 1] = 1 / len; NRM[k * 3 + 2] = nz / len;
-  }
+  // todo lo que está sobre el terreno cuelga de root: la exageración del relieve es su escala vertical
+  const root = new THREE.Group(); scene.add(root);
+  const local = (x, y, km, out = new V3()) => out.set(x - W / 2, km * VZ, y - H / 2);
+
+  /* ===== Terreno por niveles de detalle =====
+     Un árbol de recuadros: cada uno se divide en cuatro cuando la cámara se acerca.
+     Nivel 0: 24 unidades con la textura general. Cada nivel siguiente: mitad de tamaño, el doble de detalle. */
+  const NV = 49, TWC = 256, LMAX = SMALL ? 5 : 7, SPLIT = SMALL ? 1.25 : 1.55, MAXC = SMALL ? 170 : 480;
   const baseTex = new THREE.CanvasTexture(texCanvas);
-  baseTex.encoding = THREE.sRGBEncoding;
-  baseTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  baseTex.encoding = THREE.sRGBEncoding; baseTex.anisotropy = ANISO;
   const baseMat = new THREE.MeshStandardMaterial({ map: baseTex, roughness: .96, metalness: 0 });
-
-  // el terreno va en recuadros: lejos se usa la textura general; cerca, cada recuadro
-  // se reemplaza por una versión con 3 veces más vértices y 4 veces más resolución de textura
-  const TS = 24, tiles = [];
-  for (let ty = 0; ty * TS < H; ty++) for (let tx = 0; tx * TS < W; tx++) {
-    const i0 = Math.round(tx * TS * RES), i1 = Math.min(NX - 1, Math.round((tx + 1) * TS * RES));
-    const j0 = Math.round(ty * TS * RES), j1 = Math.min(NZ - 1, Math.round((ty + 1) * TS * RES));
-    const nx = i1 - i0 + 1, nz = j1 - j0 + 1;
-    const pos = new Float32Array(nx * nz * 3), nor = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2);
-    let hmin = 0, hmax = 0;
-    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
-      const v = j * nx + i, k = (j0 + j) * NX + i0 + i, h = hgt[k];
-      pos[v * 3] = (i0 + i) / RES - W / 2; pos[v * 3 + 1] = h; pos[v * 3 + 2] = (j0 + j) / RES - H / 2;
-      nor[v * 3] = NRM[k * 3]; nor[v * 3 + 1] = NRM[k * 3 + 1]; nor[v * 3 + 2] = NRM[k * 3 + 2];
-      uv[v * 2] = (i0 + i) / RES / W; uv[v * 2 + 1] = 1 - (j0 + j) / RES / H;
-      hmin = Math.min(hmin, h); hmax = Math.max(hmax, h);
-    }
+  const makeGeo = (n0, hk, x0, y0, size, uvGlobal) => {
+    const n = n0 + 2, step = size / (n0 - 1), V = n0 * n0, E = 4 * (n0 - 1);
+    const pos = new Float32Array((V + E) * 3), nor = new Float32Array((V + E) * 3), uv = new Float32Array((V + E) * 2);
+    let hmin = Infinity, hmax = -Infinity;
+    const put = (v, i, j, sink) => {
+      const k = (j + 1) * n + i + 1, km = hk[k] - sink, x = x0 + i * step, y = y0 + j * step;
+      pos[v * 3] = x - W / 2; pos[v * 3 + 1] = km * VZ; pos[v * 3 + 2] = y - H / 2;
+      const dx = (hk[k + 1] - hk[k - 1]) * VZ / (2 * step), dz = (hk[k + n] - hk[k - n]) * VZ / (2 * step), l = Math.hypot(dx, 1, dz);
+      nor[v * 3] = -dx / l; nor[v * 3 + 1] = 1 / l; nor[v * 3 + 2] = -dz / l;
+      if (uvGlobal) { uv[v * 2] = x / W; uv[v * 2 + 1] = 1 - y / H; } else { uv[v * 2] = i / (n0 - 1); uv[v * 2 + 1] = 1 - j / (n0 - 1); }
+      if (!sink) { hmin = Math.min(hmin, km); hmax = Math.max(hmax, km); }
+    };
+    for (let j = 0; j < n0; j++) for (let i = 0; i < n0; i++) put(j * n0 + i, i, j, 0);
     const idx = [];
-    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
-      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1; idx.push(a, c, b, b, c, d);
+    for (let j = 0; j < n0 - 1; j++) for (let i = 0; i < n0 - 1; i++) { const a = j * n0 + i, b = a + 1, c = a + n0, d = c + 1; idx.push(a, c, b, b, c, d); }
+    // faldones: una tira que baja en los bordes y tapa las grietas entre recuadros de distinto nivel
+    const skirt = .25 + size * KM * .012, ring = [];
+    for (let i = 0; i < n0 - 1; i++) ring.push([i, 0]);
+    for (let j = 0; j < n0 - 1; j++) ring.push([n0 - 1, j]);
+    for (let i = n0 - 1; i > 0; i--) ring.push([i, n0 - 1]);
+    for (let j = n0 - 1; j > 0; j--) ring.push([0, j]);
+    ring.forEach(([i, j], q) => put(V + q, i, j, skirt));
+    for (let q = 0; q < E; q++) {
+      const [i, j] = ring[q], [i2, j2] = ring[(q + 1) % E], a = j * n0 + i, b = j2 * n0 + i2, c = V + q, d = V + (q + 1) % E;
+      idx.push(a, c, b, b, c, d, a, b, c, b, d, c);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx);
-    const lo = new THREE.Mesh(g, baseMat); scene.add(lo);
-    const x0 = i0 / RES, x1 = i1 / RES, y0 = j0 / RES, y1 = j1 / RES;
-    tiles.push({ lo, x0, x1, y0, y1, hi: null, job: null, used: 0,
-      box: new THREE.Box3(new V3(x0 - W / 2, hmin - .5, y0 - H / 2), new V3(x1 - W / 2, hmax + .5, y1 - H / 2)) });
+    return { g, hmin, hmax };
+  };
+  const nodes = [], ROOT = 24, roots = [];
+  const makeNode = (x0, y0, size, level, parent) => ({ x0, y0, size, level, parent, children: null, mesh: null, state: 0, used: 0,
+    hmin: parent ? parent.hmin : -4, hmax: parent ? parent.hmax : 6, id: nodes.length });
+  for (let ty = 0; ty * ROOT < H; ty++) for (let tx = 0; tx * ROOT < W; tx++) {
+    const nd = makeNode(tx * ROOT, ty * ROOT, ROOT, 0, null);
+    const f = fineGrid(G, nd.x0, nd.y0, ROOT, NV, 3), { g, hmin, hmax } = makeGeo(NV, f.hk, nd.x0, nd.y0, ROOT, true);
+    nd.mesh = new THREE.Mesh(g, baseMat); nd.hmin = hmin; nd.hmax = hmax; nd.state = 2; nd.mesh.visible = false;
+    root.add(nd.mesh); nodes.push(nd); roots.push(nd);
+  }
+  let cached = 0;
+  const finishNode = (nd, hk, px) => {
+    if (nd.state !== 1) return;
+    const cv = document.createElement('canvas'); cv.width = cv.height = TWC;
+    const ctx = cv.getContext('2d'); ctx.putImageData(new ImageData(px, TWC, TWC), 0, 0);
+    strokeOverlays(ctx, G, nd.x0, nd.y0, nd.x0 + nd.size, nd.y0 + nd.size, TWC / nd.size);
+    const tex = new THREE.CanvasTexture(cv); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = ANISO;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    const { g, hmin, hmax } = makeGeo(NV, hk, nd.x0, nd.y0, nd.size, false);
+    nd.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, roughness: .96, metalness: 0 }));
+    nd.mesh.visible = false; nd.hmin = hmin; nd.hmax = hmax; nd.state = 2; root.add(nd.mesh); cached++;
+  };
+  const dropNode = nd => {
+    root.remove(nd.mesh); nd.mesh.geometry.dispose(); nd.mesh.material.map.dispose(); nd.mesh.material.dispose();
+    nd.mesh = null; nd.state = 0; cached--;
+  };
+  // hilos de pintura; si el navegador no los permite, se pinta en el hilo principal
+  const workers = [], queue = [];
+  const msgFor = nd => ({ id: nd.id, x0: nd.x0, y0: nd.y0, size: nd.size, level: nd.level, NV, TW: TWC, oct: Math.min(KMAX, nd.level + 3) });
+  try {
+    const url = URL.createObjectURL(new Blob([workerSource()], { type: 'text/javascript' }));
+    const shared = { NX, NZ, hgt: G.hgt, land: G.land, lake: G.lake, acc: G.acc, slope: G.slope, col: G.col, forest: G.forest, ftype: G.ftype, desert: G.desert, farm: G.farm, ao: G.ao, shadow: G.shadow };
+    const nW = Math.max(1, Math.min(SMALL ? 2 : 4, (navigator.hardwareConcurrency || 4) - 1));
+    for (let q = 0; q < nW; q++) {
+      const wk = new Worker(url); wk.busy = false;
+      wk.onmessage = e => { wk.busy = false; const r = e.data; finishNode(nodes[r.id], r.hk, r.px); };
+      wk.onerror = () => { wk.busy = false; wk.dead = true; };
+      wk.postMessage({ G: shared, towns: TOWNS });
+      workers.push(wk);
+    }
+  } catch (err) { workers.length = 0; }
+  const request = nd => { if (nd.state === 0) { nd.state = 1; queue.push(nd); } };
+  const pump = () => {
+    if (!queue.length) return;
+    queue.sort((a, b) => a.dist - b.dist);
+    const live = workers.filter(w => !w.dead);
+    if (live.length) {
+      for (const wk of live) if (!wk.busy && queue.length) { const nd = queue.shift(); wk.busy = true; wk.postMessage(msgFor(nd)); }
+    } else {
+      const nd = queue.shift(), r = buildChunk(G, TOWNS, msgFor(nd)); finishNode(nd, r.hk, r.px);
+    }
+  };
+  const distTo = nd => {
+    const cx = camera.position.x + W / 2, cz = camera.position.z + H / 2, cy = camera.position.y;
+    const dx = Math.max(nd.x0 - cx, 0, cx - nd.x0 - nd.size), dz = Math.max(nd.y0 - cz, 0, cz - nd.y0 - nd.size);
+    const top = worldY(nd.hmax), bot = worldY(nd.hmin), dy = cy > top ? cy - top : cy < bot ? bot - cy : 0;
+    return Math.hypot(dx, dy, dz);
+  };
+  let shown = [];
+  function selectLOD() {
+    const list = [], now = performance.now();
+    const visit = nd => {
+      nd.used = now; nd.dist = distTo(nd);
+      const outside = nd.x0 >= W || nd.y0 >= H;
+      const seaOnly = nd.hmax < -.05 && nd.level >= 2;
+      if (nd.level < LMAX && !outside && !seaOnly && nd.dist < SPLIT * nd.size) {
+        if (!nd.children) { const h = nd.size / 2; nd.children = [[0, 0], [h, 0], [0, h], [h, h]].map(([a, b]) => { const c = makeNode(nd.x0 + a, nd.y0 + b, h, nd.level + 1, nd); nodes.push(c); return c; }); }
+        let ready = true;
+        for (const c of nd.children) { c.dist = distTo(c); c.used = now; if (c.state !== 2) { ready = false; request(c); } }
+        if (ready) { for (const c of nd.children) visit(c); return; }
+      }
+      list.push(nd);
+    };
+    for (const r of roots) visit(r);
+    for (const m of shown) m.visible = false;
+    shown = list.map(nd => nd.mesh); for (const m of shown) m.visible = true;
+    // los pedidos que ya no hacen falta salen de la cola
+    for (let q = queue.length - 1; q >= 0; q--) if (now - queue[q].used > 500) { queue[q].state = 0; queue.splice(q, 1); }
+    if (cached > MAXC) {
+      const inUse = new Set(list);
+      const old = nodes.filter(nd => nd.level > 0 && nd.state === 2 && !inUse.has(nd)).sort((a, b) => a.used - b.used);
+      for (let q = 0; q < cached - MAXC && q < old.length; q++) dropNode(old[q]);
+    }
   }
 
-  // relieve fino para los recuadros cercanos: se apaga en los bordes para empalmar con los vecinos
-  const bil = (arr, x, y) => {
-    const gi = Math.max(0, Math.min(NX - 1.001, x * RES)), gj = Math.max(0, Math.min(NZ - 1.001, y * RES));
-    const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, k = j * NX + i;
-    return arr[k] * (1 - fx) * (1 - fy) + arr[k + 1] * fx * (1 - fy) + arr[k + NX] * (1 - fx) * fy + arr[k + NX + 1] * fx * fy;
-  };
-  const hiHeight = (x, y, t) => {
-    const h = heightAt(x, y);
-    if (h < .1 || bil(G.lake, x, y) > .02) return h;
-    const sl = bil(G.slope, x, y), ac = bil(G.acc, x, y);
-    let amp = (.03 + .22 * smooth(.35, 1.3, sl)) * smooth(.1, .4, h) * (1 - smooth(12, 34, ac));
-    amp *= smooth(0, 1.6, Math.min(x - t.x0, t.x1 - x, y - t.y0, t.y1 - y));
-    if (amp < 1e-4) return h;
-    const r = 1 - Math.abs(2 * fbm(x * 2.2 + 11, y * 2.2, 3) - 1);
-    return h + amp * ((fbm(x * 4.5, y * 4.5, 4) - .5) * 1.3 + (r * r - .3) * .9);
-  };
-  const HR = SMALL ? 4 : 6, TEXHI = SMALL ? 512 : 1024, MAXHI = SMALL ? 8 : 18;
-  const buildHi = t => {
-    const nx = Math.round((t.x1 - t.x0) * HR) + 1, nz = Math.round((t.y1 - t.y0) * HR) + 1, sx = (t.x1 - t.x0) / (nx - 1), sz = (t.y1 - t.y0) / (nz - 1);
-    const hb = new Float32Array((nx + 2) * (nz + 2));
-    for (let j = -1; j <= nz; j++) for (let i = -1; i <= nx; i++) hb[(j + 1) * (nx + 2) + i + 1] = hiHeight(t.x0 + i * sx, t.y0 + j * sz, t);
-    const pos = new Float32Array(nx * nz * 3), nor = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2);
-    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
-      const v = j * nx + i, c = (j + 1) * (nx + 2) + i + 1;
-      pos[v * 3] = t.x0 + i * sx - W / 2; pos[v * 3 + 1] = hb[c]; pos[v * 3 + 2] = t.y0 + j * sz - H / 2;
-      const ddx = (hb[c + 1] - hb[c - 1]) / (2 * sx), ddz = (hb[c + nx + 2] - hb[c - nx - 2]) / (2 * sz), len = Math.hypot(ddx, 1, ddz);
-      nor[v * 3] = -ddx / len; nor[v * 3 + 1] = 1 / len; nor[v * 3 + 2] = -ddz / len;
-      uv[v * 2] = i / (nx - 1); uv[v * 2 + 1] = 1 - j / (nz - 1);
-    }
-    const idx = new Uint32Array((nx - 1) * (nz - 1) * 6); let p = 0;
-    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
-      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1; idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(new THREE.BufferAttribute(idx, 1));
-    return g;
-  };
-  const startJob = t => {
-    const tw = Math.max(64, Math.round(TEXHI * (t.x1 - t.x0) / TS)), th = Math.max(64, Math.round(TEXHI * (t.y1 - t.y0) / TS));
-    const cv = document.createElement('canvas'); cv.width = tw; cv.height = th;
-    const ctx = cv.getContext('2d');
-    t.job = { cv, ctx, img: ctx.createImageData(tw, th), tw, th, row: 0 };
-  };
-  const stepJob = t => {
-    const J = t.job, rows = SMALL ? 16 : 32;
-    paintRows(G, J.img.data, J.tw, t.x0, t.y0, (t.x1 - t.x0) / J.tw, (t.y1 - t.y0) / J.th, J.row, Math.min(J.th, J.row + rows), true);
-    J.row += rows;
-    if (J.row < J.th) return;
-    J.ctx.putImageData(J.img, 0, 0);
-    strokeOverlays(J.ctx, G, t.x0, t.y0, t.x1, t.y1, J.tw / (t.x1 - t.x0), b => (.045 + .045 * b) * 1.6, .11);
-    const tex = new THREE.CanvasTexture(J.cv);
-    tex.encoding = THREE.sRGBEncoding; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-    t.hi = new THREE.Mesh(buildHi(t), new THREE.MeshStandardMaterial({ map: tex, roughness: .96, metalness: 0 }));
-    t.hi.visible = false; scene.add(t.hi); t.job = null;
-  };
-  const dropHi = t => { scene.remove(t.hi); t.hi.geometry.dispose(); t.hi.material.map.dispose(); t.hi.material.dispose(); t.hi = null; t.lo.visible = true; };
-
-  // fondo oceánico fuera del mapa
+  // fondo oceánico (a 4,5 km de profundidad) y superficie del mar
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8), new THREE.MeshBasicMaterial({ color: '#0d2c4b' }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = -2.7; scene.add(floor);
-
-  // mar: superficie transparente con oleaje y brillo del sol
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -4.5 * VZ; root.add(floor);
   const NS = 128, ncv = document.createElement('canvas'); ncv.width = ncv.height = NS;
   const nctx = ncv.getContext('2d'), nimg = nctx.createImageData(NS, NS);
   const wave = (x, y) => fbm(x / NS * 8, y / NS * 8, 3);
@@ -1243,162 +1481,141 @@ async function start() {
   }
   nctx.putImageData(nimg, 0, 0);
   const normalTex = new THREE.CanvasTexture(ncv);
-  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(260, 170);
+  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(2600, 1700);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8),
     new THREE.MeshStandardMaterial({ color: '#174f73', transparent: true, opacity: .38, roughness: .16, metalness: .1,
-      normalMap: normalTex, normalScale: new THREE.Vector2(.25, .25), depthWrite: false }));
-  water.rotation.x = -Math.PI / 2;
-  scene.add(water);
+      normalMap: normalTex, normalScale: new THREE.Vector2(.2, .2), depthWrite: false }));
+  water.rotation.x = -Math.PI / 2; root.add(water);
 
-  // luz: el mismo sol bajo del noroeste con el que se calcularon las sombras
   scene.add(new THREE.HemisphereLight('#d4e6f4', '#5a4a38', .55));
   const sun = new THREE.DirectionalLight('#fff4e2', 1.5);
-  sun.position.set(-150, 110, -110);
-  scene.add(sun);
+  sun.position.set(-150, 110, -110); scene.add(sun);
 
   const groups = {};
-  const group = name => (groups[name] = groups[name] || (() => { const g = new THREE.Group(); scene.add(g); return g; })());
+  const group = name => (groups[name] = groups[name] || (() => { const g = new THREE.Group(); root.add(g); return g; })());
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new V3(), tr = new V3();
 
-  // ríos como cintas 3D sobre el terreno: nítidos a cualquier distancia
+  // el Muro a escala: 700 pies (213 m) de hielo, siguiendo el terreno de costa a costa
   {
-    const T = SMALL ? 20 : 34, P = [], I = [], pa = new V3(), pb = new V3(), dir = new V3(), side = new V3(), upv = new V3();
-    const jit = k => [(hash(k, 1) - .5) * .7, (hash(k, 2) - .5) * .7];
-    const at = k => { const i = k % NX, j = (k / NX) | 0, [a, b] = jit(k); return [(i + .5 + a) / RES, (j + .5 + b) / RES]; };
-    for (let k = 0; k < NX * NZ; k++) {
-      if (!G.land[k] || G.lake[k] || G.acc[k] < T) continue;
-      const r = G.rcv[k]; if (r < 0) continue;
-      const b = Math.min(4, Math.floor(Math.log2(G.acc[k] / T) / 1.4)), w = .045 + .045 * b;
-      const [x0, y0] = at(k), [x1, y1] = at(r);
-      geoPos(x0, y0, Math.max(heightAt(x0, y0), 0) + .07, pa); geoPos(x1, y1, Math.max(heightAt(x1, y1), 0) + .07, pb);
-      dir.subVectors(pb, pa); const len = dir.length(); if (len < 1e-4) continue; dir.divideScalar(len);
-      upv.copy(Y); side.crossVectors(dir, upv).normalize().multiplyScalar(w / 2);
-      pa.addScaledVector(dir, -w * .45); pb.addScaledVector(dir, w * .45);
-      const o = P.length / 3;
-      P.push(pa.x - side.x, pa.y - side.y, pa.z - side.z, pa.x + side.x, pa.y + side.y, pa.z + side.z,
-             pb.x - side.x, pb.y - side.y, pb.z - side.z, pb.x + side.x, pb.y + side.y, pb.z + side.z);
-      I.push(o, o + 2, o + 1, o + 1, o + 2, o + 3);
-    }
-    const rg = new THREE.BufferGeometry();
-    rg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); rg.setIndex(I);
-    group('rios').add(new THREE.Mesh(rg, new THREE.MeshBasicMaterial({ color: '#2a6a90', side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
-  }
-
-  // el Muro: cara de hielo
-  const wallXs = [];
-  for (let x = 56; x <= 92; x += .15) { const h = heightAt(x, 22); if (h > .05) wallXs.push([x, h]); }
-  const wall = new THREE.InstancedMesh(new THREE.BoxGeometry(.17, 1, .4),
-    new THREE.MeshStandardMaterial({ color: '#e3f1f8', emissive: '#6f9fbb', emissiveIntensity: .3, roughness: .3 }), wallXs.length);
-  let wallTop = 0; wallXs.forEach(([, h]) => wallTop = Math.max(wallTop, h));
-  wallXs.forEach(([x, h], i) => {
-    const top = Math.max(h + 1.1, Math.min(wallTop + .7, h + 2.2)), bot = h - .4;
-    frameAt(x, 22, q); geoPos(x, 22, (top + bot) / 2, tr); sc.set(1, top - bot, 1);
-    m4.compose(tr, q, sc); wall.setMatrixAt(i, m4);
-  });
-  scene.add(wall);
-
-  // árboles 3D (capa opcional)
-  const treePts = [], step = SMALL ? .75 : .5, cap = SMALL ? 14000 : 36000;
-  const tcol = { pino: lin('#2b4630'), hoja: lin('#45692c'), selva: lin('#2c5e29') }, tsnow = lin('#dfe8ea');
-  for (let y = 2; y < H - 1 && treePts.length < cap; y += step) for (let x = 1; x < W - 1; x += step) {
-    let dens = 0, type = 'hoja';
-    for (const [fx, fy, fr, fd, ft] of FORESTS) {
-      const d = Math.hypot(x - fx, y - fy); if (d >= fr) continue;
-      const v = fd * smooth(fr, fr * .55, d); if (v > dens) { dens = v; type = ft; }
-    }
-    if (dens < .05) continue;
-    const jx = x + (hash(x * 100 | 0, y * 100 | 0) - .5) * step, jy = y + (hash(y * 100 | 0, x * 100 | 0) - .5) * step;
-    const clump = smooth(.35, .6, fbm(jx * .3, jy * .3, 3));
-    if (hash(jx * 997 | 0, jy * 991 | 0) > dens * clump * 1.4) continue;
-    const h = heightAt(jx, jy); if (h < .18 || h > 2.9 || lakeAt(jx, jy)) continue;
-    treePts.push([jx, jy, h, type]);
-  }
-  if (treePts.length) {
-    const tgeo = new THREE.ConeGeometry(1, 1, 6); tgeo.translate(0, .5, 0);
-    const trees = new THREE.InstancedMesh(tgeo, new THREE.MeshStandardMaterial({ roughness: 1 }), treePts.length);
-    const tc = new THREE.Color();
-    treePts.forEach(([x, y, h, type], i) => {
-      const r = hash(i, 7);
-      const s = type === 'pino' ? [.09 + r * .05, .36 + r * .22] : type === 'selva' ? [.15 + r * .06, .28 + r * .16] : [.13 + r * .06, .24 + r * .14];
-      sc.set(s[0], s[1], s[0]); frameAt(x, y, q); geoPos(x, y, h - .03, tr);
-      m4.compose(tr, q, sc); trees.setMatrixAt(i, m4);
-      tc.copy(tcol[type]).multiplyScalar(.75 + hash(i, 3) * .5);
-      if (y < 30) tc.lerp(tsnow, smooth(30, 8, y) * .65);
-      trees.setColorAt(i, tc);
+    const xs = []; for (let x = WALL_SPAN[0]; x <= WALL_SPAN[1]; x += .02) xs.push([x, elev(x, 22)]);
+    const wall = new THREE.InstancedMesh(new THREE.BoxGeometry(.021, 1, 1),
+      new THREE.MeshStandardMaterial({ color: '#e6f2f8', emissive: '#7aa8c2', emissiveIntensity: .25, roughness: .3 }), xs.length);
+    xs.forEach(([x, km], i) => {
+      const bot = km - .05, top = km + .2134;
+      local(x, 22, (top + bot) / 2, tr); sc.set(1, (top - bot) * VZ, .06 * UK); q.identity();
+      m4.compose(tr, q, sc); wall.setMatrixAt(i, m4);
     });
-    group('bosques').add(trees);
+    root.add(wall);
   }
 
-  // castillos, ciudades y ruinas
-  const towersT = [], roofsT = [], housesT = [], pyramidsT = [], statuesT = [];
+  // castillos, ciudades y ruinas a escala; se arman cuando la cámara se acerca
   const LOOKS = {
     gris: ['#9a968e', '#4a4d55'], roja: ['#a5503e', '#6b2a22'], blanca: ['#f1f1ee', '#8fa9c8'], negra: ['#3b3836', '#1f1c1b'],
     roca: ['#b49b6e', '#7d1f1f'], clara: ['#e3d7bb', '#3f6e3a'], arena: ['#d9b98a', '#b45a22'], faro: ['#e6e2d6', '#c9a35a'],
     oscura: ['#2e2d30', '#18171a'], dorada: ['#d9c08a', '#b8862b'], muro: ['#5d5853', '#2a2725'], piramide: ['#c7a978', '#8a6a44'],
     titan: ['#c3b59a', '#4e6d78'],
   };
-  for (const P of PLACES) {
+  const ROOFC = ['#9a5a43', '#8d877e', '#a89a82', '#6e6a66', '#b07a55', '#7d7369'];
+  const GEOM = {};
+  { const cyl = new THREE.CylinderGeometry(1, 1, 1, 10); cyl.translate(0, .5, 0); const cone = new THREE.ConeGeometry(1, 1, 10); cone.translate(0, .5, 0);
+    const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, .5, 0); const pyr = new THREE.ConeGeometry(1, 1, 4); pyr.translate(0, .5, 0); pyr.rotateY(Math.PI / 4);
+    Object.assign(GEOM, { cyl, cone, box, pyr }); }
+  const buildPlace = P => {
     const [name, x, y, tier, type, , , , look] = P;
-    if (type === 'isla' || type === 'paso') continue;
-    const R = rng(name), [stone, roof] = LOOKS[look] || (type === 'ruina' ? ['#77736b', null] : ['#c9c0ad', '#5b3a2e']);
-    const at = (dx, dz) => heightAt(x + dx, y + dz);
-    const tower = (dx, dz, r, h, roofed = true) => {
-      const b = at(dx, dz); if (b < .02) return;
-      towersT.push([x + dx, y + dz, b - .1, r, h + .1, 0, stone]);
-      if (roofed && roof) roofsT.push([x + dx, y + dz, b + h, r * 1.3, r * 2.4, 0, roof]);
+    const R = rng(name), g = new THREE.Group();
+    const [stone, roof] = LOOKS[look] || (type === 'ruina' ? ['#77736b', null] : ['#c9c0ad', '#5b3a2e']);
+    const parts = { box: [], cyl: [], cone: [], pyr: [] };
+    // medidas en km; dx, dy en km desde el centro del lugar
+    const add = (kind, dx, dy, w, h, d, rot, color, lift = 0) => {
+      const b = elev(x + dx * UK, y + dy * UK);
+      if (b < .002) return;
+      parts[kind].push([x + dx * UK, y + dy * UK, b - .004 + lift, w, h, d, rot, color]);
     };
-    const big = tier === 1 ? 1.1 : tier === 2 ? .9 : .7;
-    if (type === 'castillo' || type === 'fuerte') {
-      const n = type === 'fuerte' ? 1 : tier === 1 ? 6 : tier === 2 ? 4 : 3, ring = type === 'fuerte' ? 0 : .4 * big;
-      tower(0, 0, .15 * big, (look === 'blanca' ? 1.1 : .85) * big);
-      for (let t = 0; t < n - 1; t++) { const a = t / (n - 1) * Math.PI * 2 + R(); tower(Math.cos(a) * ring, Math.sin(a) * ring, .09 * big, .5 * big + R() * .2); }
-      if (look === 'faro') tower(.3, -.2, .12, 3);
-    } else if (type === 'ciudad') {
-      const nh = tier === 1 ? 70 : tier === 2 ? 36 : 14, spread = tier === 1 ? 1.4 : tier === 2 ? 1 : .65;
-      for (let k = 0; k < nh; k++) {
-        const a = R() * Math.PI * 2, rr = Math.sqrt(R()) * spread, dx = Math.cos(a) * rr, dz = Math.sin(a) * rr * .8;
-        const b = at(dx, dz); if (b < .04) continue;
-        housesT.push([x + dx, y + dz, b - .03, .09 + R() * .12, .07 + R() * .14, .09 + R() * .12, R() * Math.PI, stone]);
-      }
-      const nt = tier === 1 ? 4 : tier === 2 ? 2 : 1;
-      for (let t = 0; t < nt; t++) { const a = R() * Math.PI * 2, rr = R() * spread * .6; tower(Math.cos(a) * rr, Math.sin(a) * rr * .8, .08 * big, .55 * big + R() * .35); }
-      if (look === 'roja') { tower(.3, -.25, .14, 1); tower(.55, -.1, .11, .8); tower(.15, -.5, .11, .8); }
-      if (look === 'faro') tower(-.3, .25, .13, 3);
-      if (look === 'piramide') {
-        const b = at(0, 0); if (b > .02) pyramidsT.push([x, y, b - .05, tier === 1 ? .7 : .5, tier === 1 ? 1.4 : .9, 0, stone]);
-        for (let t = 0; t < 4; t++) { const a = R() * Math.PI * 2, rr = .5 + R() * .6, bb = at(Math.cos(a) * rr, Math.sin(a) * rr); if (bb > .02) pyramidsT.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr, bb - .05, .22, .4, 0, stone]); }
-      }
-      if (look === 'titan') statuesT.push([x + 1.6, y + .6, 0, .14, 1.7, 0, '#9c7b4a']);
+    const castle = (cx, cy, rad, nT, tH, keepR, keepH, col = stone, rf = roof) => {
+      const pts = [], a0 = R() * Math.PI;
+      for (let t = 0; t < nT; t++) { const a = a0 + t / nT * Math.PI * 2; pts.push([cx + Math.cos(a) * rad * (1 + (R() - .5) * .15), cy + Math.sin(a) * rad * .85]); }
+      pts.forEach(([px, py], t) => {
+        const [qx, qy] = pts[(t + 1) % nT], len = Math.hypot(qx - px, qy - py);
+        add('box', (px + qx) / 2, (py + qy) / 2, len, .022, .007, -Math.atan2(qy - py, qx - px), col);
+        add('cyl', px, py, .014, tH * (.8 + R() * .4), .014, 0, col);
+        if (rf) add('cone', px, py, .018, .03, .018, 0, rf, tH);
+      });
+      add('cyl', cx, cy, keepR, keepH, keepR, 0, col);
+      if (rf) add('cone', cx, cy, keepR * 1.15, keepR * 1.6, keepR * 1.15, 0, rf, keepH);
+      for (let t = 0; t < 4; t++) add('box', cx + (R() - .5) * rad, cy + (R() - .5) * rad * .8, .03 + R() * .03, .012 + R() * .01, .02 + R() * .02, R() * 3, col);
+    };
+    const big = tier === 1 ? 1.4 : tier === 2 ? 1.1 : .85;
+    if (type === 'castillo') {
+      castle(0, 0, .18 * big, tier === 1 ? 8 : 6, .055 * big, .035 * big, .07 * big);
+      if (look === 'faro') add('cyl', .1, -.05, .028, .26, .028, 0, '#e6e2d6');
+      if (look === 'negra') for (let t = 0; t < 5; t++) { const a = t / 5 * Math.PI * 2; add('cyl', Math.cos(a) * .3, Math.sin(a) * .26, .045, .12 + R() * .05, .045, 0, '#3b3836'); }
+    } else if (type === 'fuerte') {
+      castle(0, 0, .06, 4, .04, .02, .05);
     } else if (type === 'ruina') {
-      const n = tier === 1 ? 9 : 5, spread = tier === 1 ? 1.3 : .6;
-      for (let t = 0; t < n; t++) { const a = R() * Math.PI * 2, rr = R() * spread; tower(Math.cos(a) * rr, Math.sin(a) * rr, (.06 + R() * .07) * big, .15 + R() * (look === 'negra' ? 1 : .45), false); }
-      if (look === 'negra') for (let t = 0; t < 5; t++) { const a = t / 5 * Math.PI * 2; tower(Math.cos(a) * .5, Math.sin(a) * .5, .14, .6 + R() * .45, false); }
+      const n = tier === 1 ? 40 : 10, spread = tier === 1 ? 2 : .3;
+      for (let t = 0; t < n; t++) {
+        const a = R() * Math.PI * 2, rr = Math.sqrt(R()) * spread;
+        if (R() < .5) add('cyl', Math.cos(a) * rr, Math.sin(a) * rr, .01 + R() * .015, .01 + R() * (look === 'negra' ? .12 : .04), .012, 0, stone);
+        else add('box', Math.cos(a) * rr, Math.sin(a) * rr, .03 + R() * .06, .006 + R() * .015, .008, R() * 3, stone);
+      }
+      if (look === 'negra') for (let t = 0; t < 5; t++) { const a = t / 5 * Math.PI * 2; add('cyl', Math.cos(a) * .3, Math.sin(a) * .26, .045, .1 + R() * .06, .045, 0, '#3b3836'); }
+    } else if (type === 'ciudad') {
+      const rKm = tier === 1 ? 3.4 : tier === 2 ? 2.1 : 1.1, cs = .14, rot0 = R() * Math.PI;
+      for (let gx = -rKm; gx <= rKm; gx += cs) for (let gy = -rKm; gy <= rKm; gy += cs) {
+        const jx = gx + (R() - .5) * .04, jy = gy + (R() - .5) * .04, d = Math.hypot(jx, jy) / rKm;
+        if (d > 1 + .25 * (noise(jx * 3 + tier, jy * 3) - .5)) continue;
+        if (R() > (d < .6 ? .9 : .9 * smooth(1.1, .6, d))) continue;
+        const h = (.008 + R() * .014) * (1 + 1.4 * smooth(.5, 0, d));
+        const col = look === 'oscura' ? '#38363a' : look === 'arena' ? (R() < .5 ? '#d9c39a' : '#c9ad84') : ROOFC[(R() * ROOFC.length) | 0];
+        add('box', jx, jy, .05 + R() * .06, h, .05 + R() * .06, rot0 + (R() - .5) * .15, col);
+      }
+      // murallas de la ciudad con torres
+      const nSeg = Math.round(rKm * Math.PI * 2 / .35);
+      for (let t = 0; t < nSeg; t++) {
+        const a = t / nSeg * Math.PI * 2, a2 = (t + 1) / nSeg * Math.PI * 2, r1 = rKm * 1.05;
+        const px = Math.cos(a) * r1, py = Math.sin(a) * r1, qx = Math.cos(a2) * r1, qy = Math.sin(a2) * r1;
+        add('box', (px + qx) / 2, (py + qy) / 2, Math.hypot(qx - px, qy - py), .02, .008, -Math.atan2(qy - py, qx - px), look === 'oscura' ? '#2e2d30' : '#a39b8c');
+        if (t % 3 === 0) add('cyl', px, py, .014, .035, .014, 0, '#a39b8c');
+      }
+      if (look === 'roja') castle(.9, -.7, .25, 7, .07, .04, .09, '#a5503e', '#6b2a22');
+      else castle((R() - .5) * rKm * .5, (R() - .5) * rKm * .5, .18 * big, 6, .05, .03, .06);
+      if (look === 'faro') add('cyl', -.6, .4, .03, .26, .03, 0, '#e6e2d6');
+      if (look === 'piramide') {
+        add('pyr', 0, 0, .3, .244, .3, 0, stone);
+        for (let t = 0; t < 6; t++) { const a = R() * Math.PI * 2, rr = .6 + R() * rKm * .5; add('pyr', Math.cos(a) * rr, Math.sin(a) * rr, .12, .09, .12, 0, stone); }
+      }
+      if (look === 'titan') add('cyl', rKm * .9, .3, .02, .12, .02, 0, '#9c7b4a');
+      if (look === 'dorada') add('cyl', 0, 0, .12, .05, .12, 0, '#d9c08a'), add('cone', 0, 0, .14, .08, .14, 0, '#b8862b', .05);
+    }
+    const cc = new THREE.Color();
+    for (const kind of Object.keys(parts)) {
+      const list = parts[kind]; if (!list.length) continue;
+      const mesh = new THREE.InstancedMesh(GEOM[kind], new THREE.MeshStandardMaterial({ roughness: .85 }), list.length);
+      list.forEach(([px, py, b, w, h, d, rot, col], i) => {
+        q.setFromAxisAngle(Y, rot); local(px, py, b, tr); sc.set(w * UK, h * VZ, d * UK);
+        m4.compose(tr, q, sc); mesh.setMatrixAt(i, m4); mesh.setColorAt(i, cc.set(col).convertSRGBToLinear());
+      });
+      g.add(mesh);
+    }
+    return g;
+  };
+  const sites = PLACES.filter(p => p[4] !== 'isla' && p[4] !== 'paso').map(P => ({ P, x: P[1], y: P[2], g: null,
+    reach: P[4] === 'ciudad' ? (P[3] === 1 ? 7 : P[3] === 2 ? 5 : 3.5) : P[4] === 'ruina' && P[3] === 1 ? 5 : 2.5 }));
+  function updateSites() {
+    const cx = camera.position.x + W / 2, cz = camera.position.z + H / 2;
+    for (const s of sites) {
+      const d = Math.hypot(s.x - cx, s.y - cz, camera.position.y);
+      if (d < s.reach && groups.castillos.visible) { if (!s.g) { s.g = buildPlace(s.P); group('castillos').add(s.g); } s.g.visible = true; }
+      else if (s.g) s.g.visible = false;
     }
   }
-  // cada elemento: x, y, base, ancho, alto, [fondo], giro, color
-  const instanced = (geom, list, boxy) => {
-    if (!list.length) return;
-    const mesh = new THREE.InstancedMesh(geom, new THREE.MeshStandardMaterial({ roughness: .85 }), list.length);
-    const cc = new THREE.Color();
-    list.forEach((it, i) => {
-      const [x, y, b, w, h] = it, d = boxy ? it[5] : w, rot = boxy ? it[6] : it[5];
-      frameAt(x, y, q, rot); geoPos(x, y, b, tr); sc.set(w, h, d);
-      m4.compose(tr, q, sc); mesh.setMatrixAt(i, m4); mesh.setColorAt(i, cc.set(it[it.length - 1]).convertSRGBToLinear());
-    });
-    group('castillos').add(mesh);
-  };
-  const cyl = new THREE.CylinderGeometry(1, 1, 1, 7); cyl.translate(0, .5, 0);
-  const cone = new THREE.ConeGeometry(1, 1, 7); cone.translate(0, .5, 0);
-  const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, .5, 0);
-  const pyr = new THREE.ConeGeometry(1, 1, 4); pyr.translate(0, .5, 0); pyr.rotateY(Math.PI / 4);
-  instanced(cyl, towersT); instanced(cone, roofsT); instanced(box, housesT, true); instanced(pyr, pyramidsT); instanced(cyl, statuesT);
+  group('castillos');
 
-  // barcos
+  // barcos a escala (unos 45 m de eslora): sólo se distinguen muy de cerca
   const boats = [];
-  const hullG = new THREE.BoxGeometry(.6, .12, .19), sailG = new THREE.BoxGeometry(.03, .42, .3); sailG.translate(.05, .28, 0);
+  const hullG = new THREE.BoxGeometry(.045 * UK, .006 * VZ, .012 * UK), sailG = new THREE.BoxGeometry(.002 * UK, .03 * VZ, .02 * UK); sailG.translate(0, .02 * VZ, 0);
   const routes = SEA_ROUTES.map(r => new THREE.CatmullRomCurve3(r.map(([x, y]) => new V3(x, 0, y))));
-  routes.forEach((c, i) => { const n = c.getLength() > 60 ? 3 : 2; for (let k = 0; k < n; k++) boats.push({ c, t: (k / n + hash(i, k) * .2) % 1, dir: k % 2 ? -1 : 1, speed: 1.4 / c.getLength() }); });
+  routes.forEach((c, i) => { const n = c.getLength() > 60 ? 4 : 3; for (let k = 0; k < n; k++) boats.push({ c, t: (k / n + hash(i, k) * .2) % 1, dir: k % 2 ? -1 : 1, speed: .02 / c.getLength() }); });
   const hulls = new THREE.InstancedMesh(hullG, new THREE.MeshStandardMaterial({ color: '#5a3f2a', roughness: .8 }), boats.length);
   const sails = new THREE.InstancedMesh(sailG, new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: .9 }), boats.length);
   group('barcos').add(hulls, sails);
@@ -1408,61 +1625,63 @@ async function start() {
       b.t += b.dir * b.speed * dt;
       if (b.t > 1) { b.t = 1; b.dir = -1; } else if (b.t < 0) { b.t = 0; b.dir = 1; }
       b.c.getPointAt(b.t, bp); b.c.getTangentAt(b.t, bt);
-      frameAt(bp.x, bp.z, q, Math.atan2(-bt.z * b.dir, bt.x * b.dir));
-      geoPos(bp.x, bp.z, .06 + Math.sin(performance.now() * .002 + i) * .02, tr); sc.set(1, 1, 1);
+      q.setFromAxisAngle(Y, Math.atan2(-bt.z * b.dir, bt.x * b.dir));
+      local(bp.x, bp.z, .002, tr); sc.set(1, 1, 1);
       m4.compose(tr, q, sc); hulls.setMatrixAt(i, m4); sails.setMatrixAt(i, m4);
     });
     hulls.instanceMatrix.needsUpdate = sails.instanceMatrix.needsUpdate = true;
   }
   moveBoats(0);
 
-  // Valyria: brasas de las Catorce Llamas, que suben en vertical respecto del suelo
-  const EMB = 300, ember = new Float32Array(EMB * 3), emberBase = [];
+  // Valyria: columnas de ceniza y brasas de las Catorce Llamas, de hasta 6 km
+  const EMB = 400, ember = new Float32Array(EMB * 3), emberBase = [];
   const flames = RANGES.find(r => r.fire).pts;
   for (let e = 0; e < EMB; e++) {
     const s = e % (flames.length - 1), a = flames[s], b = flames[s + 1], t = Math.random();
-    const x = a[0] + (b[0] - a[0]) * t + (Math.random() - .5) * 2, y = a[1] + (b[1] - a[1]) * t + (Math.random() - .5) * 1.4;
-    const h = Math.max(heightAt(x, y), .3), base = geoPos(x, y, h);
-    emberBase.push([base, Y.clone(), .6 + Math.random() * 1.4, Math.random() * 4.5]);
+    const x = a[0] + (b[0] - a[0]) * t + (Math.random() - .5) * 1.2, y = a[1] + (b[1] - a[1]) * t + (Math.random() - .5) * .8;
+    emberBase.push([x, y, Math.max(elev(x, y, 6), .2), .3 + Math.random() * .9, Math.random() * 6]);
   }
   const emberGeo = new THREE.BufferGeometry();
   emberGeo.setAttribute('position', new THREE.BufferAttribute(ember, 3));
-  scene.add(new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .4, transparent: true, opacity: .9,
+  root.add(new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .04, transparent: true, opacity: .9,
     blending: THREE.AdditiveBlending, depthWrite: false })));
-  const placeEmbers = () => emberBase.forEach(([b, n, , off], e) => { ember[e * 3] = b.x + n.x * off; ember[e * 3 + 1] = b.y + n.y * off; ember[e * 3 + 2] = b.z + n.z * off; });
+  const placeEmbers = () => emberBase.forEach(([x, y, km, , off], e) => { local(x, y, km + off, tr); ember[e * 3] = tr.x; ember[e * 3 + 1] = tr.y; ember[e * 3 + 2] = tr.z; });
   placeEmbers();
-  const fire = new THREE.PointLight('#ff6a2a', 2.2, 26, 1.6);
-  geoPos(142, 118, 5, fire.position);
-  scene.add(fire);
+  const fire = new THREE.PointLight('#ff6a2a', 2.2, 8, 1.6);
+  local(142, 118, 8, fire.position); root.add(fire);
 
   // controles
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = .08;
   controls.screenSpacePanning = false;
-  controls.minDistance = 1.2; controls.maxDistance = 560;
-  controls.maxPolarAngle = 1.42;
+  controls.minDistance = .02; controls.maxDistance = 560;
+  controls.maxPolarAngle = 1.48;
 
   // rótulos
   const layer = $('labels'), labels = [];
   const list = $('lugares');
   const KIND = { castillo: 'Castillo', fuerte: 'Fortaleza', ciudad: 'Ciudad', ruina: 'Ruinas', isla: 'Isla', paso: 'Paso de montaña' };
+  const placeLabel = L => { L.pos.y = worldY(L.km) + L.lift; if (L.pos2) L.pos2.y = worldY(L.km2) + L.lift; };
   for (const [name, x, y, tier, type, region, house, desc] of PLACES) {
     const el = document.createElement('button');
     el.className = `lbl city t${tier} ${type}`; el.type = 'button';
     el.innerHTML = '<span></span>'; el.firstChild.textContent = name;
-    const L = { el, kind: 'city', tier, name, x, y, desc, house, kicker: `${KIND[type]} · ${region}`,
-      pos: geoPos(x, y, Math.max(heightAt(x, y), 0) + .4), max: tier === 1 ? 460 : tier === 2 ? 200 : 95, min: 0 };
+    const L = { el, kind: 'city', tier, type, name, x, y, desc, house, kicker: `${KIND[type]} · ${region}`,
+      km: Math.max(elev(x, y), 0), lift: .004, pos: new V3(x - W / 2, 0, y - H / 2), max: tier === 1 ? 460 : tier === 2 ? 200 : 95, min: 0 };
+    placeLabel(L);
     el.addEventListener('click', () => select(L));
     layer.appendChild(el); labels.push(L);
     const o = document.createElement('option'); o.value = name; list.appendChild(o);
   }
   const AKIND = { region: 'Región', 'region big': 'Continente', 'region small': 'Accidente geográfico', sea: 'Mar', 'sea small': 'Aguas', lake: 'Lago', range: 'Cordillera', forest: 'Bosque', river: 'Río' };
-  const addArea = (text, x, y, kind, max, min, desc, pos, pos2) => {
+  const addArea = (text, x, y, kind, max, min, desc, x2, y2) => {
     const el = document.createElement(desc ? 'button' : 'div');
     el.className = `lbl ${kind}`;
     if (desc) { el.type = 'button'; el.innerHTML = '<span></span>'; el.firstChild.textContent = text; } else el.textContent = text;
     const L = { el, kind, name: text, x, y, desc, house: '', kicker: AKIND[kind], tier: 0, area: true, max, min,
-      pos: pos || geoPos(x, y, kind.startsWith('sea') ? .3 : Math.max(heightAt(x, y), 0) + 1), pos2 };
+      km: kind.startsWith('sea') ? 0 : Math.max(elev(x, y, 4), 0), lift: kind.startsWith('sea') ? .01 : .02, pos: new V3(x - W / 2, 0, y - H / 2) };
+    if (x2 !== undefined) { L.pos2 = new V3(x2 - W / 2, 0, y2 - H / 2); L.km2 = Math.max(elev(x2, y2, 4), 0); }
+    placeLabel(L);
     if (desc) el.addEventListener('click', () => select(L));
     layer.appendChild(el); labels.push(L);
     if (desc) { const o = document.createElement('option'); o.value = text; list.appendChild(o); }
@@ -1480,8 +1699,7 @@ async function start() {
     }
     if (best < 0) continue;
     let down = best; for (let s = 0; s < 4 && G.rcv[down] >= 0 && G.land[G.rcv[down]]; s++) down = G.rcv[down];
-    const bx = (best % NX) / RES, by = ((best / NX) | 0) / RES, dx2 = (down % NX) / RES, dy2 = ((down / NX) | 0) / RES;
-    addArea(text, bx, by, 'river', 140, 0, desc, geoPos(bx, by, Math.max(heightAt(bx, by), 0) + .3), geoPos(dx2, dy2, Math.max(heightAt(dx2, dy2), 0) + .3));
+    addArea(text, (best % NX) / RES, ((best / NX) | 0) / RES, 'river', 140, 0, desc, (down % NX) / RES, ((down / NX) | 0) / RES);
   }
 
   // ficha
@@ -1500,7 +1718,10 @@ async function start() {
     setPressed(-1);
     if (fly) {
       if (L.area) { sph.setFromVector3(tmp.copy(camera.position).sub(controls.target)); flyTo(L.x, L.y, Math.min(sph.radius, L.max * .55), .9, null); }
-      else flyTo(L.x, L.y, L.tier === 1 ? 20 : 13, .95, null);
+      else {
+        const d = L.type === 'ciudad' ? (L.tier === 1 ? 1.1 : L.tier === 2 ? .75 : .45) : L.type === 'ruina' && L.tier === 1 ? .9 : .16;
+        flyTo(L.x, L.y, d, 1.02, null);
+      }
     }
   }
   $('close').addEventListener('click', () => { $('panel').hidden = true; if (selected) selected.el.classList.remove('sel'); selected = null; });
@@ -1511,11 +1732,10 @@ async function start() {
   });
 
   // capas
-  const LAYERS = [['Nombres', 'nombres', true], ['Ríos', 'rios', true], ['Castillos', 'castillos', true], ['Árboles 3D', 'bosques', false], ['Barcos', 'barcos', true]];
+  const LAYERS = [['Nombres', 'nombres', true], ['Castillos y ciudades', 'castillos', true], ['Barcos', 'barcos', true]];
   for (const [label, key, def] of LAYERS) {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label; b.setAttribute('aria-pressed', String(def));
-    if (!def && groups[key]) groups[key].visible = false;
     b.addEventListener('click', () => {
       const on = b.getAttribute('aria-pressed') !== 'true';
       b.setAttribute('aria-pressed', String(on));
@@ -1524,15 +1744,27 @@ async function start() {
     $('layers').appendChild(b);
   }
 
+  // exageración del relieve: 1× es la escala real
+  const exagIn = $('exag'), exagOut = $('exagOut');
+  const setExag = v => {
+    const old = EXAG; EXAG = v; root.scale.y = EXAG;
+    exagOut.textContent = EXAG === 1 ? '1× (real)' : `${EXAG}×`;
+    for (const L of labels) placeLabel(L);
+    // la cámara acompaña al suelo para no quedar enterrada
+    camera.position.y *= Math.max(1, EXAG / old);
+  };
+  exagIn.addEventListener('input', () => setExag(Number(exagIn.value)));
+
   // viajes: lugar, distancia, inclinación y rumbo de la cámara
   const TRIPS = [
     ['Todo el mundo', 186, 108, SMALL ? 520 : 330, SMALL ? .7 : .8, 0],
     ['Poniente', 75, 56, 125, .78, 0],
-    ['El Muro', 75, 22, 30, 1.05, 0],
-    ['Desembarco del Rey', 80.5, 76.5, 12, 1.05, .5],
+    ['El Muro', 75, 22, 1.2, 1.25, .3],
+    ['Desembarco del Rey', 80.5, 76.5, 1.1, 1.05, .5],
+    ['Invernalia', 74, 37, .18, 1.05, -.4],
     ['Mar Angosto', 100, 76, 80, .92, .45],
-    ['Bahía de los Esclavos', 159, 105, 40, .95, 0],
-    ['Valyria', 143, 118, 22, 1.05, .25],
+    ['Meereen', 163.5, 98, .9, 1.05, 0],
+    ['Valyria', 143, 118, 12, 1.1, .25],
     ['Qarth y el mar de Jade', 212, 138, 70, .9, 0],
     ['Asshai y la Sombra', 250, 136, 45, .98, -.3],
   ];
@@ -1540,12 +1772,16 @@ async function start() {
   const tripBtns = TRIPS.map((t, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = t[0]; b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => { setPressed(i); flyTo(t[1], t[2], t[3], t[4], t[5]); });
+    b.addEventListener('click', () => {
+      setPressed(i);
+      const L = labels.find(l => l.kind === 'city' && l.name === t[0]);
+      flyTo(L ? L.x : t[1], L ? L.y : t[2], t[3], t[4], t[5]);
+    });
     row.appendChild(b); return b;
   });
   function setPressed(i) { tripBtns.forEach((b, j) => b.setAttribute('aria-pressed', String(i === j))); }
 
-  // vuelo de cámara
+  // vuelo de cámara: la distancia se interpola en escala logarítmica, que es como cambia la altura en un globo virtual
   let tween = null, zoomLog = 0, zoomAt = null;
   const sph = new THREE.Spherical(), tmp = new V3();
   function placeCam(target, r, phi, theta) {
@@ -1554,21 +1790,25 @@ async function start() {
   }
   function flyTo(x, y, dist, polar, az) {
     sph.setFromVector3(tmp.copy(camera.position).sub(controls.target));
-    const to = geoPos(x, y, Math.max(heightAt(x, y), 0) * .5);
+    const to = local(x, y, Math.max(elev(x, y, 6), 0)); to.y *= EXAG;
     let th1 = az === null ? sph.theta : az, th0 = sph.theta;
     while (th1 - th0 > Math.PI) th1 -= Math.PI * 2;
     while (th1 - th0 < -Math.PI) th1 += Math.PI * 2;
     zoomLog = 0;
-    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 1600, from: controls.target.clone(), to,
+    const far = T => Math.min(330, T.from.distanceTo(T.to) * .6);
+    tween = { t0: performance.now(), dur: reduceMotion ? 0 : 2200, from: controls.target.clone(), to,
       r0: sph.radius, r1: dist, p0: sph.phi, p1: polar, th0, th1 };
+    tween.peak = Math.max(tween.r0, tween.r1, far(tween));
   }
   function stepTween(now) {
     if (!tween) return;
     const T = tween, k = T.dur ? Math.min(1, (now - T.t0) / T.dur) : 1;
     const e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
-    // en viajes largos la cámara sube a mitad de camino
-    const hop = Math.sin(Math.PI * e) * Math.min(80, T.from.distanceTo(T.to) * .35);
-    placeCam(tmp.lerpVectors(T.from, T.to, e).clone(), T.r0 + (T.r1 - T.r0) * e + hop, T.p0 + (T.p1 - T.p0) * e, T.th0 + (T.th1 - T.th0) * e);
+    // sube hasta ver el trayecto y baja: dos tramos en escala logarítmica
+    const lr0 = Math.log(T.r0), lr1 = Math.log(T.r1), lp = Math.log(T.peak);
+    const lr = e < .5 ? lr0 + (lp - lr0) * Math.sin(Math.PI * e) : lr1 + (lp - lr1) * Math.sin(Math.PI * e);
+    const pe = smooth(.15, .95, k);
+    placeCam(tmp.lerpVectors(T.from, T.to, smooth(.1, .9, k)).clone(), Math.exp(lr), T.p0 + (T.p1 - T.p0) * pe, T.th0 + (T.th1 - T.th0) * pe);
     if (k >= 1) tween = null;
   }
   controls.addEventListener('start', () => { tween = null; setPressed(-1); });
@@ -1578,19 +1818,30 @@ async function start() {
     flyTo(t.x + W / 2, t.z + H / 2, sph.radius, sph.phi, 0);
   });
 
-  // zoom con la rueda hacia el punto del terreno que está bajo el puntero
+  // suelo bajo un punto de la pantalla, siguiendo el relieve exagerado
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const groundUnder = (cx, cy) => {
     ndc.set(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
     const o = ray.ray.origin, d = ray.ray.direction;
-    if (d.y > -1e-3) return null;
-    const tMax = (o.y + .2) / -d.y, steps = 600, dt = tMax / steps;
-    for (let s = 0; s <= steps; s++) {
-      const t = s * dt, x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, ax = x + W / 2, ay = z + H / 2;
-      const g = ax > 0 && ax < W && ay > 0 && ay < H ? Math.max(heightAt(ax, ay), 0) : 0;
-      if (y <= g) return new V3(x, g, z);
+    if (d.y > -1e-4) return null;
+    const tMax = (o.y - worldY(-.1)) / -d.y;
+    let t0 = 0, hit = null;
+    // marcha en pasos que crecen con la distancia y luego afina por bisección
+    for (let t = 0, s = 0; s < 400 && t <= tMax; s++) {
+      const step = Math.max(.002, t * .02 + .001);
+      const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, ax = x + W / 2, ay = z + H / 2;
+      const g = ax > 0 && ax < W && ay > 0 && ay < H ? worldY(Math.max(elev(ax, ay, 8), 0)) : 0;
+      if (y <= g) { hit = t; break; }
+      t0 = t; t += step;
     }
-    return new V3(o.x + d.x * tMax, 0, o.z + d.z * tMax);
+    if (hit === null) return new V3(o.x + d.x * tMax, 0, o.z + d.z * tMax);
+    let a = t0, b = hit;
+    for (let k = 0; k < 10; k++) {
+      const m = (a + b) / 2, x = o.x + d.x * m, y = o.y + d.y * m, z = o.z + d.z * m;
+      const g = worldY(Math.max(elev(x + W / 2, z + H / 2, 8), 0));
+      if (y <= g) b = m; else a = m;
+    }
+    return new V3(o.x + d.x * b, o.y + d.y * b, o.z + d.z * b);
   };
   stage.addEventListener('wheel', e => {
     e.preventDefault(); e.stopPropagation();
@@ -1607,8 +1858,10 @@ async function start() {
     camera.position.sub(zoomAt).multiplyScalar(f).add(zoomAt);
     controls.target.sub(zoomAt).multiplyScalar(f).add(zoomAt);
   };
+  let mouse = null;
+  stage.addEventListener('pointermove', e => { mouse = [e.clientX, e.clientY]; });
 
-  placeCam(geoPos(186, 108, 0), SMALL ? 520 : 330, SMALL ? .7 : .8, 0);
+  placeCam(local(186, 108, 0), SMALL ? 520 : 330, SMALL ? .7 : .8, 0);
   setPressed(0);
 
   function resize() {
@@ -1617,56 +1870,60 @@ async function start() {
   }
   addEventListener('resize', resize); resize();
 
-  // nivel de detalle: qué recuadros merecen versión de alta resolución
-  const frustum = new THREE.Frustum(), pm = new THREE.Matrix4();
-  let job = null, lodTick = 0;
-  function updateLOD() {
-    pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(pm);
-    const cx = camera.position.x + W / 2, cz = camera.position.z + H / 2, cy = Math.max(.5, camera.position.y);
-    const want = [];
-    let nHi = 0;
-    for (const t of tiles) {
-      const dx = Math.max(t.x0 - cx, 0, cx - t.x1), dz = Math.max(t.y0 - cz, 0, cz - t.y1);
-      t.d = Math.hypot(dx, dz, cy);
-      const seen = frustum.intersectsBox(t.box), near = seen && t.d < (SMALL ? 26 : 38);
-      if (t.hi) {
-        nHi++;
-        const show = seen && t.d < (SMALL ? 32 : 46);
-        t.hi.visible = show; t.lo.visible = !show;
-        if (show) t.used = performance.now();
-      } else if (near && !t.job) want.push(t);
+  // barra de escala, altura de la vista y elevación bajo el puntero
+  const fmtKm = km => km >= 10 ? `${Math.round(km).toLocaleString('es')} km` : km >= 1 ? `${km.toFixed(1).replace('.', ',')} km` : `${Math.round(km * 1000)} m`;
+  function updateReadout() {
+    const P = groundUnder(innerWidth / 2, innerHeight / 2);
+    if (P) {
+      const d = camera.position.distanceTo(P), kmPx = d * 2 * Math.tan(camera.fov * Math.PI / 360) / innerHeight * KM;
+      const target = kmPx * 110, p10 = Math.pow(10, Math.floor(Math.log10(target)));
+      const nice = [1, 2, 5, 10].map(m => m * p10).filter(v => v <= target).pop() || p10;
+      $('sbBar').style.width = `${Math.round(nice / kmPx)}px`;
+      const lg = nice / LEAGUE_KM;
+      $('sbText').textContent = `${fmtKm(nice)} · ${lg >= 10 ? Math.round(lg) : lg.toFixed(1).replace('.', ',')} leguas`;
     }
-    if (!job && want.length) { want.sort((a, b) => a.d - b.d); job = want[0]; startJob(job); }
-    if (nHi > MAXHI) {
-      const idle = tiles.filter(t => t.hi && !t.hi.visible).sort((a, b) => a.used - b.used);
-      for (let q = 0; q < nHi - MAXHI && q < idle.length; q++) dropHi(idle[q]);
+    const ax = camera.position.x + W / 2, ay = camera.position.z + H / 2;
+    const gk = ax > 0 && ax < W && ay > 0 && ay < H ? Math.max(elev(ax, ay, 8), 0) : 0;
+    let txt = `Altura de la vista: ${fmtKm(Math.max(0, camera.position.y - worldY(gk)) * KM)}`;
+    if (mouse) {
+      const M = groundUnder(mouse[0], mouse[1]);
+      if (M) {
+        const mx = M.x + W / 2, my = M.z + H / 2;
+        if (mx > 0 && mx < W && my > 0 && my < H) {
+          const km = elev(mx, my, 10);
+          txt += km >= 0 ? ` · Bajo el puntero: ${Math.round(km * 1000).toLocaleString('es')} m` : ` · Bajo el puntero: mar, ${Math.round(-km * 1000).toLocaleString('es')} m de profundidad`;
+        }
+      }
     }
+    $('readout').textContent = txt;
   }
 
   const v = new V3(), v2 = new V3(), needle = $('needle');
-  let last = performance.now();
+  let last = performance.now(), tick = 0;
   function frame(now) {
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     stepTween(now);
     stepZoom(dt);
     controls.update();
-    // limitar el desplazamiento al mapa
     const t = controls.target, cx = Math.max(-W / 2, Math.min(W / 2, t.x)), cz = Math.max(-H / 2, Math.min(H / 2, t.z));
     if (cx !== t.x || cz !== t.z) { camera.position.x += cx - t.x; camera.position.z += cz - t.z; t.x = cx; t.z = cz; }
-    // no meter la cámara bajo tierra
-    const [ax, ay] = toAtlas(camera.position);
-    const ground = ax > 0 && ax < W && ay > 0 && ay < H ? Math.max(heightAt(ax, ay), 0) : 0;
-    if (camera.position.y < ground + .35) camera.position.y = ground + .35;
+    // no meter la cámara bajo tierra: al menos 30 m sobre el suelo
+    const ax = camera.position.x + W / 2, ay = camera.position.z + H / 2;
+    const ground = ax > 0 && ax < W && ay > 0 && ay < H ? worldY(Math.max(elev(ax, ay, 8), 0)) : 0;
+    if (camera.position.y < ground + .002) camera.position.y = ground + .002;
+    // el ángulo de visión y los planos de corte acompañan la altura
+    camera.near = Math.max(.0004, (camera.position.y - ground) * .02); camera.updateProjectionMatrix();
 
-    // detalle cercano: un poco de pintura por cuadro, para no trabar la vista
-    if (job) { stepJob(job); if (!job.job) job = null; }
-    if ((lodTick++ & 3) === 0) updateLOD();
+    camera.updateMatrixWorld();
+    selectLOD(); pump();
+    if ((tick & 7) === 0) updateSites();
+    if ((tick++ % 12) === 0) updateReadout();
 
     if (!reduceMotion) {
-      for (const eb of emberBase) { eb[3] += eb[2] * dt; if (eb[3] > 4.5) eb[3] = 0; }
+      for (const eb of emberBase) { eb[4] += eb[3] * dt; if (eb[4] > 6) eb[4] = 0; }
       placeEmbers(); emberGeo.attributes.position.needsUpdate = true;
       fire.intensity = 2 + Math.sin(now * .007) * .4 + Math.sin(now * .019) * .25;
-      normalTex.offset.x += dt * .006; normalTex.offset.y += dt * .003;
+      normalTex.offset.x += dt * .02; normalTex.offset.y += dt * .01;
       if (groups.barcos.visible) moveBoats(dt);
     }
     renderer.render(scene, camera);
