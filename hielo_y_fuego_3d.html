@@ -74,6 +74,11 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
 #compass { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel);
   padding: 0; cursor: pointer; display: grid; place-items: center; }
 #compass:focus-visible { outline: 2px solid var(--brass); }
+#zoombtns { display: flex; border: 1px solid var(--line); border-radius: 20px; overflow: hidden; background: var(--panel); }
+#zoombtns button { width: 40px; height: 38px; border: 0; background: none; color: var(--parch); font: 22px/1 var(--ui); cursor: pointer; }
+#zoombtns button + button { border-left: 1px solid var(--line); }
+#zoombtns button:hover { background: rgba(236, 226, 200, .08); }
+#zoombtns button:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
 #compass svg { width: 30px; height: 30px; }
 #layers { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 280px; }
 #layers button { border: 1px solid var(--line); background: var(--panel); color: var(--parch-dim); font: 13px var(--ui);
@@ -162,6 +167,7 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
   <div id="search">
     <input id="q" list="lugares" placeholder="Buscar un lugar…" autocomplete="off" aria-label="Buscar un lugar">
     <datalist id="lugares"></datalist>
+    <span id="zoombtns"><button id="zin" type="button" aria-label="Acercar">+</button><button id="zout" type="button" aria-label="Alejar">−</button></span>
     <button id="compass" title="Volver a orientar al norte" aria-label="Orientar al norte">
       <svg viewBox="0 0 30 30" aria-hidden="true"><g id="needle">
         <path d="M15 3 L19 15 L15 13 L11 15 Z" fill="#c9a35a"/>
@@ -178,7 +184,7 @@ header p { margin: 4px 0 0; font: italic 15px/1.3 var(--serif); color: var(--par
 </div>
 
 <div id="scale" aria-live="off"><div id="sbBar"></div><span id="sbText"></span><div id="readout"></div></div>
-<div id="hint">Arrastrá para girar · rueda para acercarte hacia el puntero · clic derecho para desplazar · tocá un nombre · el mundo está a escala: 1 legua ≈ 4,8 km</div>
+<div id="hint">Arrastrá para girar · rueda o doble clic para acercarte hacia el puntero · clic derecho para desplazar · tocá un nombre · el mundo está a escala: 1 legua ≈ 4,8 km</div>
 
 <nav id="trips" aria-label="Viajes rápidos"><div class="row"></div></nav>
 
@@ -225,12 +231,25 @@ const ISLES = [
   ell(112, 204, 4, 2.2, 11),                                    // El Rejo
   ell(110, 162, 1.5, 1, 47), ell(110, 167, 1.3, .9, 48),        // Islas Escudo
   ell(108, 137, 1.8, 1.2, 7),                                   // Isla Bella
-  ell(126, 60, 3, 2, 2),                                        // Isla del Oso
-  ell(116, 118, 2.6, 1.8, 3), ell(110, 124, 2, 1.5, 5), ell(122, 129, 2, 1.4, 4), // Islas del Hierro
-  ell(170, 107, 2, 1, 12),                                      // Tres Hermanas
+  ell(126, 60, 3.6, 2.4, 2),                                    // Isla del Oso
+  ell(114, 117, 3.2, 2.2, 3), ell(109, 124, 2.6, 1.6, 5), ell(121, 128, 1.9, 1.3, 4), // Gran Wyk, Harlaw, Pyke
+  ell(109, 111.5, 1.6, 1.2, 60), ell(118, 110.5, 1.8, 1.2, 61), ell(117, 134, 1.6, 1.1, 62), ell(112, 106.5, 1.3, 1, 63), // Viejo Wyk, Monteorca, Acantilado de Sal, Marea Negra
+  ell(98, 113, .7, .5, 64),                                     // Luz Solitaria
+  ell(191, 46, 3, 4.6, 65), ell(186.5, 39.5, 1.2, .9, 66),     // Skagos y Skane
+  ell(171, 104.5, 1.6, .8, 12), ell(176, 106.5, 1.2, .7, 67), ell(180.5, 103.5, 1, .6, 68), // Tres Hermanas
+  ell(190, 140, 1.2, .8, 69),                                   // Isla Zarpa
+  ell(108, 171, 1.1, .8, 70), ell(106, 158, 1, .7, 71),        // Islas Escudo del sur y del norte
+  ell(203, 206, .9, .6, 72), ell(208, 204, .8, .5, 73),        // más Peldaños
+  ell(244.5, 110.5, 1.2, .8, 74), ell(236, 110, 1, .7, 75),    // islas de Lorath
+  ell(395, 100, 1.6, 1, 76),                                    // Ib menor
+  ell(300, 286, 2, 1.3, 77), ell(318, 284, 1.4, 1, 78),        // Isla de los Elefantes y otra de las Basilisco
+  ell(300, 237, 2, 1.4, 79),                                    // Isla de los Cedros
+  ell(476, 283, 2, 1.2, 80),                                    // Pequeña Moraq
+  ell(440, 316, 3, 1.8, 81),                                    // Marahai
+  ell(226, 292, 2.4, 1.5, 82), ell(196, 270, 2, 1.3, 83),      // Omboru y Jhala (Islas del Verano)
   ell(201, 197, 1.6, 1, 16), ell(205, 201, 1.4, 1, 17), ell(199, 203, 1.2, .8, 18), // Peldaños de Piedra
   ell(206, 193, 2, 1.5, 14), ell(214, 210, 2.6, 1.6, 15),       // Tyrosh y Lys
-  ell(207, 114, 2, 1.6, 13),                                    // Braavos
+  ell(207, 114, 2.2, 1.8, 13),                                  // Braavos
   ell(240, 113, 2, 1.2, 49),                                    // Lorath
   ell(268, 289, 3, 2, 29),                                      // Naath
   ell(306, 268, 3, 1.8, 30), ell(312, 277, 2.6, 1.6, 52),       // Islas Basilisco
@@ -490,7 +509,7 @@ async function buildWorld(progress = async () => {}) {
   // desenfoque de caja en dos pasadas: redondea el escalonado de los píxeles de la máscara
   let img = new Float32Array(MW * MH), tmpb = new Float32Array(MW * MH);
   for (let i = 0; i < MW * MH; i++) img[i] = data[i * 4] / 255;
-  const BR = 4;
+  const BR = 2;
   for (let pass = 0; pass < 2; pass++) {
     for (let y = 0; y < MH; y++) {
       let acc = 0; const row = y * MW;
@@ -525,8 +544,9 @@ async function buildWorld(progress = async () => {}) {
   const land = new Uint8Array(N), dl = new Float32Array(N), ds = new Float32Array(N);
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
     const x = i / RES, y = j / RES;
-    const wx = x + 1.8 * (fbm(x * .09, y * .09, 3) - .5) + .9 * (fbm(x * .45 + 7, y * .45, 3) - .5);
-    const wy = y + 1.8 * (fbm(x * .09 + 31, y * .09 + 17, 3) - .5) + .9 * (fbm(x * .45, y * .45 + 9, 3) - .5);
+    // apenas una pizca de irregularidad: la costa tiene que seguir fiel al mapa de referencia
+    const wx = x + .4 * (fbm(x * .3, y * .3, 3) - .5) + .18 * (fbm(x * 1.4 + 7, y * 1.4, 2) - .5);
+    const wy = y + .4 * (fbm(x * .3 + 31, y * .3 + 17, 3) - .5) + .18 * (fbm(x * 1.4, y * 1.4 + 9, 2) - .5);
     const edge = Math.min(x, W - x, y, H - y), k = j * NX + i, L = mask(wx, wy) > .5 + .7 * smooth(6, 1, edge + (fbm(x * .2, y * .2, 2) - .5) * 3) && i > 0 && j > 0 && i < NX - 1 && j < NZ - 1;
     land[k] = L ? 1 : 0;
     dl[k] = L ? 1e9 : 0; ds[k] = L ? 0 : 1e9;
@@ -705,7 +725,8 @@ async function buildWorld(progress = async () => {}) {
       farm[k] = Math.min(1, fw) * (1 - smooth(.8, 1.6, hgt[k])) * (1 - smooth(.25, .5, slope[k]));
     }
   }
-  return { NX, NZ, hgt, land, lake, acc, rcv, shadow: shadowS, ao, slope, col, forest, ftype, desert, farm };
+  const lakeS = blurInto(lake, 2);   // contorno suave para pintar las orillas
+  return { NX, NZ, hgt, land, lake, lakeS, acc, rcv, shadow: shadowS, ao, slope, col, forest, ftype, desert, farm };
 }
 
 /* ===== Escala =====
@@ -808,8 +829,8 @@ function paintChunk(G, D, TW, rx0, ry0, sx, sy, r0, r1, level, fine, towns) {
     for (let tx = 0; tx < TW; tx++) {
       const wx = rx0 + (tx + .5) * sx;
       const gi = Math.max(0, Math.min(NX - 1.001, wx * RES)), i = gi | 0; fx = gi - i; k0 = j * NX + i;
-      const h = S(G.hgt), lk = S(G.lake);
-      const n1 = noise(wx * 2.3, wy * 2.3), n2 = noise(wx * 9, wy * 9), n3 = noise(wx * 26, wy * 26);
+      const h = S(G.hgt), n1 = noise(wx * 2.3, wy * 2.3), n2 = noise(wx * 9, wy * 9), n3 = noise(wx * 26, wy * 26);
+      let lk = S(G.lakeS); if (lk > .05 && lk < .95) lk += (n2 - .5) * .22 + (n3 - .5) * .1;   // orillas irregulares
       let fn = 0; for (const q of xf) fn += XW[q] * (noise(wx * XF[q] + q * 3.7, wy * XF[q]) - .5);
       const n4 = hiN ? noise(wx * 60, wy * 60) : .5;
       if (lk > .38 && lk < .5 && h >= 0) { const e = smooth(.38, .5, lk); mix3(P.BEACH, P.LAKEEDGE, e, c); c[0] *= .8; c[1] *= .8; c[2] *= .8; }
@@ -831,14 +852,16 @@ function paintChunk(G, D, TW, rx0, ry0, sx, sy, r0, r1, level, fine, towns) {
         const fw = S(G.farm);
         if (fw > .04) {
           const ux = wx * 2.6 + n1 * .8, uy = wy * 3.4 + n2 * .5, px = Math.floor(ux), py = Math.floor(uy), hv = hash(px, py);
-          mix3(c, P.FIELDS[(hv * 4) | 0], fw * (.35 + .35 * hash(py, px)), c);
+          mix3(c, P.FIELDS[(hv * 4) | 0], fw * (.12 + .14 * hash(py, px)), c);
           if (fieldsFine) {
-            const vx = wx * 38 + n3 * 1.2, vy = wy * 47 + n2 * 1.5, qx = Math.floor(vx), qy = Math.floor(vy), hf = hash(qx + 911, qy);
-            const fc = P.FIELDS[(hf * P.FIELDS.length) | 0], fade = smooth(.012, .006, texel);
-            mix3(c, fc, fw * .55 * fade, c);
-            const ex = Math.min(vx - qx, 1 - (vx - qx)), ey = Math.min(vy - qy, 1 - (vy - qy));
+            // parcelas alargadas, con la orientación de cada comarca
+            const th = hash(px, py + 31) * Math.PI, ct = Math.cos(th), st = Math.sin(th);
+            const vx = (wx * ct + wy * st) * 17 + (noise(wx * 5, wy * 5) - .5) * .5, vy = (-wx * st + wy * ct) * 62 + (noise(wx * 5 + 9, wy * 5) - .5) * .5, qx = Math.floor(vx), qy = Math.floor(vy), hf = hash(qx + 911, qy);
+            const fc = P.FIELDS[(hf * P.FIELDS.length) | 0], fade = smooth(.012, .006, texel), wild = hash(qx, qy + 77) < .22;
+            if (!wild) mix3(c, fc, fw * .38 * fade, c); else mix3(c, P.FCOL[1], fw * .3 * fade, c);   // algunos sotos entre los campos
+            const ex = Math.min(vx - qx, 1 - (vx - qx)) * .27, ey = Math.min(vy - qy, 1 - (vy - qy));
             const border = 1 - smooth(0, .05, Math.min(ex, ey)), furrow = .5 + .5 * Math.sin((hf > .5 ? vx : vy) * 40);
-            const m = 1 - fw * fade * (border * .3 + furrow * .07 * smooth(.004, .002, texel)); c[0] *= m; c[1] *= m; c[2] *= m;
+            const m = 1 - fw * fade * (border * .2 + furrow * .06 * smooth(.004, .002, texel)); c[0] *= m; c[1] *= m; c[2] *= m;
           }
         }
         // desiertos con dunas
@@ -943,7 +966,7 @@ function riverPaths(G) {
   const up = new Uint8Array(N);
   for (let k = 0; k < N; k++) if (isR(k)) up[G.rcv[k]] = 1;
   const at = k => { const i = k % NX, j = (k / NX) | 0; return [(i + .5 + (hash(k, 1) - .5) * .7) / RES, (j + .5 + (hash(k, 2) - .5) * .7) / RES]; };
-  const wKm = k => Math.min(.9, .04 * Math.sqrt(G.acc[k] / T));
+  const wKm = k => Math.min(1.2, .06 * Math.sqrt(G.acc[k] / T));
   const done = new Uint8Array(N), paths = [];
   for (let k = 0; k < N; k++) {
     if (!isR(k) || up[k]) continue;   // empieza en las nacientes
@@ -968,28 +991,29 @@ function riverPaths(G) {
     });
     paths.push(p);
   }
+  for (const p of paths) { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (const q of p) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } p.box = [a, b, c, d]; }
   return RIVER_PATHS = paths;
 }
 
 // ríos, caminos y el Muro sobre la pintura; las medidas reales tienen un mínimo de un texel para que no desaparezcan
-let WALL_SPAN = null;
+let WALL_SPAN = null, ROAD_LINES = null;
 function strokeOverlays(ctx, G, rx0, ry0, rx1, ry1, scale) {
   const texel = 1 / scale, m = .6;
   ctx.setTransform(scale, 0, 0, scale, -rx0 * scale, -ry0 * scale);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const inBox = (x, y) => x > rx0 - m && x < rx1 + m && y > ry0 - m && y < ry1 + m;
   for (const p of riverPaths(G)) {
-    let any = false; for (let q = 0; q < p.length; q += 4) if (inBox(p[q][0], p[q][1])) { any = true; break; }
-    if (!any && !inBox(p[p.length - 1][0], p[p.length - 1][1])) continue;
+    const bx = p.box; if (bx[2] < rx0 - m || bx[0] > rx1 + m || bx[3] < ry0 - m || bx[1] > ry1 + m) continue;
     for (let q = 1; q < p.length; q++) {
-      const w = Math.max(p[q][2] * UK, texel * 1.1);
-      ctx.strokeStyle = w > texel * 2.5 ? '#2c6585' : 'rgba(46,96,124,.9)';
+      if (!inBox(p[q][0], p[q][1]) && !inBox(p[q - 1][0], p[q - 1][1])) continue;
+      const w = Math.max(p[q][2] * UK, texel * 1.7);
+      ctx.strokeStyle = w > texel * 2.5 ? '#285f80' : 'rgba(38,88,118,.95)';
       ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(p[q - 1][0], p[q - 1][1]); ctx.lineTo(p[q][0], p[q][1]); ctx.stroke();
     }
   }
   ctx.strokeStyle = 'rgba(196,174,128,.85)'; ctx.lineWidth = Math.max(.012 * UK * 5, texel * 1.05);
-  for (const r of ROADS) {
-    const p = chaikinOpen(r, 3);
+  ROAD_LINES = ROAD_LINES || ROADS.map(r => chaikinOpen(r, 3));
+  for (const p of ROAD_LINES) {
     ctx.beginPath(); p.forEach(([x, y], q) => q ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
   }
   if (WALL_SPAN && ry0 - m < 22 && ry1 + m > 22) {
@@ -1091,7 +1115,12 @@ const PLACES = [
   // Islas del Hierro
   ['Pyke', 122, 129, 2, 'castillo', 'Islas del Hierro', 'greyjoy', 'Fortaleza de los Greyjoy: torres sobre peñascos en el mar, unidas por puentes colgantes.', 'gris'],
   ['Diez Torres', 110, 124, 3, 'castillo', 'Islas del Hierro', 'harlaw', 'Castillo de diez torres en Harlaw, la isla más rica del archipiélago.'],
-  ['Gran Wyk', 116, 118, 3, 'isla', 'Islas del Hierro', '', 'La mayor de las Islas del Hierro.'],
+  ['Gran Wyk', 114, 117, 3, 'isla', 'Islas del Hierro', '', 'La mayor de las Islas del Hierro.'],
+  ['Viejo Wyk', 109, 111.5, 3, 'isla', 'Islas del Hierro', '', 'Isla sagrada de los hijos del hierro: allí se reúne la asamblea que elige a su rey.'],
+  ['Monteorca', 118, 110.5, 3, 'isla', 'Islas del Hierro', '', 'Isla del norte del archipiélago.'],
+  ['Luz Solitaria', 98, 113, 3, 'isla', 'Islas del Hierro', '', 'El islote más occidental de las Islas del Hierro, con su faro, perdido en el mar del Ocaso.'],
+  ['Skagos', 191, 46, 3, 'isla', 'El Norte', '', 'Isla montañosa y salvaje en la bahía de las Focas; sus habitantes tienen fama de feroces.'],
+  ['Tres Hermanas', 176, 105.5, 3, 'isla', 'El Valle de Arryn', '', 'Tres islas en el Mordisco, refugio de contrabandistas.'],
   // El Valle
   ['Nido de Águilas', 177, 124, 1, 'castillo', 'El Valle de Arryn', 'arryn', 'Castillo blanco en lo alto de una montaña. Sólo se sube por un sendero de mulas, y sus celdas tienen tres paredes y un abismo.', 'blanca'],
   ['Puerta de la Sangre', 166, 124, 3, 'fuerte', 'El Valle de Arryn', 'arryn', 'Fortificación que cierra el único paso al Valle desde el oeste.'],
@@ -1168,6 +1197,12 @@ const PLACES = [
   ['Árboles Altos', 210, 284, 3, 'ciudad', 'Islas del Verano', '', 'Puerto principal de Walano, la mayor de las Islas del Verano.'],
   ['Naath', 268, 289, 3, 'isla', 'Mar Estival', '', 'La Isla de las Mariposas. Su gente es pacífica; las fiebres matan a los forasteros que se quedan.'],
   ['Islas Basilisco', 309, 272, 3, 'isla', 'Mar Estival', '', 'Nido de corsarios y esclavistas.'],
+  ['Isla de los Elefantes', 300, 286, 3, 'isla', 'Mar Estival', '', 'Isla al sur de las Islas Basilisco.'],
+  ['Isla de los Cedros', 300, 237, 3, 'isla', 'Golfo del Pesar', '', 'Isla boscosa frente a Valyria, arrasada el día de la Maldición.'],
+  ['Pequeña Moraq', 476, 283, 3, 'isla', 'Mar de Jade', '', 'Isla menor junto a Gran Moraq.'],
+  ['Marahai', 440, 316, 3, 'isla', 'Mar de Jade', '', 'Isla del mar de Jade, al sur de las Puertas de Jade.'],
+  ['Omboru', 226, 292, 3, 'isla', 'Islas del Verano', '', 'Una de las Islas del Verano.'],
+  ['Jhala', 196, 270, 3, 'isla', 'Islas del Verano', '', 'Una de las Islas del Verano.'],
   ['Yeen', 330, 302, 3, 'ruina', 'Sothoryos', '', 'Ciudad de piedra negra en la selva; dicen que la selva nunca logra cubrirla.'],
   ['Zamettar', 348, 350, 3, 'ruina', 'Sothoryos', '', 'Ruinas de un asentamiento ghiscario en la selva.'],
 ];
@@ -1273,12 +1308,21 @@ function snapCoast(heightAt) {
     const coastal = (x, y) => heightAt(x, y) > .06 && [[.35, 0], [-.35, 0], [0, .35], [0, -.35]].some(([a, b]) => heightAt(x + a, y + b) < 0);
     if (coastal(P[1], P[2])) continue;
     let best = null;
-    for (let r = .2; r <= 5 && !best; r += .2)
-      for (let a = 0; a < 32; a++) {
-        const x = P[1] + Math.cos(a / 32 * Math.PI * 2) * r, y = P[2] + Math.sin(a / 32 * Math.PI * 2) * r;
+    for (let r = .2; r <= 9 && !best; r += .2)
+      for (let a = 0; a < 48; a++) {
+        const x = P[1] + Math.cos(a / 48 * Math.PI * 2) * r, y = P[2] + Math.sin(a / 48 * Math.PI * 2) * r;
         if (coastal(x, y)) { best = [x, y]; break; }
       }
-    if (best) { P[1] = best[0]; P[2] = best[1]; }
+    if (best) { MOVES.push([P[1], P[2], best[0] - P[1], best[1] - P[2]]); P[1] = best[0]; P[2] = best[1]; }
+  }
+}
+// los caminos acompañan a los lugares que se movieron
+const MOVES = [];
+function followMoves() {
+  for (const r of ROADS) for (const pt of r) {
+    let dx = 0, dy = 0, wsum = 0;
+    for (const [ox, oy, mx, my] of MOVES) { const d = Math.hypot(pt[0] - ox, pt[1] - oy), w = d < .6 ? 1 : Math.max(0, 1 - (d - .6) / 4); if (w > 0) { dx += mx * w; dy += my * w; wsum = Math.max(wsum, w); } }
+    if (wsum) { pt[0] += dx; pt[1] += dy; }
   }
 }
 // mueve a tierra firme los lugares que caen al agua por la resolución de la máscara
@@ -1291,7 +1335,7 @@ function snapPlaces(heightAt) {
         const x = P[1] + Math.cos(a / 16 * Math.PI * 2) * r, y = P[2] + Math.sin(a / 16 * Math.PI * 2) * r;
         if (heightAt(x, y) > .14) { best = [x, y]; break; }
       }
-    if (best) { P[1] = best[0]; P[2] = best[1]; }
+    if (best) { MOVES.push([P[1], P[2], best[0] - P[1], best[1] - P[2]]); P[1] = best[0]; P[2] = best[1]; }
   }
 }
 
@@ -1313,7 +1357,7 @@ async function start() {
     const i = gi | 0, j = gj | 0, fx = gi - i, fy = gj - j, g = (a, b) => hgt[b * NX + a];
     return (g(i, j) * (1 - fx) + g(i + 1, j) * fx) * (1 - fy) + (g(i, j + 1) * (1 - fx) + g(i + 1, j + 1) * fx) * fy;
   };
-  snapPlaces(heightAt); snapCoast(heightAt);
+  snapPlaces(heightAt); snapCoast(heightAt); followMoves();
   // el Muro va de costa a costa
   { let a = null, b = null; for (let x = 50; x <= 100; x += .05) if (heightAt(x, 22) > .03) { if (a === null) a = x; b = x; } WALL_SPAN = [a, b]; }
   const TOWNS = townList();
@@ -1349,7 +1393,7 @@ async function start() {
   /* ===== Terreno por niveles de detalle =====
      Un árbol de recuadros: cada uno se divide en cuatro cuando la cámara se acerca.
      Nivel 0: 24 unidades con la textura general. Cada nivel siguiente: mitad de tamaño, el doble de detalle. */
-  const NV = 49, TWC = 256, LMAX = SMALL ? 5 : 7, SPLIT = SMALL ? 1.25 : 1.55, MAXC = SMALL ? 170 : 480;
+  const NV = 49, TWC = 256, LMAX = SMALL ? 5 : 7, SPLIT = SMALL ? 1.15 : 1.35, MAXC = SMALL ? 170 : 480;
   const baseTex = new THREE.CanvasTexture(texCanvas);
   baseTex.encoding = THREE.sRGBEncoding; baseTex.anisotropy = ANISO;
   const baseMat = new THREE.MeshStandardMaterial({ map: baseTex, roughness: .96, metalness: 0 });
@@ -1414,12 +1458,12 @@ async function start() {
   const msgFor = nd => ({ id: nd.id, x0: nd.x0, y0: nd.y0, size: nd.size, level: nd.level, NV, TW: TWC, oct: Math.min(KMAX, nd.level + 3) });
   try {
     const url = URL.createObjectURL(new Blob([workerSource()], { type: 'text/javascript' }));
-    const shared = { NX, NZ, hgt: G.hgt, land: G.land, lake: G.lake, acc: G.acc, slope: G.slope, col: G.col, forest: G.forest, ftype: G.ftype, desert: G.desert, farm: G.farm, ao: G.ao, shadow: G.shadow };
+    const shared = { NX, NZ, hgt: G.hgt, land: G.land, lake: G.lake, lakeS: G.lakeS, acc: G.acc, slope: G.slope, col: G.col, forest: G.forest, ftype: G.ftype, desert: G.desert, farm: G.farm, ao: G.ao, shadow: G.shadow };
     const nW = Math.max(1, Math.min(SMALL ? 2 : 4, (navigator.hardwareConcurrency || 4) - 1));
     for (let q = 0; q < nW; q++) {
       const wk = new Worker(url); wk.busy = false;
       wk.onmessage = e => { wk.busy = false; const r = e.data; finishNode(nodes[r.id], r.hk, r.px); };
-      wk.onerror = () => { wk.busy = false; wk.dead = true; };
+      wk.onerror = e => { wk.busy = false; wk.dead = true; console.warn('hilo de pintura detenido:', e.message); };
       wk.postMessage({ G: shared, towns: TOWNS });
       workers.push(wk);
     }
@@ -1469,7 +1513,7 @@ async function start() {
   }
 
   // fondo oceánico (a 4,5 km de profundidad) y superficie del mar
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8), new THREE.MeshBasicMaterial({ color: '#0d2c4b' }));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W * 20, H * 30, 160, 120), new THREE.MeshBasicMaterial({ color: '#0d2c4b' }));
   floor.rotation.x = -Math.PI / 2; floor.position.y = -4.5 * VZ; root.add(floor);
   const NS = 128, ncv = document.createElement('canvas'); ncv.width = ncv.height = NS;
   const nctx = ncv.getContext('2d'), nimg = nctx.createImageData(NS, NS);
@@ -1481,8 +1525,9 @@ async function start() {
   }
   nctx.putImageData(nimg, 0, 0);
   const normalTex = new THREE.CanvasTexture(ncv);
-  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(2600, 1700);
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 6, H * 8),
+  normalTex.wrapS = normalTex.wrapT = THREE.RepeatWrapping; normalTex.repeat.set(8600, 6400);
+  // malla fina: con triángulos gigantes la profundidad se calcula mal de cerca y el mar tapa la costa
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 20, H * 30, 480, 360),
     new THREE.MeshStandardMaterial({ color: '#174f73', transparent: true, opacity: .38, roughness: .16, metalness: .1,
       normalMap: normalTex, normalScale: new THREE.Vector2(.2, .2), depthWrite: false }));
   water.rotation.x = -Math.PI / 2; root.add(water);
@@ -1643,8 +1688,9 @@ async function start() {
   }
   const emberGeo = new THREE.BufferGeometry();
   emberGeo.setAttribute('position', new THREE.BufferAttribute(ember, 3));
-  root.add(new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .04, transparent: true, opacity: .9,
-    blending: THREE.AdditiveBlending, depthWrite: false })));
+  const embers = new THREE.Points(emberGeo, new THREE.PointsMaterial({ color: '#ff8a3c', size: .04, transparent: true, opacity: .9,
+    blending: THREE.AdditiveBlending, depthWrite: false }));
+  root.add(embers);
   const placeEmbers = () => emberBase.forEach(([x, y, km, , off], e) => { local(x, y, km + off, tr); ember[e * 3] = tr.x; ember[e * 3 + 1] = tr.y; ember[e * 3 + 2] = tr.z; });
   placeEmbers();
   const fire = new THREE.PointLight('#ff6a2a', 2.2, 8, 1.6);
@@ -1847,7 +1893,7 @@ async function start() {
     e.preventDefault(); e.stopPropagation();
     const P = groundUnder(e.clientX, e.clientY); if (!P) return;
     tween = null; setPressed(-1);
-    zoomAt = P; zoomLog += Math.max(-.5, Math.min(.5, e.deltaY * (e.deltaMode ? .06 : .0016)));
+    zoomAt = P; zoomLog += Math.max(-.7, Math.min(.7, e.deltaY * (e.deltaMode ? .1 : .0032)));
   }, { capture: true, passive: false });
   const stepZoom = dt => {
     if (!zoomAt || Math.abs(zoomLog) < 1e-4) return;
@@ -1858,6 +1904,11 @@ async function start() {
     camera.position.sub(zoomAt).multiplyScalar(f).add(zoomAt);
     controls.target.sub(zoomAt).multiplyScalar(f).add(zoomAt);
   };
+  // doble clic acerca hacia ese punto; los botones + y − acercan hacia el centro
+  stage.addEventListener('dblclick', e => { const P = groundUnder(e.clientX, e.clientY); if (P) { tween = null; setPressed(-1); zoomAt = P; zoomLog -= 1.1; } });
+  const zoomCenter = k => { const P = groundUnder(innerWidth / 2, innerHeight / 2); if (P) { tween = null; setPressed(-1); zoomAt = P; zoomLog += k; } };
+  $('zin').addEventListener('click', () => zoomCenter(-.9));
+  $('zout').addEventListener('click', () => zoomCenter(.9));
   let mouse = null;
   stage.addEventListener('pointermove', e => { mouse = [e.clientX, e.clientY]; });
 
@@ -1921,6 +1972,8 @@ async function start() {
 
     if (!reduceMotion) {
       for (const eb of emberBase) { eb[4] += eb[3] * dt; if (eb[4] > 6) eb[4] = 0; }
+      // las brasas sólo se ven de cerca; de lejos parecerían una raya
+      embers.visible = Math.hypot(camera.position.x - (142 - W / 2), camera.position.z - (118 - H / 2), camera.position.y) < 60;
       placeEmbers(); emberGeo.attributes.position.needsUpdate = true;
       fire.intensity = 2 + Math.sin(now * .007) * .4 + Math.sin(now * .019) * .25;
       normalTex.offset.x += dt * .02; normalTex.offset.y += dt * .01;
@@ -1929,7 +1982,7 @@ async function start() {
     renderer.render(scene, camera);
 
     if (!layer.classList.contains('off')) {
-      const w = innerWidth, h = innerHeight;
+      const w = innerWidth, h = innerHeight, cand = [];
       for (const L of labels) {
         v.copy(L.pos).project(camera);
         const d = camera.position.distanceTo(L.pos);
@@ -1939,26 +1992,43 @@ async function start() {
           if (L.min) op = Math.min(op, (d - L.min) / (L.min * .2));
         }
         if (L === selected && v.z < 1) op = 1;
-        const vis = op > .02;
-        if (vis !== L.vis) { L.el.style.visibility = vis ? 'visible' : 'hidden'; L.vis = vis; }
-        if (!vis) continue;
-        const sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
-        let rot = '';
+        L.op = op;
+        if (op <= .02) continue;
+        L.sx = (v.x * .5 + .5) * w; L.sy = (-v.y * .5 + .5) * h; L.rot = '';
         if (L.pos2) {
           v2.copy(L.pos2).project(camera);
           let a = Math.atan2(-(v2.y - v.y) * h, (v2.x - v.x) * w) * 180 / Math.PI;
           if (a > 90) a -= 180; else if (a < -90) a += 180;
-          rot = ` rotate(${a.toFixed(1)}deg)`;
+          L.rot = ` rotate(${a.toFixed(1)}deg)`;
         }
+        cand.push(L);
+      }
+      // sin superposición: entran primero los rótulos más importantes; los que chocan esperan a que te acerques
+      const PRIO = { 'region big': 1, region: 3, sea: 4, lake: 6, range: 6, river: 7, 'region small': 8, forest: 8, 'sea small': 10 };
+      const prio = L => L === selected ? 0 : L.kind === 'city' ? (L.tier === 1 ? 2 : L.tier === 2 ? 5 : 9) : PRIO[L.kind] || 9;
+      cand.sort((a, b) => prio(a) - prio(b) || b.op - a.op);
+      const boxes = [], pad = 3;
+      for (const L of cand) {
+        if (!L.w) { L.el.style.visibility = 'visible'; L.vis = true; L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; }
+        const x0 = L.kind === 'city' ? L.sx - 6 : L.sx - L.w / 2, y0 = L.sy - L.h / 2, x1 = x0 + L.w, y1 = y0 + L.h;
+        L.ok = L === selected || !boxes.some(b => x0 < b[2] + pad && x1 > b[0] - pad && y0 < b[3] + pad && y1 > b[1] - pad);
+        if (L.ok) boxes.push([x0, y0, x1, y1]);
+      }
+      for (const L of labels) {
+        const vis = L.op > .02 && L.ok;
+        if (vis !== L.vis) { L.el.style.visibility = vis ? 'visible' : 'hidden'; L.vis = vis; }
+        if (!vis) continue;
         L.el.style.transform = L.kind === 'city'
-          ? `translate(${sx - 4}px, ${sy}px) translateY(-50%)`
-          : `translate(${sx}px, ${sy}px) translate(-50%, -50%)${rot}`;
-        L.el.style.opacity = op.toFixed(2);
+          ? `translate(${L.sx - 4}px, ${L.sy}px) translateY(-50%)`
+          : `translate(${L.sx}px, ${L.sy}px) translate(-50%, -50%)${L.rot}`;
+        L.el.style.opacity = L.op.toFixed(2);
       }
     }
     needle.setAttribute('transform', `rotate(${(controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1)} 15 15)`);
     requestAnimationFrame(frame);
   }
+  // acceso para pruebas automáticas
+  window.__atlas = { camera, controls, water, root, scene, renderer, flyTo, placeCam, local, elev, labels, nodes, queue, workers, setExag, get shown() { return shown; } };
   $('loading').remove();
   requestAnimationFrame(frame);
 }
